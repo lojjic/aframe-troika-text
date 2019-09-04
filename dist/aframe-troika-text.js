@@ -5257,11 +5257,7 @@
     - glyph indices: N * 1
     = 39N
 
-  A downside of this is that the UVs end up being 0-1 within each glyph rather than across
-  the entire text block; we may be able to work around that with an option to instance the
-  `uv` attribute. (TODO)
-
-  Another downside of course is the rare-but-possible lack of the instanced arrays extension,
+  A downside of this is the rare-but-possible lack of the instanced arrays extension,
   which we could potentially work around with a fallback non-instanced implementation.
 
   */
@@ -5334,7 +5330,7 @@
 
   var VERTEX_DEFS = "\nuniform float uTroikaGlyphVSize;\nuniform vec4 uTroikaTotalBounds;\nattribute vec4 aTroikaGlyphBounds;\nattribute float aTroikaGlyphIndex;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n";
 
-  var VERTEX_TRANSFORM = "\nvTroikaGlyphUV = vec2(\n  position.x,\n  uTroikaGlyphVSize * (aTroikaGlyphIndex + position.y)\n);\n\nposition = vec3(\n  position.x == 1.0 ? aTroikaGlyphBounds.z : aTroikaGlyphBounds.x,\n  position.y == 1.0 ? aTroikaGlyphBounds.w : aTroikaGlyphBounds.y,\n  0.0\n);\nvTroikaLocalPos = vec3(position);\n\nuv = vec2(\n  (position.x - uTroikaTotalBounds.x) / (uTroikaTotalBounds.z - uTroikaTotalBounds.x),\n  (position.y - uTroikaTotalBounds.y) / (uTroikaTotalBounds.w - uTroikaTotalBounds.y)\n);\n";
+  var VERTEX_TRANSFORM = "\nvTroikaGlyphUV = vec2(\n  position.x,\n  uTroikaGlyphVSize * (aTroikaGlyphIndex + position.y)\n);\n\nposition = vec3(\n  mix(aTroikaGlyphBounds.x, aTroikaGlyphBounds.z, position.x),\n  mix(aTroikaGlyphBounds.y, aTroikaGlyphBounds.w, position.y),\n  position.z\n);\nvTroikaLocalPos = vec3(position);\n\nuv = vec2(\n  (position.x - uTroikaTotalBounds.x) / (uTroikaTotalBounds.z - uTroikaTotalBounds.x),\n  (position.y - uTroikaTotalBounds.y) / (uTroikaTotalBounds.w - uTroikaTotalBounds.y)\n);\n";
 
   var FRAGMENT_DEFS = "\nuniform sampler2D uTroikaSDFTexture;\nuniform float uTroikaSDFMinDistancePct;\nuniform bool uTroikaSDFDebug;\nuniform float uTroikaGlyphVSize;\nuniform vec4 uTroikaClipRect;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n\nvoid troikaApplyClipping() {\n  vec4 rect = uTroikaClipRect;\n  vec3 pos = vTroikaLocalPos;\n  if (rect != vec4(.0,.0,.0,.0) && (\n    pos.x < min(rect.x, rect.z) || \n    pos.y < min(rect.y, rect.w) ||\n    pos.x > max(rect.x, rect.z) ||\n    pos.y > max(rect.y, rect.w)\n  )) {\n    discard;\n  }\n}\n";
 
@@ -5587,13 +5583,13 @@
     };
 
     /**
-     * Shortcut to dispose the geometry and derived material
+     * Shortcut to dispose the geometry specific to this instance.
+     * Note: we don't also dispose the derived material here because if anything else is
+     * sharing the same base material it will result in a pause next frame as the program
+     * is recompiled. Instead users can dispose the base material manually, like normal,
+     * and we'll also dispose the derived material at that time.
      */
     TextMesh.prototype.dispose = function dispose () {
-      var textMaterial = this._derivedMaterial;
-      if (textMaterial) {
-        textMaterial.dispose();
-      }
       this.geometry.dispose();
     };
 
@@ -5608,6 +5604,11 @@
           derivedMaterial.dispose();
         }
         derivedMaterial = this._derivedMaterial = createTextDerivedMaterial(baseMaterial);
+        // dispose the derived material when its base material is disposed:
+        baseMaterial.addEventListener('dispose', function onDispose() {
+          baseMaterial.removeEventListener('dispose', onDispose);
+          derivedMaterial.dispose();
+        });
       }
       return derivedMaterial
     };
@@ -5704,7 +5705,7 @@
     });
   });
 
-  const COMPONENT_NAME = 'troika-text';
+  var COMPONENT_NAME = 'troika-text';
 
 
   aframe.registerComponent(COMPONENT_NAME, {
@@ -5722,7 +5723,7 @@
       value: {type: 'string'},
       whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']}
 
-      // attrs to be handled via text material, once I figure that out:
+      // attrs that can be configured via troika-text-material:
       // opacity: {type: 'number', default: 1.0},
       // transparent: {default: true},
       // side: {default: 'front', oneOf: ['front', 'back', 'double']},
@@ -5732,9 +5733,23 @@
      * Called once when component is attached. Generally for initial setup.
      */
     init: function () {
-      var textMesh = this.textMesh = new TextMesh();
+      // If we're being applied as a component attached to a generic a-entity, create an
+      // anonymous sub-entity that we can use to isolate the text mesh and the material
+      // component that should apply to it. If we're a primitive, no isolation is needed.
+      var textEntity;
+      var isPrimitive = this.el.tagName.toLowerCase() === 'a-troika-text';
+      if (isPrimitive) {
+        textEntity = this.el;
+      } else {
+        textEntity = document.createElement('a-entity');
+        this.el.appendChild(textEntity);
+      }
+      this.troikaTextEntity = textEntity;
+
+      // Create TextMesh and add it to the entity as the 'mesh' object
+      var textMesh = this.troikaTextMesh = new TextMesh();
       textMesh.anchor = [0, 0];
-      this.el.setObject3D(this.attrName, this.textMesh);
+      textEntity.setObject3D('mesh', textMesh);
     },
 
     /**
@@ -5743,10 +5758,10 @@
      */
     update: function () {
       var data = this.data;
-      var mesh = this.textMesh;
+      var mesh = this.troikaTextMesh;
+      var entity = this.troikaTextEntity;
 
-      console.log(data);
-
+      // Update the text mesh
       mesh.text = data.value;
       mesh.textAlign = data.align;
       mesh.anchor[0] = anchorMapping[data.anchor];
@@ -5759,8 +5774,17 @@
       mesh.overflowWrap = data.overflowWrap;
       mesh.whiteSpace = data.whiteSpace;
       mesh.maxWidth = data.maxWidth;
-
       mesh.sync();
+
+      // Pass material config down to child entity
+      if (entity !== this.el) {
+        var materialAttr = this.el.getAttribute('troika-text-material');
+        if (materialAttr) {
+          entity.setAttribute('material', materialAttr);
+        } else {
+          entity.removeAttribute('material');
+        }
+      }
     },
 
     /**
@@ -5768,8 +5792,13 @@
      * Generally undoes all modifications to the entity.
      */
     remove: function () {
-      this.textMesh.dispose();
-      this.el.removeObject3D(this.attrName);
+      // Free memory
+      this.troikaTextMesh.dispose();
+
+      // If using sub-entity, remove it
+      if (this.troikaTextEntity !== this.el) {
+        this.el.removeChild(this.troikaTextEntity);
+      }
     }
 
   });

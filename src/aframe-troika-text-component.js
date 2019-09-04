@@ -4,7 +4,7 @@ import aframe from 'aframe'
 import {TextMesh} from 'troika-3d-text/dist/textmesh-standalone.esm.js'
 
 
-export const COMPONENT_NAME = 'troika-text'
+export var COMPONENT_NAME = 'troika-text'
 
 
 aframe.registerComponent(COMPONENT_NAME, {
@@ -22,7 +22,7 @@ aframe.registerComponent(COMPONENT_NAME, {
     value: {type: 'string'},
     whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']}
 
-    // attrs to be handled via text material, once I figure that out:
+    // attrs that can be configured via troika-text-material:
     // opacity: {type: 'number', default: 1.0},
     // transparent: {default: true},
     // side: {default: 'front', oneOf: ['front', 'back', 'double']},
@@ -32,9 +32,23 @@ aframe.registerComponent(COMPONENT_NAME, {
    * Called once when component is attached. Generally for initial setup.
    */
   init: function () {
-    var textMesh = this.textMesh = new TextMesh()
+    // If we're being applied as a component attached to a generic a-entity, create an
+    // anonymous sub-entity that we can use to isolate the text mesh and the material
+    // component that should apply to it. If we're a primitive, no isolation is needed.
+    var textEntity
+    var isPrimitive = this.el.tagName.toLowerCase() === 'a-troika-text'
+    if (isPrimitive) {
+      textEntity = this.el
+    } else {
+      textEntity = document.createElement('a-entity')
+      this.el.appendChild(textEntity)
+    }
+    this.troikaTextEntity = textEntity
+
+    // Create TextMesh and add it to the entity as the 'mesh' object
+    var textMesh = this.troikaTextMesh = new TextMesh()
     textMesh.anchor = [0, 0]
-    this.el.setObject3D(this.attrName, this.textMesh)
+    textEntity.setObject3D('mesh', textMesh)
   },
 
   /**
@@ -43,10 +57,10 @@ aframe.registerComponent(COMPONENT_NAME, {
    */
   update: function () {
     var data = this.data
-    var mesh = this.textMesh
+    var mesh = this.troikaTextMesh
+    var entity = this.troikaTextEntity
 
-    console.log(data)
-
+    // Update the text mesh
     mesh.text = data.value
     mesh.textAlign = data.align
     mesh.anchor[0] = anchorMapping[data.anchor]
@@ -59,8 +73,17 @@ aframe.registerComponent(COMPONENT_NAME, {
     mesh.overflowWrap = data.overflowWrap
     mesh.whiteSpace = data.whiteSpace
     mesh.maxWidth = data.maxWidth
-
     mesh.sync()
+
+    // Pass material config down to child entity
+    if (entity !== this.el) {
+      var materialAttr = this.el.getAttribute('troika-text-material')
+      if (materialAttr) {
+        entity.setAttribute('material', materialAttr)
+      } else {
+        entity.removeAttribute('material')
+      }
+    }
   },
 
   /**
@@ -68,8 +91,13 @@ aframe.registerComponent(COMPONENT_NAME, {
    * Generally undoes all modifications to the entity.
    */
   remove: function () {
-    this.textMesh.dispose()
-    this.el.removeObject3D(this.attrName);
+    // Free memory
+    this.troikaTextMesh.dispose()
+
+    // If using sub-entity, remove it
+    if (this.troikaTextEntity !== this.el) {
+      this.el.removeChild(this.troikaTextEntity)
+    }
   }
 
 })

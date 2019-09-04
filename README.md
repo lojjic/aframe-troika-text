@@ -25,7 +25,7 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | align                 | align                  | Multi-line text alignment (left, center, right, justify).                                                   | left                            |
 | anchor                | anchor                 | Horizontal positioning (left, center, right, align).                                                        | center                          |
 | baseline              | baseline               | Vertical positioning (top, center, bottom).                                                                 | center                          |
-| color                 | color                  | Text color.                                                                                                 | white                           |
+| color                 | color                  | Text color. This is a shortcut for specifying a custom material.                                            | white                           |
 | font                  | font                   | URL to a font file - can be a .ttf, .otf, or .woff (no .woff2)                                              | Roboto loaded from Google Fonts |
 | fontSize              | font-size              | Em-height at which to render the font, in world units                                                       | 0.2                             |
 | letterSpacing         | letter-spacing         | Letter spacing in meters.                                                                                   | 0                               |
@@ -35,10 +35,29 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | **value**             | value                  | The actual content of the text. Line breaks and tabs are supported with `\n` and `\t`.                      | ''                              |
 | whiteSpace            | white-space            | How whitespace should be handled (i.e., normal, nowrap).                                                    | normal (behaves like pre-wrap)  |
 
-I haven't yet determined how best to allow changing the material used for the text. For now it always uses a MeshBasicMaterial, but ideally it should be possible to control it with all the options of the `material` component.
+Note: It does not currently follow how the built-in `text` component interacts with a `geometry` component for auto-sizing and anchoring. I think that's a nice feature so it's probably worth adding; in the meantime just use the `maxWidth` and `anchor`/`baseline` attributes to control it manually.  
 
-It also does not currently follow how the `text` component interacts with a `geometry` component for auto-sizing and anchoring. I think that's a nice feature so it's probably worth adding; in the meantime just use the `maxWidth` and `anchor`/`baseline` attributes to control it manually.  
+#### Changing the material
 
+By default the text will render using a `MeshBasicMaterial` using the `color` property described in the table above. But you can also change the material to gain more advanced shader features such as physically-based lighting.
+
+If you are using the `<a-troika-text>` _primitive_, you can assign it a [`material` component](https://aframe.io/docs/master/components/material.html) just as you would any other entity.
+
+```html
+<a-troika-text
+  value="Hello!"
+  material="shader: standard; metalness: 0.8;"
+></a-troika-text>
+```
+
+If you are using the `troika-text="..."` _component_, you must instead give it a `troika-text-material="..."` attribute to distinguish the text material from the entity's main material. You can pass it anything supported by the built in [`material` component](https://aframe.io/docs/master/components/material.html). 
+
+```html
+<a-entity
+  troika-text="value: Hello!"
+  troika-text-material="shader: standard; metalness: 0.8;"
+></a-entity>
+```
 
 ### Installation
 
