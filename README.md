@@ -69,7 +69,7 @@ Install and use by directly including the [browser files](dist):
 <head>
   <title>My A-Frame Scene</title>
   <script src="https://aframe.io/releases/0.9.2/aframe.min.js"></script>
-  <script src="https://unpkg.com/aframe-troika-text@0.1.0/dist/aframe-troika-text.min.js"></script>
+  <script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
 </head>
 
 <body>
