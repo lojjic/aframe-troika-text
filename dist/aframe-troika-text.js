@@ -178,8 +178,7 @@
 
   var _workerModuleId = 0;
   var _messageId = 0;
-  var worker = null;
-
+  var workers = Object.create(null);
   var openRequests = Object.create(null);
   openRequests._count = 0;
 
@@ -207,6 +206,11 @@
    *        It will be passed that response value, and if it returns an array then that will be
    *        used as the "transferables" parameter to `postMessage`. Use this if there are values
    *        in the response that can/should be transfered rather than cloned.
+   * @param {string} [options.workerId] - By default all modules will run in the same dedicated worker,
+   *        but if you want to use multiple workers you can pass a `workerId` to indicate a specific
+   *        worker to spawn. Note that each worker is completely standalone and no data or state will
+   *        be shared between them. If a worker module is used as a dependency by worker modules
+   *        using different `workerId`s, then that dependency will be re-registered in each worker.
    * @return {function(...[*]): {then}}
    */
   function defineWorkerModule(options) {
@@ -216,6 +220,10 @@
     var dependencies = options.dependencies;
     var init = options.init;
     var getTransferables = options.getTransferables;
+    var workerId = options.workerId;
+    if (workerId == null) {
+      workerId = '#default';
+    }
     var id = "workerModule" + (++_workerModuleId);
     var registrationThenable = null;
 
@@ -223,6 +231,7 @@
       // Wrap raw functions as worker modules with no dependencies
       if (typeof dep === 'function' && !dep.workerModuleData) {
         dep = defineWorkerModule({
+          workerId: workerId,
           init: new Function(("return function(){return (" + (stringifyFunction(dep)) + ")}"))()
         });
       }
@@ -239,7 +248,7 @@
 
       // Register this module if needed
       if (!registrationThenable) {
-        registrationThenable = callWorker('registerModule', moduleFunc.workerModuleData);
+        registrationThenable = callWorker(workerId,'registerModule', moduleFunc.workerModuleData);
       }
 
       // Invoke the module, returning a thenable
@@ -247,7 +256,7 @@
         var isCallable = ref.isCallable;
 
         if (isCallable) {
-          return callWorker('callModule', {id: id, args: args})
+          return callWorker(workerId,'callModule', {id: id, args: args})
         } else {
           throw new Error('Worker module function was called but `init` did not return a callable function')
         }
@@ -277,7 +286,8 @@
   }
 
 
-  function getWorker() {
+  function getWorker(workerId) {
+    var worker = workers[workerId];
     if (!worker) {
       // Bootstrap the worker's content
       var bootstrap = (function() {
@@ -414,7 +424,7 @@
       }).toString();
 
       // Create the worker from the bootstrap function content
-      worker = new Worker(
+      worker = workers[workerId] = new Worker(
         URL.createObjectURL(
           new Blob([(";(" + bootstrap + ")()")], {type: 'application/javascript'})
         )
@@ -437,7 +447,7 @@
   }
 
   // Issue a call to the worker with a callback to handle the response
-  function callWorker(action, data) {
+  function callWorker(workerId, action, data) {
     var thenable = Thenable();
     var messageId = ++_messageId;
     openRequests[messageId] = function (response) {
@@ -451,7 +461,7 @@
     if (openRequests.count > 1000) { //detect leaks
       console.warn('Large number of open WorkerModule requests, some may not be returning');
     }
-    getWorker().postMessage({
+    getWorker(workerId).postMessage({
       messageId: messageId,
       action: action,
       data: data
@@ -513,6 +523,7 @@
 
 
   var idCtr = 0;
+  var epoch = Date.now();
   var CACHE = new WeakMap(); //threejs requires WeakMap internally so should be safe to assume support
 
 
@@ -529,6 +540,10 @@
    * @param {Object} options.uniforms - Custom `uniforms` for use in the modified shader. These can
    *        be accessed and manipulated via the resulting material's `uniforms` property, just like
    *        in a ShaderMaterial. You do not need to repeat the base material's own uniforms here.
+   * @param {String} options.timeUniform - If specified, a uniform of this name will be injected into
+   *        both shaders, and it will automatically be updated on each render frame with a number of
+   *        elapsed milliseconds. The "zero" epoch time is not significant so don't rely on this as a
+   *        true calendar time.
    * @param {String} options.vertexDefs - Custom GLSL code to inject into the vertex shader's top-level
    *        definitions, above the `void main()` function.
    * @param {String} options.vertexMainIntro - Custom GLSL code to inject at the top of the vertex
@@ -545,6 +560,15 @@
    *        TODO allow injecting before base shader logic or elsewhere?
    *
    * @return {THREE.Material}
+   *
+   * The returned material will also have two new methods, `getDepthMaterial()` and `getDistanceMaterial()`,
+   * which can be called to get a variant of the derived material for use in shadow casting. If the
+   * target mesh is expected to cast shadows, then you can assign these to the mesh's `customDepthMaterial`
+   * (for directional and spot lights) and/or `customDistanceMaterial` (for point lights) properties to
+   * allow the cast shadow to honor your derived shader's vertex transforms and discarded fragments. These
+   * will also set a custom `#define IS_DEPTH_MATERIAL` or `#define IS_DISTANCE_MATERIAL` that you can look
+   * for in your derived shaders with `#ifdef` to customize their behavior for the depth or distance
+   * scenarios, e.g. skipping antialiasing or expensive shader logic.
    */
   function createDerivedMaterial(baseMaterial, options) {
     // First check the cache to see if we've already derived from this baseMaterial using
@@ -563,6 +587,7 @@
     var id = ++idCtr;
     var privateDerivedShadersProp = "_derivedShaders" + id;
     var privateBeforeCompileProp = "_onBeforeCompile" + id;
+    var distanceMaterialTpl, depthMaterialTpl;
 
     // Private onBeforeCompile handler that injects the modified shaders and uniforms when
     // the renderer switches to this material's program
@@ -586,6 +611,13 @@
       shaderInfo.fragmentShader = fragment.result;
       assign(shaderInfo.uniforms, this.uniforms);
 
+      // Inject auto-updating time uniform if requested
+      if (options.timeUniform) {
+        shaderInfo.uniforms[options.timeUniform] = {
+          get value() {return Date.now() - epoch}
+        };
+      }
+
       // Users can still add their own handlers on top of ours
       if (this[privateBeforeCompileProp]) {
         this[privateBeforeCompileProp](shaderInfo);
@@ -594,6 +626,7 @@
 
     function DerivedMaterial() {
       baseMaterial.constructor.apply(this, arguments);
+      this._listeners = undefined; //don't inherit EventDispatcher listeners
     }
     DerivedMaterial.prototype = Object.create(baseMaterial, {
       constructor: {value: DerivedMaterial},
@@ -613,13 +646,64 @@
         value: function (source) {
           baseMaterial.copy.call(this, source);
           if (!baseMaterial.isShaderMaterial && !baseMaterial.isDerivedMaterial) {
-            this.extensions = source.extensions;
+            this.extensions = assign({}, source.extensions);
             this.defines = assign({}, source.defines);
             this.uniforms = three.UniformsUtils.clone(source.uniforms);
           }
           return this
         }
-      }
+      },
+
+      /**
+       * Utility to get a MeshDepthMaterial that will honor this derived material's vertex
+       * transformations and discarded fragments.
+       */
+      getDepthMaterial: {value: function() {
+        var depthMaterial = this._depthMaterial;
+        if (!depthMaterial) {
+          if (!depthMaterialTpl) {
+            depthMaterialTpl = createDerivedMaterial(
+              baseMaterial.isDerivedMaterial
+                ? baseMaterial.getDepthMaterial()
+                : new three.MeshDepthMaterial({depthPacking: three.RGBADepthPacking}),
+              options
+            );
+            depthMaterialTpl.defines.IS_DEPTH_MATERIAL = '';
+          }
+          depthMaterial = this._depthMaterial = depthMaterialTpl.clone();
+        }
+        return depthMaterial
+      }},
+
+      /**
+       * Utility to get a MeshDistanceMaterial that will honor this derived material's vertex
+       * transformations and discarded fragments.
+       */
+      getDistanceMaterial: {value: function() {
+        var distanceMaterial = this._distanceMaterial;
+        if (!distanceMaterial) {
+          if (!distanceMaterialTpl) {
+            distanceMaterialTpl = createDerivedMaterial(
+              baseMaterial.isDerivedMaterial
+                ? baseMaterial.getDistanceMaterial()
+                : new three.MeshDistanceMaterial(),
+              options
+            );
+            distanceMaterialTpl.defines.IS_DISTANCE_MATERIAL = '';
+          }
+          distanceMaterial = this._distanceMaterial = distanceMaterialTpl.clone();
+        }
+        return distanceMaterial
+      }},
+
+      dispose: {value: function value() {
+        var ref = this;
+        var _depthMaterial = ref._depthMaterial;
+        var _distanceMaterial = ref._distanceMaterial;
+        if (_depthMaterial) { _depthMaterial.dispose(); }
+        if (_distanceMaterial) { _distanceMaterial.dispose(); }
+        baseMaterial.dispose.call(this);
+      }}
     });
 
     var material = new DerivedMaterial();
@@ -646,6 +730,14 @@
     var fragmentDefs = options.fragmentDefs;
     var fragmentMainIntro = options.fragmentMainIntro;
     var fragmentColorTransform = options.fragmentColorTransform;
+    var timeUniform = options.timeUniform;
+
+    // Inject auto-updating time uniform if requested
+    if (timeUniform) {
+      var code = "\nuniform float " + timeUniform + ";\n";
+      vertexDefs = (vertexDefs || '') + code;
+      fragmentDefs = (fragmentDefs || '') + code;
+    }
 
     // Modify vertex shader
     if (vertexDefs || vertexMainIntro || vertexTransform) {
@@ -657,7 +749,7 @@
         vertexShader = expandShaderIncludes(vertexShader);
         vertexDefs = (vertexDefs || '') + "\nvoid troikaVertexTransform" + id + "(inout vec3 position, inout vec3 normal, inout vec2 uv) {\n  " + vertexTransform + "\n}\n";
         vertexShader = vertexShader.replace(/\b(position|normal|uv)\b/g, function (match, match1, index, fullStr) {
-          return /\battribute\s+vec3\s+$/.test(fullStr.substr(0, index)) ? match1 : ("troika_" + match1 + "_" + id)
+          return /\battribute\s+vec[23]\s+$/.test(fullStr.substr(0, index)) ? match1 : ("troika_" + match1 + "_" + id)
         });
         vertexMainIntro = "\nvec3 troika_position_" + id + " = vec3(position);\nvec3 troika_normal_" + id + " = vec3(normal);\nvec2 troika_uv_" + id + " = vec2(uv);\ntroikaVertexTransform" + id + "(troika_position_" + id + ", troika_normal_" + id + ", troika_uv_" + id + ");\n" + (vertexMainIntro || '') + "\n";
       }
@@ -939,6 +1031,175 @@
     array[startIndex + 3] = enc3;
     return array
   }
+
+  /*
+  Input geometry is a cylinder with r=1, height in y dimension from 0 to 1,
+  divided into a reasonable number of height segments.
+  */
+
+  var vertexDefs = "\nuniform vec3 pointA;\nuniform vec3 controlA;\nuniform vec3 controlB;\nuniform vec3 pointB;\nuniform float radius;\nvarying float bezierT;\n\nvec3 cubicBezier(vec3 p1, vec3 c1, vec3 c2, vec3 p2, float t) {\n  float t2 = 1.0 - t;\n  float b0 = t2 * t2 * t2;\n  float b1 = 3.0 * t * t2 * t2;\n  float b2 = 3.0 * t * t * t2;\n  float b3 = t * t * t;\n  return b0 * p1 + b1 * c1 + b2 * c2 + b3 * p2;\n}\n\nvec3 cubicBezierDerivative(vec3 p1, vec3 c1, vec3 c2, vec3 p2, float t) {\n  float t2 = 1.0 - t;\n  return -3.0 * p1 * t2 * t2 +\n    c1 * (3.0 * t2 * t2 - 6.0 * t2 * t) +\n    c2 * (6.0 * t2 * t - 3.0 * t * t) +\n    3.0 * p2 * t * t;\n}\n";
+
+  var vertexTransform = "\nfloat t = position.y;\nbezierT = t;\nvec3 bezierCenterPos = cubicBezier(pointA, controlA, controlB, pointB, t);\nvec3 bezierDir = normalize(cubicBezierDerivative(pointA, controlA, controlB, pointB, t));\n\n// Make \"sideways\" always perpendicular to the camera ray; this ensures that any twists\n// in the cylinder occur where you won't see them: \nvec3 viewDirection = normalMatrix * vec3(0.0, 0.0, 1.0);\nif (bezierDir == viewDirection) {\n  bezierDir = normalize(cubicBezierDerivative(pointA, controlA, controlB, pointB, t == 1.0 ? t - 0.0001 : t + 0.0001));\n}\nvec3 sideways = normalize(cross(bezierDir, viewDirection));\nvec3 upish = normalize(cross(sideways, bezierDir));\n\n// Build a matrix for transforming this disc in the cylinder:\nmat4 discTx;\ndiscTx[0].xyz = sideways * radius;\ndiscTx[1].xyz = bezierDir * radius;\ndiscTx[2].xyz = upish * radius;\ndiscTx[3].xyz = bezierCenterPos;\ndiscTx[3][3] = 1.0;\n\n// Apply transform, ignoring original y\nposition = (discTx * vec4(position.x, 0.0, position.z, 1.0)).xyz;\nnormal = normalize(mat3(discTx) * normal);\n";
+
+  var fragmentDefs = "\nuniform vec3 dashing;\nvarying float bezierT;\n";
+
+  var fragmentMainIntro = "\nif (dashing.x + dashing.y > 0.0) {\n  float dashFrac = mod(bezierT - dashing.z, dashing.x + dashing.y);\n  if (dashFrac > dashing.x) {\n    discard;\n  }\n}\n";
+
+  // Debugging: separate color for each of the 6 sides:
+  // const fragmentColorTransform = `
+  // float sideNum = floor(vUV.x * 6.0);
+  // vec3 mixColor = sideNum < 1.0 ? vec3(1.0, 0.0, 0.0) :
+  //   sideNum < 2.0 ? vec3(0.0, 1.0, 1.0) :
+  //   sideNum < 3.0 ? vec3(1.0, 1.0, 0.0) :
+  //   sideNum < 4.0 ? vec3(0.0, 0.0, 1.0) :
+  //   sideNum < 5.0 ? vec3(0.0, 1.0, 0.0) :
+  //   vec3(1.0, 0.0, 1.0);
+  // gl_FragColor.xyz = mix(gl_FragColor.xyz, mixColor, 0.5);
+  // `
+
+
+
+  function createBezierMeshMaterial(baseMaterial) {
+    return createDerivedMaterial(
+      baseMaterial,
+      {
+        uniforms: {
+          pointA: {value: new three.Vector3()},
+          controlA: {value: new three.Vector3()},
+          controlB: {value: new three.Vector3()},
+          pointB: {value: new three.Vector3()},
+          radius: {value: 0.01},
+          dashing: {value: new three.Vector3()} //on, off, offset
+        },
+        vertexDefs: vertexDefs,
+        vertexTransform: vertexTransform,
+        fragmentDefs: fragmentDefs,
+        fragmentMainIntro: fragmentMainIntro
+      }
+    )
+  }
+
+  var geometry = null;
+
+  var defaultBaseMaterial = new three.MeshStandardMaterial({color: 0xffffff, side: three.DoubleSide});
+
+
+  /**
+   * A ThreeJS `Mesh` that bends a tube shape along a 3D cubic bezier path. The bending is done
+   * by deforming a straight cylindrical geometry in the vertex shader based on a set of four
+   * control point uniforms. It patches the necessary GLSL into the mesh's assigned `material`
+   * automatically.
+   *
+   * The cubiz bezier path is determined by its four `Vector3` properties:
+   * - `pointA`
+   * - `controlA`
+   * - `controlB`
+   * - `pointB`
+   *
+   * The tube's radius is controlled by its `radius` property, which defaults to `0.01`.
+   *
+   * You can also give the tube a dashed appearance with two properties:
+   *
+   * - `dashArray` - an array of two numbers, defining the length of "on" and "off" parts of
+   *   the dash. Each is a 0-1 ratio of the entire path's length. (Actually this is the `t` length
+   *   used as input to the cubic bezier function, not its visible length.)
+   * - `dashOffset` - offset of where the dash starts. You can animate this to make the dashes move.
+   *
+   * Note that the dashes will appear like a hollow tube, not solid. This will be more apparent on
+   * thicker tubes.
+   *
+   * TODO: proper geometry bounding sphere and raycasting
+   * TODO: allow control of the geometry's segment counts
+   */
+  var BezierMesh = (function (Mesh) {
+    function BezierMesh() {
+      Mesh.call(
+        this, geometry || (geometry =
+          new three.CylinderBufferGeometry(1, 1, 1, 6, 64).translate(0, 0.5, 0)
+        ),
+        defaultBaseMaterial
+      );
+
+      this.pointA = new three.Vector3();
+      this.controlA = new three.Vector3();
+      this.controlB = new three.Vector3();
+      this.pointB = new three.Vector3();
+      this.radius = 0.01;
+      this.dashArray = new three.Vector2();
+      this.dashOffset = 0;
+
+      // TODO - disabling frustum culling until I figure out how to customize the
+      //  geometry's bounding sphere that gets used
+      this.frustumCulled = false;
+    }
+
+    if ( Mesh ) BezierMesh.__proto__ = Mesh;
+    BezierMesh.prototype = Object.create( Mesh && Mesh.prototype );
+    BezierMesh.prototype.constructor = BezierMesh;
+
+    var prototypeAccessors = { material: { configurable: true },customDepthMaterial: { configurable: true },customDistanceMaterial: { configurable: true } };
+
+    // Handler for automatically wrapping the base material with our upgrades. We do the wrapping
+    // lazily on _read_ rather than write to avoid unnecessary wrapping on transient values.
+    prototypeAccessors.material.get = function () {
+      var derivedMaterial = this._derivedMaterial;
+      var baseMaterial = this._baseMaterial || defaultBaseMaterial;
+      if (!derivedMaterial || derivedMaterial.baseMaterial !== baseMaterial) {
+        if (derivedMaterial) {
+          derivedMaterial.dispose();
+        }
+        derivedMaterial = this._derivedMaterial = createBezierMeshMaterial(baseMaterial);
+        // dispose the derived material when its base material is disposed:
+        baseMaterial.addEventListener('dispose', function onDispose() {
+          baseMaterial.removeEventListener('dispose', onDispose);
+          derivedMaterial.dispose();
+        });
+      }
+      return derivedMaterial
+    };
+    prototypeAccessors.material.set = function (baseMaterial) {
+      this._baseMaterial = baseMaterial;
+    };
+
+    // Create and update material for shadows upon request:
+    prototypeAccessors.customDepthMaterial.get = function () {
+      return this._updateBezierUniforms(this.material.getDepthMaterial())
+    };
+    prototypeAccessors.customDistanceMaterial.get = function () {
+      return this._updateBezierUniforms(this.material.getDistanceMaterial())
+    };
+
+    BezierMesh.prototype.onBeforeRender = function onBeforeRender (shaderInfo) {
+      this._updateBezierUniforms(this.material);
+    };
+
+    BezierMesh.prototype._updateBezierUniforms = function _updateBezierUniforms (material) {
+      var uniforms = material.uniforms;
+      var ref = this;
+      var pointA = ref.pointA;
+      var controlA = ref.controlA;
+      var controlB = ref.controlB;
+      var pointB = ref.pointB;
+      var radius = ref.radius;
+      var dashArray = ref.dashArray;
+      var dashOffset = ref.dashOffset;
+      uniforms.pointA.value.copy(pointA);
+      uniforms.controlA.value.copy(controlA);
+      uniforms.controlB.value.copy(controlB);
+      uniforms.pointB.value.copy(pointB);
+      uniforms.radius.value = radius;
+      uniforms.dashing.value.set(dashArray.x, dashArray.y, dashOffset || 0);
+      return material
+    };
+
+    BezierMesh.prototype.raycast = function raycast (raycaster, intersects) {
+      // TODO - just fail for now
+    };
+
+    Object.defineProperties( BezierMesh.prototype, prototypeAccessors );
+
+    return BezierMesh;
+  }(three.Mesh));
 
   /**
    * Initializes and returns a function to generate an SDF texture for a given glyph.
@@ -1388,11 +1649,16 @@
           request.open('get', url, true);
           request.responseType = 'arraybuffer';
           request.onload = function () {
-            try {
-              var fontObj = fontParser(request.response);
-              callback(fontObj);
-            } catch (e) {
-              onError(e);
+            if (request.status >= 400) {
+              onError(new Error(request.statusText));
+            }
+            else if (request.status > 0) {
+              try {
+                var fontObj = fontParser(request.response);
+                callback(fontObj);
+              } catch (e) {
+                onError(e);
+              }
             }
           };
           request.onerror = onError;
@@ -5268,16 +5534,6 @@
       // Base per-instance attributes
       this.copy(templateGeometry);
 
-      // Add our custom instanced attributes
-      this.addAttribute(
-        glyphBoundsAttrName,
-        new three.InstancedBufferAttribute(new Float32Array(0), 4)
-      );
-      this.addAttribute(
-        glyphIndexAttrName,
-        new three.InstancedBufferAttribute(new Float32Array(0), 1)
-      );
-
       // Preallocate zero-radius bounding sphere
       this.boundingSphere = new three.Sphere();
     }
@@ -5300,8 +5556,8 @@
      */
     GlyphsGeometry.prototype.updateGlyphs = function updateGlyphs (glyphBounds, glyphIndices, totalBounds) {
       // Update the instance attributes
-      updateBufferAttrArray(this.attributes[glyphBoundsAttrName], glyphBounds);
-      updateBufferAttrArray(this.attributes[glyphIndexAttrName], glyphIndices);
+      updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
+      updateBufferAttr(this, glyphIndexAttrName, glyphIndices, 1);
       this.maxInstancedCount = glyphIndices.length;
 
       // Update the boundingSphere based on the total bounds
@@ -5317,24 +5573,37 @@
     return GlyphsGeometry;
   }(three.InstancedBufferGeometry));
 
-
-
-  function updateBufferAttrArray(attr, newArray) {
-    if (attr.array.length === newArray.length) {
-      attr.array.set(newArray);
-    } else {
-      attr.setArray(newArray);
-    }
-    attr.needsUpdate = true;
+  // Compat for pre r109:
+  if (!GlyphsGeometry.prototype.setAttribute) {
+    GlyphsGeometry.prototype.setAttribute = function(name, attribute) {
+      this.attributes[ name ] = attribute;
+      return this
+    };
   }
 
+
+  function updateBufferAttr(geom, attrName, newArray, itemSize) {
+    var attr = geom.getAttribute(attrName);
+    // If length isn't changing, just update the attribute's array data
+    if (attr && attr.array.length === newArray.length) {
+      attr.array.set(newArray);
+      attr.needsUpdate = true;
+    } else {
+      geom.setAttribute(attrName, new three.InstancedBufferAttribute(newArray, itemSize));
+    }
+  }
+
+  // language=GLSL
   var VERTEX_DEFS = "\nuniform float uTroikaGlyphVSize;\nuniform vec4 uTroikaTotalBounds;\nattribute vec4 aTroikaGlyphBounds;\nattribute float aTroikaGlyphIndex;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n";
 
+  // language=GLSL prefix="void main() {" suffix="}"
   var VERTEX_TRANSFORM = "\nvTroikaGlyphUV = vec2(\n  position.x,\n  uTroikaGlyphVSize * (aTroikaGlyphIndex + position.y)\n);\n\nposition = vec3(\n  mix(aTroikaGlyphBounds.x, aTroikaGlyphBounds.z, position.x),\n  mix(aTroikaGlyphBounds.y, aTroikaGlyphBounds.w, position.y),\n  position.z\n);\nvTroikaLocalPos = vec3(position);\n\nuv = vec2(\n  (position.x - uTroikaTotalBounds.x) / (uTroikaTotalBounds.z - uTroikaTotalBounds.x),\n  (position.y - uTroikaTotalBounds.y) / (uTroikaTotalBounds.w - uTroikaTotalBounds.y)\n);\n";
 
-  var FRAGMENT_DEFS = "\nuniform sampler2D uTroikaSDFTexture;\nuniform float uTroikaSDFMinDistancePct;\nuniform bool uTroikaSDFDebug;\nuniform float uTroikaGlyphVSize;\nuniform vec4 uTroikaClipRect;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n\nvoid troikaApplyClipping() {\n  vec4 rect = uTroikaClipRect;\n  vec3 pos = vTroikaLocalPos;\n  if (rect != vec4(.0,.0,.0,.0) && (\n    pos.x < min(rect.x, rect.z) || \n    pos.y < min(rect.y, rect.w) ||\n    pos.x > max(rect.x, rect.z) ||\n    pos.y > max(rect.y, rect.w)\n  )) {\n    discard;\n  }\n}\n";
+  // language=GLSL
+  var FRAGMENT_DEFS = "\nuniform sampler2D uTroikaSDFTexture;\nuniform float uTroikaSDFMinDistancePct;\nuniform bool uTroikaSDFDebug;\nuniform float uTroikaGlyphVSize;\nuniform vec4 uTroikaClipRect;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n\nfloat troikaGetClipAlpha() {\n  vec4 clip = uTroikaClipRect;\n  vec3 pos = vTroikaLocalPos;\n  float dClip = min(\n    min(pos.x - min(clip.x, clip.z), max(clip.x, clip.z) - pos.x),\n    min(pos.y - min(clip.y, clip.w), max(clip.y, clip.w) - pos.y)\n  );\n  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float aa = length(fwidth(pos)) * 0.5;\n  return smoothstep(-aa, aa, dClip);\n  #else\n  return step(0.0, dClip);\n  #endif\n}\n\nfloat troikaGetTextAlpha() {\n  float troikaSDFValue = texture2D(uTroikaSDFTexture, vTroikaGlyphUV).r;\n  \n  #if defined(IS_DEPTH_MATERIAL) || defined(IS_DISTANCE_MATERIAL)\n  float alpha = step(0.5, troikaSDFValue);\n  #else\n  " + ('') + "\n  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float aaDist = min(\n    0.5,\n    0.5 * min(\n      fwidth(vTroikaGlyphUV.x), \n      fwidth(vTroikaGlyphUV.y / uTroikaGlyphVSize)\n    )\n  ) / uTroikaSDFMinDistancePct;\n  #else\n  float aaDist = 0.01;\n  #endif\n  \n  float alpha = uTroikaSDFDebug ? troikaSDFValue : smoothstep(\n    0.5 - aaDist,\n    0.5 + aaDist,\n    troikaSDFValue\n  );\n  #endif\n  \n  return min(alpha, troikaGetClipAlpha());\n}\n";
 
-  var FRAGMENT_TRANSFORM = "\ntroikaApplyClipping();\n\nfloat troikaSDFValue = texture2D(uTroikaSDFTexture, vTroikaGlyphUV).r;\n\n" + ('') + "\n#if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float troikaAntiAliasDist = min(\n    0.5,\n    0.5 * min(\n      fwidth(vTroikaGlyphUV.x), \n      fwidth(vTroikaGlyphUV.y / uTroikaGlyphVSize)\n    )\n  ) / uTroikaSDFMinDistancePct;\n#else\n  float troikaAntiAliasDist = 0.01;\n#endif\n\nfloat textAlphaMult = uTroikaSDFDebug ? troikaSDFValue : smoothstep(\n  0.5 - troikaAntiAliasDist,\n  0.5 + troikaAntiAliasDist,\n  troikaSDFValue\n);\nif (textAlphaMult == 0.0) {\n  if (uTroikaSDFDebug) {\n    gl_FragColor *= 0.5;\n  } else {\n    discard;\n  }\n} else {\n  gl_FragColor.a *= textAlphaMult;\n}\n";
+  // language=GLSL prefix="void main() {" suffix="}"
+  var FRAGMENT_TRANSFORM = "\nfloat troikaAlphaMult = troikaGetTextAlpha();\nif (troikaAlphaMult == 0.0) {\n  discard;\n} else {\n  gl_FragColor.a *= troikaAlphaMult;\n}\n";
 
 
   /**
@@ -5357,8 +5626,16 @@
       fragmentColorTransform: FRAGMENT_TRANSFORM
     });
 
-    //force transparency - TODO is this reasonable?
+    // Force transparency - TODO is this reasonable?
     textMaterial.transparent = true;
+
+    // WebGLShadowMap reverses the side of the shadow material by default, which fails
+    // for planes, so here we force the `shadowSide` to always match the main side.
+    Object.defineProperty(textMaterial, 'shadowSide', {
+      get: function get() {
+        return this.side
+      }
+    });
 
     return textMaterial
   }
@@ -5369,15 +5646,16 @@
     transparent: true
   });
 
-  var noclip = Object.freeze([0, 0, 0, 0]);
+  var noclip = Object.freeze([-Infinity, -Infinity, Infinity, Infinity]);
 
   var tempMat4 = new three.Matrix4();
+  var tempPlane = new three.Plane();
+  var tempVec3$1 = new three.Vector3();
 
   var raycastMesh = new three.Mesh(
     new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0),
     defaultMaterial
   );
-
 
 
 
@@ -5513,7 +5791,7 @@
     TextMesh.prototype = Object.create( Mesh && Mesh.prototype );
     TextMesh.prototype.constructor = TextMesh;
 
-    var prototypeAccessors = { material: { configurable: true } };
+    var prototypeAccessors = { material: { configurable: true },customDepthMaterial: { configurable: true },customDistanceMaterial: { configurable: true } };
 
     /**
      * Updates the text rendering according to the current text-related configuration properties.
@@ -5616,23 +5894,21 @@
       this._baseMaterial = baseMaterial;
     };
 
+    // Create and update material for shadows upon request:
+    prototypeAccessors.customDepthMaterial.get = function () {
+      return this._updateLayoutUniforms(this.material.getDepthMaterial())
+    };
+    prototypeAccessors.customDistanceMaterial.get = function () {
+      return this._updateLayoutUniforms(this.material.getDistanceMaterial())
+    };
+
     TextMesh.prototype._prepareMaterial = function _prepareMaterial () {
       var material = this._derivedMaterial;
-      var textInfo = this._textRenderInfo;
+      this._updateLayoutUniforms(material);
+
+      // presentation uniforms:
       var uniforms = material.uniforms;
-      if (textInfo) {
-        var sdfTexture = textInfo.sdfTexture;
-        uniforms.uTroikaSDFTexture.value = sdfTexture;
-        uniforms.uTroikaSDFMinDistancePct.value = textInfo.sdfMinDistancePercent;
-        uniforms.uTroikaGlyphVSize.value = sdfTexture.image.width / sdfTexture.image.height;
-        uniforms.uTroikaTotalBounds.value.fromArray(textInfo.totalBounds);
-      }
       uniforms.uTroikaSDFDebug.value = !!this.debugSDF;
-
-      var clipRect = this.clipRect;
-      if (!(clipRect && Array.isArray(clipRect) && clipRect.length === 4)) { clipRect = noclip; }
-      uniforms.uTroikaClipRect.value.fromArray(clipRect);
-
       material.polygonOffset = !!this.depthOffset;
       material.polygonOffsetFactor = material.polygonOffsetUnits = this.depthOffset || 0;
 
@@ -5641,6 +5917,32 @@
       if (color != null && material.color && material.color.isColor && color !== material._troikaColor) {
         material.color.set(material._troikaColor = color);
       }
+    };
+
+    TextMesh.prototype._updateLayoutUniforms = function _updateLayoutUniforms (material) {
+      var textInfo = this._textRenderInfo;
+      var uniforms = material.uniforms;
+      if (textInfo) {
+        var sdfTexture = textInfo.sdfTexture;
+        var totalBounds = textInfo.totalBounds;
+        uniforms.uTroikaSDFTexture.value = sdfTexture;
+        uniforms.uTroikaSDFMinDistancePct.value = textInfo.sdfMinDistancePercent;
+        uniforms.uTroikaGlyphVSize.value = sdfTexture.image.width / sdfTexture.image.height;
+        uniforms.uTroikaTotalBounds.value.fromArray(totalBounds);
+
+        var clipRect = this.clipRect;
+        if (!(clipRect && Array.isArray(clipRect) && clipRect.length === 4)) {
+          uniforms.uTroikaClipRect.value.fromArray(totalBounds);
+        } else {
+          uniforms.uTroikaClipRect.value.set(
+            Math.max(totalBounds[0], clipRect[0]),
+            Math.max(totalBounds[1], clipRect[1]),
+            Math.min(totalBounds[2], clipRect[2]),
+            Math.min(totalBounds[3], clipRect[3])
+          );
+        }
+      }
+      return material
     };
 
     /**
