@@ -26,7 +26,7 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | anchor                | anchor                 | Horizontal positioning (left, center, right, align).                                                        | center                          |
 | baseline              | baseline               | Vertical positioning (top, center, bottom).                                                                 | center                          |
 | color                 | color                  | Text color. This is a shortcut for specifying a custom material.                                            | white                           |
-| depthOffset           | depth-offset           | Depth buffer offset to help prevent z-fighting. Positive numbers are closer to camera, negatives further.   | 0                               |
+| depthOffset           | depth-offset           | Depth buffer offset to help prevent z-fighting. Negative numbers are closer to camera, positives further.   | 0                               |
 | font                  | font                   | URL to a font file - can be a .ttf, .otf, or .woff (no .woff2)                                              | Roboto loaded from Google Fonts |
 | fontSize              | font-size              | Em-height at which to render the font, in world units                                                       | 0.2                             |
 | letterSpacing         | letter-spacing         | Letter spacing in meters.                                                                                   | 0                               |
