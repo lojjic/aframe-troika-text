@@ -66,6 +66,7 @@ aframe.registerComponent(COMPONENT_NAME, {
     mesh.anchor[0] = anchorMapping[data.anchor]
     mesh.anchor[1] = baselineMapping[data.baseline]
     mesh.color = data.color
+    mesh.depthOffset = data.depthOffset || 0
     mesh.font = data.font //TODO allow aframe stock font names
     mesh.fontSize = data.fontSize
     mesh.letterSpacing = data.letterSpacing || 0

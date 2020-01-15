@@ -10,7 +10,7 @@ It has similar performance and quality to A-Frame's built-in SDF `text` componen
 * It reads font files directly (ttf, otf, woff) and does not require using an external tool to pre-generate SDF textures with the glyphs you think you'll need.
 
 * It supports ligatures so you can use fonts like [Material Icons](https://material.io/resources/icons/).
- 
+
 * Rather than using a fully custom shader, it patches the built-in Three.js material shaders as needed, so you don't lose all the nice standard shader features like lighting and fog.
 
 
@@ -26,6 +26,7 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | anchor                | anchor                 | Horizontal positioning (left, center, right, align).                                                        | center                          |
 | baseline              | baseline               | Vertical positioning (top, center, bottom).                                                                 | center                          |
 | color                 | color                  | Text color. This is a shortcut for specifying a custom material.                                            | white                           |
+| depthOffset           | depth-offset           | Depth buffer offset to help prevent z-fighting. Positive numbers are closer to camera, negatives further.   | 0                               |
 | font                  | font                   | URL to a font file - can be a .ttf, .otf, or .woff (no .woff2)                                              | Roboto loaded from Google Fonts |
 | fontSize              | font-size              | Em-height at which to render the font, in world units                                                       | 0.2                             |
 | letterSpacing         | letter-spacing         | Letter spacing in meters.                                                                                   | 0                               |
@@ -35,7 +36,7 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | **value**             | value                  | The actual content of the text. Line breaks and tabs are supported with `\n` and `\t`.                      | ''                              |
 | whiteSpace            | white-space            | How whitespace should be handled (i.e., normal, nowrap).                                                    | normal (behaves like pre-wrap)  |
 
-Note: It does not currently follow how the built-in `text` component interacts with a `geometry` component for auto-sizing and anchoring. I think that's a nice feature so it's probably worth adding; in the meantime just use the `maxWidth` and `anchor`/`baseline` attributes to control it manually.  
+Note: It does not currently follow how the built-in `text` component interacts with a `geometry` component for auto-sizing and anchoring. I think that's a nice feature so it's probably worth adding; in the meantime just use the `maxWidth` and `anchor`/`baseline` attributes to control it manually.
 
 #### Changing the material
 
@@ -50,7 +51,7 @@ If you are using the `<a-troika-text>` _primitive_, you can assign it a [`materi
 ></a-troika-text>
 ```
 
-If you are using the `troika-text="..."` _component_, you must instead give it a `troika-text-material="..."` attribute to distinguish the text material from the entity's main material. You can pass it anything supported by the built in [`material` component](https://aframe.io/docs/master/components/material.html). 
+If you are using the `troika-text="..."` _component_, you must instead give it a `troika-text-material="..."` attribute to distinguish the text material from the entity's main material. You can pass it anything supported by the built in [`material` component](https://aframe.io/docs/master/components/material.html).
 
 ```html
 <a-entity
@@ -68,7 +69,7 @@ Install and use by directly including the [browser files](dist):
 ```html
 <head>
   <title>My A-Frame Scene</title>
-  <script src="https://aframe.io/releases/0.9.2/aframe.min.js"></script>
+  <script src="https://aframe.io/releases/1.0.3/aframe.min.js"></script>
   <script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
 </head>
 
