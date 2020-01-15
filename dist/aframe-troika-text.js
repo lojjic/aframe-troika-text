@@ -1032,174 +1032,7 @@
     return array
   }
 
-  /*
-  Input geometry is a cylinder with r=1, height in y dimension from 0 to 1,
-  divided into a reasonable number of height segments.
-  */
-
-  var vertexDefs = "\nuniform vec3 pointA;\nuniform vec3 controlA;\nuniform vec3 controlB;\nuniform vec3 pointB;\nuniform float radius;\nvarying float bezierT;\n\nvec3 cubicBezier(vec3 p1, vec3 c1, vec3 c2, vec3 p2, float t) {\n  float t2 = 1.0 - t;\n  float b0 = t2 * t2 * t2;\n  float b1 = 3.0 * t * t2 * t2;\n  float b2 = 3.0 * t * t * t2;\n  float b3 = t * t * t;\n  return b0 * p1 + b1 * c1 + b2 * c2 + b3 * p2;\n}\n\nvec3 cubicBezierDerivative(vec3 p1, vec3 c1, vec3 c2, vec3 p2, float t) {\n  float t2 = 1.0 - t;\n  return -3.0 * p1 * t2 * t2 +\n    c1 * (3.0 * t2 * t2 - 6.0 * t2 * t) +\n    c2 * (6.0 * t2 * t - 3.0 * t * t) +\n    3.0 * p2 * t * t;\n}\n";
-
-  var vertexTransform = "\nfloat t = position.y;\nbezierT = t;\nvec3 bezierCenterPos = cubicBezier(pointA, controlA, controlB, pointB, t);\nvec3 bezierDir = normalize(cubicBezierDerivative(pointA, controlA, controlB, pointB, t));\n\n// Make \"sideways\" always perpendicular to the camera ray; this ensures that any twists\n// in the cylinder occur where you won't see them: \nvec3 viewDirection = normalMatrix * vec3(0.0, 0.0, 1.0);\nif (bezierDir == viewDirection) {\n  bezierDir = normalize(cubicBezierDerivative(pointA, controlA, controlB, pointB, t == 1.0 ? t - 0.0001 : t + 0.0001));\n}\nvec3 sideways = normalize(cross(bezierDir, viewDirection));\nvec3 upish = normalize(cross(sideways, bezierDir));\n\n// Build a matrix for transforming this disc in the cylinder:\nmat4 discTx;\ndiscTx[0].xyz = sideways * radius;\ndiscTx[1].xyz = bezierDir * radius;\ndiscTx[2].xyz = upish * radius;\ndiscTx[3].xyz = bezierCenterPos;\ndiscTx[3][3] = 1.0;\n\n// Apply transform, ignoring original y\nposition = (discTx * vec4(position.x, 0.0, position.z, 1.0)).xyz;\nnormal = normalize(mat3(discTx) * normal);\n";
-
-  var fragmentDefs = "\nuniform vec3 dashing;\nvarying float bezierT;\n";
-
-  var fragmentMainIntro = "\nif (dashing.x + dashing.y > 0.0) {\n  float dashFrac = mod(bezierT - dashing.z, dashing.x + dashing.y);\n  if (dashFrac > dashing.x) {\n    discard;\n  }\n}\n";
-
-  // Debugging: separate color for each of the 6 sides:
-  // const fragmentColorTransform = `
-  // float sideNum = floor(vUV.x * 6.0);
-  // vec3 mixColor = sideNum < 1.0 ? vec3(1.0, 0.0, 0.0) :
-  //   sideNum < 2.0 ? vec3(0.0, 1.0, 1.0) :
-  //   sideNum < 3.0 ? vec3(1.0, 1.0, 0.0) :
-  //   sideNum < 4.0 ? vec3(0.0, 0.0, 1.0) :
-  //   sideNum < 5.0 ? vec3(0.0, 1.0, 0.0) :
-  //   vec3(1.0, 0.0, 1.0);
-  // gl_FragColor.xyz = mix(gl_FragColor.xyz, mixColor, 0.5);
-  // `
-
-
-
-  function createBezierMeshMaterial(baseMaterial) {
-    return createDerivedMaterial(
-      baseMaterial,
-      {
-        uniforms: {
-          pointA: {value: new three.Vector3()},
-          controlA: {value: new three.Vector3()},
-          controlB: {value: new three.Vector3()},
-          pointB: {value: new three.Vector3()},
-          radius: {value: 0.01},
-          dashing: {value: new three.Vector3()} //on, off, offset
-        },
-        vertexDefs: vertexDefs,
-        vertexTransform: vertexTransform,
-        fragmentDefs: fragmentDefs,
-        fragmentMainIntro: fragmentMainIntro
-      }
-    )
-  }
-
-  var geometry = null;
-
   var defaultBaseMaterial = new three.MeshStandardMaterial({color: 0xffffff, side: three.DoubleSide});
-
-
-  /**
-   * A ThreeJS `Mesh` that bends a tube shape along a 3D cubic bezier path. The bending is done
-   * by deforming a straight cylindrical geometry in the vertex shader based on a set of four
-   * control point uniforms. It patches the necessary GLSL into the mesh's assigned `material`
-   * automatically.
-   *
-   * The cubiz bezier path is determined by its four `Vector3` properties:
-   * - `pointA`
-   * - `controlA`
-   * - `controlB`
-   * - `pointB`
-   *
-   * The tube's radius is controlled by its `radius` property, which defaults to `0.01`.
-   *
-   * You can also give the tube a dashed appearance with two properties:
-   *
-   * - `dashArray` - an array of two numbers, defining the length of "on" and "off" parts of
-   *   the dash. Each is a 0-1 ratio of the entire path's length. (Actually this is the `t` length
-   *   used as input to the cubic bezier function, not its visible length.)
-   * - `dashOffset` - offset of where the dash starts. You can animate this to make the dashes move.
-   *
-   * Note that the dashes will appear like a hollow tube, not solid. This will be more apparent on
-   * thicker tubes.
-   *
-   * TODO: proper geometry bounding sphere and raycasting
-   * TODO: allow control of the geometry's segment counts
-   */
-  var BezierMesh = (function (Mesh) {
-    function BezierMesh() {
-      Mesh.call(
-        this, geometry || (geometry =
-          new three.CylinderBufferGeometry(1, 1, 1, 6, 64).translate(0, 0.5, 0)
-        ),
-        defaultBaseMaterial
-      );
-
-      this.pointA = new three.Vector3();
-      this.controlA = new three.Vector3();
-      this.controlB = new three.Vector3();
-      this.pointB = new three.Vector3();
-      this.radius = 0.01;
-      this.dashArray = new three.Vector2();
-      this.dashOffset = 0;
-
-      // TODO - disabling frustum culling until I figure out how to customize the
-      //  geometry's bounding sphere that gets used
-      this.frustumCulled = false;
-    }
-
-    if ( Mesh ) BezierMesh.__proto__ = Mesh;
-    BezierMesh.prototype = Object.create( Mesh && Mesh.prototype );
-    BezierMesh.prototype.constructor = BezierMesh;
-
-    var prototypeAccessors = { material: { configurable: true },customDepthMaterial: { configurable: true },customDistanceMaterial: { configurable: true } };
-
-    // Handler for automatically wrapping the base material with our upgrades. We do the wrapping
-    // lazily on _read_ rather than write to avoid unnecessary wrapping on transient values.
-    prototypeAccessors.material.get = function () {
-      var derivedMaterial = this._derivedMaterial;
-      var baseMaterial = this._baseMaterial || defaultBaseMaterial;
-      if (!derivedMaterial || derivedMaterial.baseMaterial !== baseMaterial) {
-        if (derivedMaterial) {
-          derivedMaterial.dispose();
-        }
-        derivedMaterial = this._derivedMaterial = createBezierMeshMaterial(baseMaterial);
-        // dispose the derived material when its base material is disposed:
-        baseMaterial.addEventListener('dispose', function onDispose() {
-          baseMaterial.removeEventListener('dispose', onDispose);
-          derivedMaterial.dispose();
-        });
-      }
-      return derivedMaterial
-    };
-    prototypeAccessors.material.set = function (baseMaterial) {
-      this._baseMaterial = baseMaterial;
-    };
-
-    // Create and update material for shadows upon request:
-    prototypeAccessors.customDepthMaterial.get = function () {
-      return this._updateBezierUniforms(this.material.getDepthMaterial())
-    };
-    prototypeAccessors.customDistanceMaterial.get = function () {
-      return this._updateBezierUniforms(this.material.getDistanceMaterial())
-    };
-
-    BezierMesh.prototype.onBeforeRender = function onBeforeRender (shaderInfo) {
-      this._updateBezierUniforms(this.material);
-    };
-
-    BezierMesh.prototype._updateBezierUniforms = function _updateBezierUniforms (material) {
-      var uniforms = material.uniforms;
-      var ref = this;
-      var pointA = ref.pointA;
-      var controlA = ref.controlA;
-      var controlB = ref.controlB;
-      var pointB = ref.pointB;
-      var radius = ref.radius;
-      var dashArray = ref.dashArray;
-      var dashOffset = ref.dashOffset;
-      uniforms.pointA.value.copy(pointA);
-      uniforms.controlA.value.copy(controlA);
-      uniforms.controlB.value.copy(controlB);
-      uniforms.pointB.value.copy(pointB);
-      uniforms.radius.value = radius;
-      uniforms.dashing.value.set(dashArray.x, dashArray.y, dashOffset || 0);
-      return material
-    };
-
-    BezierMesh.prototype.raycast = function raycast (raycaster, intersects) {
-      // TODO - just fail for now
-    };
-
-    Object.defineProperties( BezierMesh.prototype, prototypeAccessors );
-
-    return BezierMesh;
-  }(three.Mesh));
 
   /**
    * Initializes and returns a function to generate an SDF texture for a given glyph.
@@ -1367,12 +1200,10 @@
       this.walkBranch(this._root, callback);
     };
     GlyphSegmentsQuadtree.prototype.walkBranch = function walkBranch (root, callback) {
-        var this$1 = this;
-
       if (callback(root) !== false && !root.data) {
         for (var i = 0; i < 4; i++) {
           if (root[i] !== null) {
-            this$1.walkBranch(root[i], callback);
+            this.walkBranch(root[i], callback);
           }
         }
       }
@@ -1581,7 +1412,6 @@
    *       //invokes callback for each glyph to render, passing it an object:
    *       callback({
    *         index: number,
-   *         unicode: number,
    *         advanceWidth: number,
    *         xMin: number,
    *         yMin: number,
@@ -1731,107 +1561,124 @@
       var whiteSpace = ref.whiteSpace; if ( whiteSpace === void 0 ) whiteSpace = 'normal';
       var overflowWrap = ref.overflowWrap; if ( overflowWrap === void 0 ) overflowWrap = 'normal';
       var anchor = ref.anchor;
+      var includeCaretPositions = ref.includeCaretPositions; if ( includeCaretPositions === void 0 ) includeCaretPositions = false;
       if ( metricsOnly === void 0 ) metricsOnly=false;
+
+      // Ensure newlines are normalized
+      if (text.indexOf('\r') > -1) {
+        console.warn('FontProcessor.process: got text with \\r chars; normalizing to \\n');
+        text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      }
 
       getSdfAtlas(font, function (atlas) {
         var fontObj = atlas.fontObj;
         var hasMaxWidth = isFinite(maxWidth);
         var newGlyphs = null;
         var glyphBounds = null;
-        var glyphIndices = null;
+        var glyphAtlasIndices = null;
+        var caretPositions = null;
         var totalBounds = null;
-        var lineCount = 0;
         var maxLineWidth = 0;
         var canWrap = whiteSpace !== 'nowrap';
+        var ascender = fontObj.ascender;
+        var descender = fontObj.descender;
+        var unitsPerEm = fontObj.unitsPerEm;
 
         // Find conversion between native font units and fontSize units; this will already be done
         // for the gx/gy values below but everything else we'll need to convert
-        var fontSizeMult = fontSize / fontObj.unitsPerEm;
+        var fontSizeMult = fontSize / unitsPerEm;
 
         // Determine appropriate value for 'normal' line height based on the font's actual metrics
         // TODO this does not guarantee individual glyphs won't exceed the line height, e.g. Roboto; should we use yMin/Max instead?
         if (lineHeight === 'normal') {
-          lineHeight = (fontObj.ascender - fontObj.descender) / fontObj.unitsPerEm;
+          lineHeight = (ascender - descender) / unitsPerEm;
         }
 
         // Determine line height and leading adjustments
         lineHeight = lineHeight * fontSize;
-        var halfLeading = (lineHeight - (fontObj.ascender - fontObj.descender) * fontSizeMult) / 2;
+        var halfLeading = (lineHeight - (ascender - descender) * fontSizeMult) / 2;
+        var caretHeight = Math.min(lineHeight, (ascender - descender) * fontSizeMult);
+        var caretBottomOffset = (ascender + descender) / 2 * fontSizeMult - caretHeight / 2;
 
-        // Split by hard line breaks
-        var lineBlocks = text.split(/\r?\n/).map(function (text) {
-          var lineXOffset = 0;
+        // Distribute glyphs into lines based on wrapping
+        var lineXOffset = 0;
+        var currentLine = {glyphs: [], width: 0};
+        var lines = [currentLine];
+        fontObj.forEachGlyph(text, fontSize, letterSpacing, function (glyphObj, glyphX, charIndex) {
+          var char = text.charAt(charIndex);
+          var glyphWidth = glyphObj.advanceWidth * fontSizeMult;
+          var isWhitespace = !!char && /\s/.test(char);
+          var curLineGlyphs = currentLine.glyphs;
+          var nextLineGlyphs;
 
-          // Distribute glyphs into lines based on wrapping
-          var currentLine = [];
-          var lines = [currentLine];
-          fontObj.forEachGlyph(text, fontSize, letterSpacing, function (glyphObj, glyphX) {
-            var charCode = glyphObj.unicode;
-            var char = typeof charCode === 'number' && String.fromCharCode(charCode);
-            var glyphWidth = glyphObj.advanceWidth * fontSizeMult;
-            var isWhitespace = !!char && /\s/.test(char);
-
-            // If a non-whitespace character overflows the max width, we need to wrap
-            if (canWrap && hasMaxWidth && !isWhitespace && glyphX + glyphWidth + lineXOffset > maxWidth && currentLine.length) {
-              // If it's the first char after a whitespace, start a new line
-              var nextLine;
-              if (currentLine[currentLine.length - 1].isWhitespace) {
-                nextLine = [];
-                lineXOffset = -glyphX;
-              } else {
-                // Back up looking for a whitespace character to wrap at
-                for (var i = currentLine.length; i--;) {
-                  // If we got the start of the line there's no soft break point; make hard break if overflowWrap='break-word'
-                  if (i === 0 && overflowWrap==='break-word') {
-                    nextLine = [];
-                    lineXOffset = -glyphX;
-                    break
-                  }
-                  // Found a soft break point; move all chars since it to a new line
-                  else if (currentLine[i].isWhitespace) {
-                    nextLine = currentLine.splice(i + 1);
-                    var adjustX = nextLine[0].x;
-                    lineXOffset -= adjustX;
-                    for (var j = 0; j < nextLine.length; j++) {
-                      nextLine[j].x -= adjustX;
-                    }
-                    break
-                  }
+          // If a non-whitespace character overflows the max width, we need to soft-wrap
+          if (canWrap && hasMaxWidth && !isWhitespace && glyphX + glyphWidth + lineXOffset > maxWidth && curLineGlyphs.length) {
+            // If it's the first char after a whitespace, start a new line
+            if (curLineGlyphs[curLineGlyphs.length - 1].isWhitespace) {
+              nextLineGlyphs = [];
+              lineXOffset = -glyphX;
+            } else {
+              // Back up looking for a whitespace character to wrap at
+              for (var i = curLineGlyphs.length; i--;) {
+                // If we got the start of the line there's no soft break point; make hard break if overflowWrap='break-word'
+                if (i === 0 && overflowWrap === 'break-word') {
+                  nextLineGlyphs = [];
+                  lineXOffset = -glyphX;
+                  break
                 }
-              }
-              if (nextLine) {
-                // Strip any trailing whitespace characters from the prior line so they don't affect line length
-                while (currentLine[currentLine.length - 1].isWhitespace) {
-                  currentLine.pop();
+                // Found a soft break point; move all chars since it to a new line
+                else if (curLineGlyphs[i].isWhitespace) {
+                  nextLineGlyphs = curLineGlyphs.splice(i + 1);
+                  var adjustX = nextLineGlyphs[0].x;
+                  lineXOffset -= adjustX;
+                  for (var j = 0; j < nextLineGlyphs.length; j++) {
+                    nextLineGlyphs[j].x -= adjustX;
+                  }
+                  break
                 }
-                lines.push(currentLine = nextLine);
-                maxLineWidth = maxWidth;
               }
             }
-
-            currentLine.push({
-              glyphObj: glyphObj,
-              x: glyphX + lineXOffset,
-              y: 0, //added later
-              width: glyphWidth,
-              char: char,
-              isWhitespace: isWhitespace,
-              isEmpty: glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax,
-              atlasInfo: null //added later
-            });
-          });
-
-          // Find max block width after wrapping
-          for (var i = 0; i < lines.length && maxLineWidth < maxWidth; i++) {
-            var lineGlyphs = lines[i];
-            if (lineGlyphs.length) {
-              var lastChar = lineGlyphs[lineGlyphs.length - 1];
-              maxLineWidth = Math.max(maxLineWidth, lastChar.x + lastChar.width);
+            if (nextLineGlyphs) {
+              currentLine.isSoftWrapped = true;
+              currentLine = {glyphs: nextLineGlyphs, width: 0};
+              lines.push(currentLine);
+              maxLineWidth = maxWidth; //after soft wrapping use maxWidth as calculated width
             }
           }
-          lineCount += lines.length;
 
-          return lines
+          currentLine.glyphs.push({
+            glyphObj: glyphObj,
+            x: glyphX + lineXOffset,
+            y: 0, //added later
+            width: glyphWidth,
+            char: char,
+            charIndex: charIndex,
+            isWhitespace: isWhitespace,
+            isEmpty: glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax,
+            atlasInfo: null //added later
+          });
+
+          // Handle hard line breaks
+          if (char === '\n') {
+            currentLine = {glyphs: [], width: 0};
+            lines.push(currentLine);
+            lineXOffset = -(glyphX + glyphWidth);
+          }
+        });
+
+        // Calculate width of each line (excluding trailing whitespace) and maximum block width
+        lines.forEach(function (line) {
+          var lineGlyphs = line.glyphs;
+          for (var i = lineGlyphs.length; i--;) {
+            var lastChar = lineGlyphs[i];
+            if (!lastChar.isWhitespace) {
+              line.width = lastChar.x + lastChar.width;
+              if (line.width > maxLineWidth) {
+                maxLineWidth = line.width;
+              }
+              return
+            }
+          }
         });
 
         if (!metricsOnly) {
@@ -1839,72 +1686,103 @@
           // collecting all renderable glyphs into a single collection.
           var renderableGlyphs = [];
           var lineYOffset = -(fontSize + halfLeading);
-          lineBlocks.forEach(function (lines) {
-            for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-              var lineGlyphs = lines[lineIndex];
+          if (includeCaretPositions) {
+            caretPositions = new Float32Array(text.length * 3);
+          }
+          var prevCharIndex = -1;
+          lines.forEach(function (line) {
+            var lineGlyphs = line.glyphs;
+            var lineWidth = line.width;
 
-              // Ignore empty lines
-              if (lineGlyphs.length) {
-                // Find x offset for horizontal alignment
-                var lineXOffset = 0;
-                var lastChar = lineGlyphs[lineGlyphs.length - 1];
-                var thisLineWidth = lastChar.x + lastChar.width;
-                var whitespaceCount = 0;
-                if (textAlign === 'center') {
-                  lineXOffset = (maxLineWidth - thisLineWidth) / 2;
-                } else if (textAlign === 'right') {
-                  lineXOffset = maxLineWidth - thisLineWidth;
-                } else if (textAlign === 'justify') {
-                  // just count the whitespace characters, and we'll adjust the offsets per character in the next loop
-                  for (var i = 0, len = lineGlyphs.length; i < len; i++) {
-                    if (lineGlyphs[i].isWhitespace) {
-                      whitespaceCount++;
+            // Ignore empty lines
+            if (lineGlyphs.length) {
+              // Find x offset for horizontal alignment
+              var lineXOffset = 0;
+              var whitespaceCount = 0;
+              if (textAlign === 'center') {
+                lineXOffset = (maxLineWidth - lineWidth) / 2;
+              } else if (textAlign === 'right') {
+                lineXOffset = maxLineWidth - lineWidth;
+              } else if (textAlign === 'justify') {
+                // just count the non-trailing whitespace characters, and we'll adjust the offsets per
+                // character in the next loop
+                for (var i = lineGlyphs.length; i--;) {
+                  if (!lineGlyphs[i].isWhitespace) {
+                    while (i--) {
+                      if (lineGlyphs[i].isWhitespace) {
+                        whitespaceCount++;
+                      }
                     }
-                  }
-                }
-
-                for (var i$1 = 0, len$1 = lineGlyphs.length; i$1 < len$1; i$1++) {
-                  var glyphInfo = lineGlyphs[i$1];
-                  if (glyphInfo.isWhitespace && textAlign === 'justify' && lineIndex !== lines.length - 1) {
-                    lineXOffset += (maxLineWidth - thisLineWidth) / whitespaceCount;
-                  }
-
-                  if (!glyphInfo.isWhitespace && !glyphInfo.isEmpty) {
-                    var glyphObj = glyphInfo.glyphObj;
-
-                    // If we haven't seen this glyph yet, generate its SDF
-                    var glyphAtlasInfo = atlas.glyphs[glyphObj.index];
-                    if (!glyphAtlasInfo) {
-                      var glyphSDFData = sdfGenerator(glyphObj);
-
-                      // Assign this glyph the next available atlas index
-                      glyphSDFData.atlasIndex = atlas.glyphCount++;
-
-                      // Queue it up in the response's newGlyphs list
-                      if (!newGlyphs) { newGlyphs = []; }
-                      newGlyphs.push(glyphSDFData);
-
-                      // Store its metadata (not the texture) in our atlas info
-                      glyphAtlasInfo = atlas.glyphs[glyphObj.index] = {
-                        atlasIndex: glyphSDFData.atlasIndex,
-                        glyphObj: glyphObj,
-                        renderingBounds: glyphSDFData.renderingBounds
-                      };
-                    }
-                    glyphInfo.atlasInfo = glyphAtlasInfo;
-
-                    // Apply position adjustments
-                    if (lineXOffset) { glyphInfo.x += lineXOffset; }
-                    glyphInfo.y = lineYOffset;
-
-                    renderableGlyphs.push(glyphInfo);
+                    break
                   }
                 }
               }
 
-              // Increment y offset for next line
-              lineYOffset -= lineHeight;
+              for (var i$1 = 0, len = lineGlyphs.length; i$1 < len; i$1++) {
+                var glyphInfo = lineGlyphs[i$1];
+
+                // Apply position adjustments
+                if (lineXOffset) { glyphInfo.x += lineXOffset; }
+                glyphInfo.y = lineYOffset;
+
+                // Expand whitespaces for justify alignment
+                if (glyphInfo.isWhitespace && textAlign === 'justify' && line.isSoftWrapped) {
+                  var adjust = (maxLineWidth - lineWidth) / whitespaceCount;
+                  lineXOffset += adjust;
+                  glyphInfo.width += adjust;
+                }
+
+                // Add initial caret positions
+                if (includeCaretPositions) {
+                  var charIndex = glyphInfo.charIndex;
+                  caretPositions[charIndex * 3] = glyphInfo.x; //left edge x
+                  caretPositions[charIndex * 3 + 1] = glyphInfo.x + glyphInfo.width; //right edge x
+                  caretPositions[charIndex * 3 + 2] = glyphInfo.y + caretBottomOffset; //common bottom y
+
+                  // If we skipped any chars from the previous glyph (due to ligature subs), copy the
+                  // previous glyph's info to those missing char indices. In the future we may try to
+                  // use the font's LigatureCaretList table to get interior caret positions.
+                  while (charIndex - prevCharIndex > 1) {
+                    caretPositions[(prevCharIndex + 1) * 3] = caretPositions[prevCharIndex * 3 + 1];
+                    caretPositions[(prevCharIndex + 1) * 3 + 1] = caretPositions[prevCharIndex * 3 + 1];
+                    caretPositions[(prevCharIndex + 1) * 3 + 2] = caretPositions[prevCharIndex * 3 + 2];
+                    prevCharIndex++;
+                  }
+                  prevCharIndex = charIndex;
+                }
+
+                // Get atlas data for renderable glyphs
+                if (!glyphInfo.isWhitespace && !glyphInfo.isEmpty) {
+                  var glyphObj = glyphInfo.glyphObj;
+
+                  // If we haven't seen this glyph yet, generate its SDF
+                  var glyphAtlasInfo = atlas.glyphs[glyphObj.index];
+                  if (!glyphAtlasInfo) {
+                    var glyphSDFData = sdfGenerator(glyphObj);
+
+                    // Assign this glyph the next available atlas index
+                    glyphSDFData.atlasIndex = atlas.glyphCount++;
+
+                    // Queue it up in the response's newGlyphs list
+                    if (!newGlyphs) { newGlyphs = []; }
+                    newGlyphs.push(glyphSDFData);
+
+                    // Store its metadata (not the texture) in our atlas info
+                    glyphAtlasInfo = atlas.glyphs[glyphObj.index] = {
+                      atlasIndex: glyphSDFData.atlasIndex,
+                      glyphObj: glyphObj,
+                      renderingBounds: glyphSDFData.renderingBounds
+                    };
+                  }
+                  glyphInfo.atlasInfo = glyphAtlasInfo;
+
+                  renderableGlyphs.push(glyphInfo);
+                }
+              }
             }
+
+            // Increment y offset for next line
+            lineYOffset -= lineHeight;
           });
 
           // Find overall position adjustments for anchoring
@@ -1916,13 +1794,22 @@
               anchorXOffset = -maxLineWidth * anchor[0];
             }
             if (anchor[1]) {
-              anchorYOffset = lineCount * lineHeight * anchor[1];
+              anchorYOffset = lines.length * lineHeight * anchor[1];
+            }
+          }
+
+          // Adjust caret positions by anchoring offsets
+          if (includeCaretPositions && (anchorXOffset || anchorYOffset)) {
+            for (var i = 0, len = caretPositions.length; i < len; i += 3) {
+              caretPositions[i] += anchorXOffset;
+              caretPositions[i + 1] += anchorXOffset;
+              caretPositions[i + 2] += anchorYOffset;
             }
           }
 
           // Create the final output for the rendeable glyphs
           glyphBounds = new Float32Array(renderableGlyphs.length * 4);
-          glyphIndices = new Float32Array(renderableGlyphs.length);
+          glyphAtlasIndices = new Float32Array(renderableGlyphs.length);
           totalBounds = [INF, INF, -INF, -INF];
           renderableGlyphs.forEach(function (glyphInfo, i) {
             var ref = glyphInfo.atlasInfo;
@@ -1938,16 +1825,18 @@
             if (x1 > totalBounds[2]) { totalBounds[2] = x1; }
             if (y1 > totalBounds[3]) { totalBounds[3] = y1; }
 
-            glyphIndices[i] = atlasIndex;
+            glyphAtlasIndices[i] = atlasIndex;
           });
         }
 
         callback({
-          glyphBounds: glyphBounds,
-          glyphIndices: glyphIndices,
-          totalBounds: totalBounds,
-          totalBlockSize: [maxLineWidth, lineCount * lineHeight],
-          newGlyphSDFs: newGlyphs
+          glyphBounds: glyphBounds, //rendering quad bounds for each glyph [x1, y1, x2, y2]
+          glyphAtlasIndices: glyphAtlasIndices, //atlas indices for each glyph
+          caretPositions: caretPositions, //x,y of bottom of cursor position before each char, plus one after last char
+          caretHeight: caretHeight, //height of cursor from bottom to top
+          totalBounds: totalBounds, //total rect including all glyphBounds; will be slightly larger than glyph edges due to SDF padding
+          totalBlockSize: [maxLineWidth, lines.length * lineHeight], //width and height of the text block; accurate for layout measurement
+          newGlyphSDFs: newGlyphs //if this request included any new SDFs for the atlas, they'll be included here
         });
       });
     }
@@ -1965,7 +1854,7 @@
           width: result.totalBlockSize[0],
           height: result.totalBlockSize[1]
         });
-      }, true);
+      }, {metricsOnly: true});
     }
 
     return {
@@ -5195,51 +5084,55 @@
           var fontScale = 1 / fontObj.unitsPerEm * fontSize;
 
           var glyphIndices = Typr.U.stringToGlyphs(typrFont, text);
+          var charIndex = 0;
           glyphIndices.forEach(function (glyphIndex) {
-            if (glyphIndex === -1) { return } //Typr leaves -1s in the array after ligature substitution
+            // Typr returns a glyph index per string codepoint, with -1s in place of those that
+            // were omitted due to ligature substitution. So we can track original index in the
+            // string via simple increment, and skip everything else when seeing a -1.
+            if (glyphIndex !== -1) {
+              var glyphObj = glyphMap[glyphIndex];
+              if (!glyphObj) {
+                // !!! NOTE: Typr doesn't expose a public accessor for the glyph data, so this just
+                // copies how it parses that data in Typr.U._drawGlyf -- this may be fragile.
+                var typrGlyph = Typr.glyf._parseGlyf(typrFont, glyphIndex) || {xMin: 0, xMax: 0, yMin: 0, yMax: 0};
+                var ref = Typr.U.glyphToPath(typrFont, glyphIndex);
+                var cmds = ref.cmds;
+                var crds = ref.crds;
 
-            var glyphObj = glyphMap[glyphIndex];
-            if (!glyphObj) {
-              // !!! NOTE: Typr doesn't expose a public accessor for the glyph data, so this just
-              // copies how it parses that data in Typr.U._drawGlyf -- this may be fragile.
-              var typrGlyph = Typr.glyf._parseGlyf(typrFont, glyphIndex) || {xMin: 0, xMax: 0, yMin: 0, yMax: 0};
-              var ref = Typr.U.glyphToPath(typrFont, glyphIndex);
-              var cmds = ref.cmds;
-              var crds = ref.crds;
-
-              glyphObj = glyphMap[glyphIndex] = {
-                index: glyphIndex,
-                unicode: getUnicodeForGlyph(typrFont, glyphIndex),
-                advanceWidth: typrFont.hmtx.aWidth[glyphIndex],
-                xMin: typrGlyph.xMin,
-                yMin: typrGlyph.yMin,
-                xMax: typrGlyph.xMax,
-                yMax: typrGlyph.yMax,
-                pathCommandCount: cmds.length,
-                forEachPathCommand: function forEachPathCommand(callback) {
-                  var argsIndex = 0;
-                  var argsArray = [];
-                  for (var i = 0, len = cmds.length; i < len; i++) {
-                    var numArgs = cmdArgLengths[cmds[i]];
-                    argsArray.length = 1 + numArgs;
-                    argsArray[0] = cmds[i];
-                    for (var j = 1; j <= numArgs; j++) {
-                      argsArray[j] = crds[argsIndex++];
+                glyphObj = glyphMap[glyphIndex] = {
+                  index: glyphIndex,
+                  advanceWidth: typrFont.hmtx.aWidth[glyphIndex],
+                  xMin: typrGlyph.xMin,
+                  yMin: typrGlyph.yMin,
+                  xMax: typrGlyph.xMax,
+                  yMax: typrGlyph.yMax,
+                  pathCommandCount: cmds.length,
+                  forEachPathCommand: function forEachPathCommand(callback) {
+                    var argsIndex = 0;
+                    var argsArray = [];
+                    for (var i = 0, len = cmds.length; i < len; i++) {
+                      var numArgs = cmdArgLengths[cmds[i]];
+                      argsArray.length = 1 + numArgs;
+                      argsArray[0] = cmds[i];
+                      for (var j = 1; j <= numArgs; j++) {
+                        argsArray[j] = crds[argsIndex++];
+                      }
+                      callback.apply(null, argsArray);
                     }
-                    callback.apply(null, argsArray);
                   }
-                }
-              };
-            }
+                };
+              }
 
-            callback.call(null, glyphObj, glyphX);
+              callback.call(null, glyphObj, glyphX, charIndex);
 
-            if (glyphObj.advanceWidth) {
-              glyphX += glyphObj.advanceWidth * fontScale;
+              if (glyphObj.advanceWidth) {
+                glyphX += glyphObj.advanceWidth * fontScale;
+              }
+              if (letterSpacing) {
+                glyphX += letterSpacing * fontSize;
+              }
             }
-            if (letterSpacing) {
-              glyphX += letterSpacing * fontSize;
-            }
+            charIndex += (text.codePointAt(charIndex) > 0xffff ? 2 : 1);
           });
           return glyphX
         }
@@ -5247,60 +5140,6 @@
 
       return fontObj
     }
-
-
-    function getUnicodeForGlyph(typrFont, glyphIndex) {
-      var glyphToUnicodeMap = typrFont.glyphToUnicodeMap;
-      if (!glyphToUnicodeMap) {
-        glyphToUnicodeMap = typrFont.glyphToUnicodeMap = Object.create(null);
-
-        // NOTE: this logic for traversing the cmap table formats follows that in Typr.U.codeToGlyph
-        var cmap = typrFont.cmap;
-
-        var tableIndex = -1;
-        if (cmap.p0e4 != null) { tableIndex = cmap.p0e4; }
-        else if (cmap.p3e1 != null) { tableIndex = cmap.p3e1; }
-        else if (cmap.p1e0 != null) { tableIndex = cmap.p1e0; }
-        else if (cmap.p0e3 != null) { tableIndex = cmap.p0e3; }
-        if (tableIndex === -1) {
-          throw "no familiar platform and encoding!"
-        }
-        var table = cmap.tables[tableIndex];
-
-        if (table.format === 0) {
-          for (var code = 0; code < table.map.length; code++) {
-            glyphToUnicodeMap[table.map[code]] = code;
-          }
-        }
-        else if (table.format === 4) {
-          var startCodes = table.startCount;
-          var endCodes = table.endCount;
-          for (var i = 0; i < startCodes.length; i++) {
-            for (var code$1 = startCodes[i]; code$1 <= endCodes[i]; code$1++) {
-              glyphToUnicodeMap[Typr.U.codeToGlyph(typrFont, code$1)] = code$1;
-            }
-          }
-        }
-        else if (table.format === 12)
-        {
-          table.groups.forEach(function (ref) {
-            var startCharCode = ref[0];
-            var endCharCode = ref[1];
-            var startGlyphID = ref[2];
-
-            var glyphId = startGlyphID;
-            for (var code = startCharCode; code <= endCharCode; code++) {
-              glyphToUnicodeMap[glyphId++] = code;
-            }
-          });
-        }
-        else {
-          throw "unknown cmap table format " + table.format
-        }
-      }
-      return glyphToUnicodeMap[glyphIndex] || 0
-    }
-
 
     return function parse(buffer) {
       // Look to see if we have a WOFF file and convert it if so:
@@ -5330,15 +5169,11 @@
 
   var CONFIG = {
     defaultFontURL: 'https://fonts.gstatic.com/s/roboto/v18/KFOmCnqEu92Fr1Mu4mxM.woff', //Roboto Regular
-    sdfGlyphSize: 64
+    sdfGlyphSize: 64,
+    textureWidth: 2048
   };
   var linkEl = document.createElement('a'); //for resolving relative URLs to absolute
 
-
-  /**
-   * How many glyphs the font's SDF texture should initially be created to hold.
-   */
-  var SDF_INITIAL_GLYPH_COUNT = 64;
 
   /**
    * The radial distance from glyph edges over which the SDF alpha will be calculated; if the alpha
@@ -5362,12 +5197,30 @@
    */
   var atlases = Object.create(null);
 
+  /**
+   * @typedef {object} TroikaTextRenderInfo - Format of the result from `getTextRenderInfo`.
+   * @property {DataTexture} sdfTexture
+   * @property {number} sdfGlyphSize
+   * @property {number} sdfMinDistancePercent
+   * @property {Float32Array} glyphBounds
+   * @property {Float32Array} glyphAtlasIndices
+   * @property {Float32Array} [caretPositions]
+   * @property {number} [caretHeight]
+   * @property {Array<number>} totalBounds
+   * @property {Array<number>} totalBlockSize
+   * @frozen
+   */
+
+  /**
+   * @callback getTextRenderInfo~callback
+   * @param {TroikaTextRenderInfo} textRenderInfo
+   */
 
   /**
    * Main entry point for requesting the data needed to render a text string with given font parameters.
    * This is an asynchronous call, performing most of the logic in a web worker thread.
-   * @param args
-   * @param callback
+   * @param {object} args
+   * @param {getTextRenderInfo~callback} callback
    */
   function getTextRenderInfo(args, callback) {
     args = assign$1({}, args);
@@ -5382,13 +5235,14 @@
 
     // Init the atlas for this font if needed
     var sdfGlyphSize = CONFIG.sdfGlyphSize;
+    var textureWidth = CONFIG.textureWidth;
     var atlas = atlases[args.font];
     if (!atlas) {
       atlas = atlases[args.font] = {
         sdfTexture: new three.DataTexture(
-          new Uint8Array(sdfGlyphSize * sdfGlyphSize * SDF_INITIAL_GLYPH_COUNT),
+          new Uint8Array(sdfGlyphSize * textureWidth),
+          textureWidth,
           sdfGlyphSize,
-          sdfGlyphSize * SDF_INITIAL_GLYPH_COUNT,
           three.LuminanceFormat,
           undefined,
           undefined,
@@ -5410,31 +5264,42 @@
           var atlasIndex = ref.atlasIndex;
 
           var texImg = atlas.sdfTexture.image;
-          var arrayOffset = atlasIndex * sdfGlyphSize * sdfGlyphSize;
 
           // Grow the texture by power of 2 if needed
-          while (arrayOffset > texImg.data.length - 1) {
+          while (texImg.data.length < (atlasIndex + 1) * sdfGlyphSize * sdfGlyphSize) {
             var biggerArray = new Uint8Array(texImg.data.length * 2);
             biggerArray.set(texImg.data);
             texImg.data = biggerArray;
             texImg.height *= 2;
           }
 
-          // Insert the new glyph's data at the proper index
-          texImg.data.set(textureData, arrayOffset);
+          // Insert the new glyph's data into the full texture image at the correct offsets
+          var cols = texImg.width / sdfGlyphSize;
+          for (var y = 0; y < sdfGlyphSize; y++) {
+            var srcStartIndex = y * sdfGlyphSize;
+            var tgtStartIndex = texImg.width * sdfGlyphSize * Math.floor(atlasIndex / cols) //full rows
+              + (atlasIndex % cols) * sdfGlyphSize //partial row
+              + (y * texImg.width); //row within glyph
+            for (var x = 0; x < sdfGlyphSize; x++) {
+              texImg.data[tgtStartIndex + x] = textureData[srcStartIndex + x];
+            }
+          }
         });
         atlas.sdfTexture.needsUpdate = true;
       }
 
       // Invoke callback with the text layout arrays and updated texture
-      callback({
+      callback(Object.freeze({
         sdfTexture: atlas.sdfTexture,
+        sdfGlyphSize: sdfGlyphSize,
         sdfMinDistancePercent: SDF_DISTANCE_PERCENT,
         glyphBounds: result.glyphBounds,
-        glyphIndices: result.glyphIndices,
+        glyphAtlasIndices: result.glyphAtlasIndices,
+        caretPositions: result.caretPositions,
+        caretHeight: result.caretHeight,
         totalBounds: result.totalBounds,
         totalBlockSize: result.totalBlockSize
-      });
+      }));
     });
   }
 
@@ -5479,7 +5344,13 @@
     },
     getTransferables: function getTransferables(result) {
       // Mark array buffers as transferable to avoid cloning during postMessage
-      var transferables = [result.glyphBounds.buffer, result.glyphIndices.buffer];
+      var transferables = [
+        result.glyphBounds.buffer,
+        result.glyphAtlasIndices.buffer
+      ];
+      if (result.caretPositions) {
+        transferables.push(result.caretPositions.buffer);
+      }
       if (result.newGlyphSDFs) {
         result.newGlyphSDFs.forEach(function (d) {
           transferables.push(d.textureData.buffer);
@@ -5488,6 +5359,31 @@
       return transferables
     }
   });
+
+  /*
+  window._dumpSDFs = function() {
+    Object.values(atlases).forEach(atlas => {
+      const imgData = atlas.sdfTexture.image.data
+      const canvas = document.createElement('canvas')
+      const {width, height} = atlas.sdfTexture.image
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, width, height)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          ctx.fillStyle = `rgba(0,0,0,${imgData[y * width + x]/255})`
+          ctx.fillRect(x, y, 1, 1)
+        }
+      }
+      const img = new Image()
+      img.src = canvas.toDataURL()
+      document.body.appendChild(img)
+      console.log(img)
+    })
+  }
+  */
 
   var templateGeometry = new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0);
   var tempVec3 = new three.Vector3();
@@ -5527,7 +5423,7 @@
   which we could potentially work around with a fallback non-instanced implementation.
 
   */
-  var GlyphsGeometry = (function (InstancedBufferGeometry) {
+  var GlyphsGeometry = /*@__PURE__*/(function (InstancedBufferGeometry) {
     function GlyphsGeometry() {
       InstancedBufferGeometry.call(this);
 
@@ -5550,15 +5446,15 @@
      * Update the geometry for a new set of glyphs.
      * @param {Float32Array} glyphBounds - An array holding the planar bounds for all glyphs
      *        to be rendered, 4 entries for each glyph: x1,x2,y1,y1
-     * @param {Float32Array} glyphIndices - An array holding the index of each glyph within
+     * @param {Float32Array} glyphAtlasIndices - An array holding the index of each glyph within
      *        the SDF atlas texture.
      * @param {Array} totalBounds - An array holding the [minX, minY, maxX, maxY] across all glyphs
      */
-    GlyphsGeometry.prototype.updateGlyphs = function updateGlyphs (glyphBounds, glyphIndices, totalBounds) {
+    GlyphsGeometry.prototype.updateGlyphs = function updateGlyphs (glyphBounds, glyphAtlasIndices, totalBounds) {
       // Update the instance attributes
       updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
-      updateBufferAttr(this, glyphIndexAttrName, glyphIndices, 1);
-      this.maxInstancedCount = glyphIndices.length;
+      updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
+      this.maxInstancedCount = glyphAtlasIndices.length;
 
       // Update the boundingSphere based on the total bounds
       var sphere = this.boundingSphere;
@@ -5594,13 +5490,13 @@
   }
 
   // language=GLSL
-  var VERTEX_DEFS = "\nuniform float uTroikaGlyphVSize;\nuniform vec4 uTroikaTotalBounds;\nattribute vec4 aTroikaGlyphBounds;\nattribute float aTroikaGlyphIndex;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n";
+  var VERTEX_DEFS = "\nuniform vec2 uTroikaSDFTextureSize;\nuniform float uTroikaSDFGlyphSize;\nuniform vec4 uTroikaTotalBounds;\nattribute vec4 aTroikaGlyphBounds;\nattribute float aTroikaGlyphIndex;\nvarying vec2 vTroikaSDFTextureUV;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n";
 
   // language=GLSL prefix="void main() {" suffix="}"
-  var VERTEX_TRANSFORM = "\nvTroikaGlyphUV = vec2(\n  position.x,\n  uTroikaGlyphVSize * (aTroikaGlyphIndex + position.y)\n);\n\nposition = vec3(\n  mix(aTroikaGlyphBounds.x, aTroikaGlyphBounds.z, position.x),\n  mix(aTroikaGlyphBounds.y, aTroikaGlyphBounds.w, position.y),\n  position.z\n);\nvTroikaLocalPos = vec3(position);\n\nuv = vec2(\n  (position.x - uTroikaTotalBounds.x) / (uTroikaTotalBounds.z - uTroikaTotalBounds.x),\n  (position.y - uTroikaTotalBounds.y) / (uTroikaTotalBounds.w - uTroikaTotalBounds.y)\n);\n";
+  var VERTEX_TRANSFORM = "\nvTroikaGlyphUV = vec2(position);\n\nvec2 colsAndRows = uTroikaSDFTextureSize / uTroikaSDFGlyphSize;\nvTroikaSDFTextureUV = vec2(\n  mod(aTroikaGlyphIndex, colsAndRows.x) + position.x,\n  floor(aTroikaGlyphIndex / colsAndRows.x) + position.y\n) * uTroikaSDFGlyphSize / uTroikaSDFTextureSize;\n\nposition = vec3(\n  mix(aTroikaGlyphBounds.x, aTroikaGlyphBounds.z, position.x),\n  mix(aTroikaGlyphBounds.y, aTroikaGlyphBounds.w, position.y),\n  position.z\n);\nvTroikaLocalPos = vec3(position);\n\nuv = vec2(\n  (position.x - uTroikaTotalBounds.x) / (uTroikaTotalBounds.z - uTroikaTotalBounds.x),\n  (position.y - uTroikaTotalBounds.y) / (uTroikaTotalBounds.w - uTroikaTotalBounds.y)\n);\n";
 
   // language=GLSL
-  var FRAGMENT_DEFS = "\nuniform sampler2D uTroikaSDFTexture;\nuniform float uTroikaSDFMinDistancePct;\nuniform bool uTroikaSDFDebug;\nuniform float uTroikaGlyphVSize;\nuniform vec4 uTroikaClipRect;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n\nfloat troikaGetClipAlpha() {\n  vec4 clip = uTroikaClipRect;\n  vec3 pos = vTroikaLocalPos;\n  float dClip = min(\n    min(pos.x - min(clip.x, clip.z), max(clip.x, clip.z) - pos.x),\n    min(pos.y - min(clip.y, clip.w), max(clip.y, clip.w) - pos.y)\n  );\n  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float aa = length(fwidth(pos)) * 0.5;\n  return smoothstep(-aa, aa, dClip);\n  #else\n  return step(0.0, dClip);\n  #endif\n}\n\nfloat troikaGetTextAlpha() {\n  float troikaSDFValue = texture2D(uTroikaSDFTexture, vTroikaGlyphUV).r;\n  \n  #if defined(IS_DEPTH_MATERIAL) || defined(IS_DISTANCE_MATERIAL)\n  float alpha = step(0.5, troikaSDFValue);\n  #else\n  " + ('') + "\n  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float aaDist = min(\n    0.5,\n    0.5 * min(\n      fwidth(vTroikaGlyphUV.x), \n      fwidth(vTroikaGlyphUV.y / uTroikaGlyphVSize)\n    )\n  ) / uTroikaSDFMinDistancePct;\n  #else\n  float aaDist = 0.01;\n  #endif\n  \n  float alpha = uTroikaSDFDebug ? troikaSDFValue : smoothstep(\n    0.5 - aaDist,\n    0.5 + aaDist,\n    troikaSDFValue\n  );\n  #endif\n  \n  return min(alpha, troikaGetClipAlpha());\n}\n";
+  var FRAGMENT_DEFS = "\nuniform sampler2D uTroikaSDFTexture;\nuniform float uTroikaSDFMinDistancePct;\nuniform bool uTroikaSDFDebug;\nuniform vec4 uTroikaClipRect;\nvarying vec2 vTroikaSDFTextureUV;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n\nfloat troikaGetClipAlpha() {\n  vec4 clip = uTroikaClipRect;\n  vec3 pos = vTroikaLocalPos;\n  float dClip = min(\n    min(pos.x - min(clip.x, clip.z), max(clip.x, clip.z) - pos.x),\n    min(pos.y - min(clip.y, clip.w), max(clip.y, clip.w) - pos.y)\n  );\n  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float aa = length(fwidth(pos)) * 0.5;\n  return smoothstep(-aa, aa, dClip);\n  #else\n  return step(0.0, dClip);\n  #endif\n}\n\nfloat troikaGetTextAlpha() {\n  float troikaSDFValue = texture2D(uTroikaSDFTexture, vTroikaSDFTextureUV).r;\n  \n  #if defined(IS_DEPTH_MATERIAL) || defined(IS_DISTANCE_MATERIAL)\n  float alpha = step(0.5, troikaSDFValue);\n  #else\n  " + ('') + "\n  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float aaDist = min(\n    0.5,\n    0.5 * min(\n      fwidth(vTroikaGlyphUV.x),\n      fwidth(vTroikaGlyphUV.y)\n    )\n  ) / uTroikaSDFMinDistancePct;\n  #else\n  float aaDist = 0.01;\n  #endif\n  \n  float alpha = uTroikaSDFDebug ? troikaSDFValue : smoothstep(\n    0.5 - aaDist,\n    0.5 + aaDist,\n    troikaSDFValue\n  );\n  #endif\n  \n  return min(alpha, troikaGetClipAlpha());\n}\n";
 
   // language=GLSL prefix="void main() {" suffix="}"
   var FRAGMENT_TRANSFORM = "\nfloat troikaAlphaMult = troikaGetTextAlpha();\nif (troikaAlphaMult == 0.0) {\n  discard;\n} else {\n  gl_FragColor.a *= troikaAlphaMult;\n}\n";
@@ -5614,8 +5510,9 @@
       extensions: {derivatives: true},
       uniforms: {
         uTroikaSDFTexture: {value: null},
+        uTroikaSDFTextureSize: {value: new three.Vector2()},
+        uTroikaSDFGlyphSize: {value: 0},
         uTroikaSDFMinDistancePct: {value: 0},
-        uTroikaGlyphVSize: {value: 0},
         uTroikaTotalBounds: {value: new three.Vector4()},
         uTroikaClipRect: {value: new three.Vector4()},
         uTroikaSDFDebug: {value: false}
@@ -5646,11 +5543,7 @@
     transparent: true
   });
 
-  var noclip = Object.freeze([-Infinity, -Infinity, Infinity, Infinity]);
-
   var tempMat4 = new three.Matrix4();
-  var tempPlane = new three.Plane();
-  var tempVec3$1 = new three.Vector3();
 
   var raycastMesh = new three.Mesh(
     new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0),
@@ -5665,7 +5558,7 @@
    * A ThreeJS Mesh that renders a string of text on a plane in 3D space using signed distance
    * fields (SDF).
    */
-  var TextMesh = (function (Mesh) {
+  var TextMesh = /*@__PURE__*/(function (Mesh) {
     function TextMesh(material) {
       var geometry = new GlyphsGeometry();
       Mesh.call(this, geometry, null);
@@ -5791,7 +5684,7 @@
     TextMesh.prototype = Object.create( Mesh && Mesh.prototype );
     TextMesh.prototype.constructor = TextMesh;
 
-    var prototypeAccessors = { material: { configurable: true },customDepthMaterial: { configurable: true },customDistanceMaterial: { configurable: true } };
+    var prototypeAccessors = { textRenderInfo: { configurable: true },material: { configurable: true },customDepthMaterial: { configurable: true },customDistanceMaterial: { configurable: true } };
 
     /**
      * Updates the text rendering according to the current text-related configuration properties.
@@ -5821,7 +5714,8 @@
             textAlign: this.textAlign,
             whiteSpace: this.whiteSpace,
             overflowWrap: this.overflowWrap,
-            anchor: this.anchor
+            anchor: this.anchor,
+            includeCaretPositions: true //TODO parameterize
           }, function (textRenderInfo) {
             this$1._isSyncing = false;
 
@@ -5829,7 +5723,7 @@
             this$1._textRenderInfo = textRenderInfo;
 
             // Update the geometry attributes
-            this$1.geometry.updateGlyphs(textRenderInfo.glyphBounds, textRenderInfo.glyphIndices, textRenderInfo.totalBounds);
+            this$1.geometry.updateGlyphs(textRenderInfo.glyphBounds, textRenderInfo.glyphAtlasIndices, textRenderInfo.totalBounds);
 
             // If we had extra sync requests queued up, kick it off
             var queued = this$1._queuedSyncs;
@@ -5871,6 +5765,16 @@
       this.geometry.dispose();
     };
 
+    /**
+     * @property {TroikaTextRenderInfo|null} textRenderInfo
+     * @readonly
+     * The current processed rendering data for this TextMesh, returned by the TextBuilder after
+     * a `sync()` call. This will be `null` initially, and may be stale for a short period until
+     * the asynchrous `sync()` process completes.
+     */
+    prototypeAccessors.textRenderInfo.get = function () {
+      return this._textRenderInfo || null
+    };
 
     // Handler for automatically wrapping the base material with our upgrades. We do the wrapping
     // lazily on _read_ rather than write to avoid unnecessary wrapping on transient values.
@@ -5920,14 +5824,15 @@
     };
 
     TextMesh.prototype._updateLayoutUniforms = function _updateLayoutUniforms (material) {
-      var textInfo = this._textRenderInfo;
+      var textInfo = this.textRenderInfo;
       var uniforms = material.uniforms;
       if (textInfo) {
         var sdfTexture = textInfo.sdfTexture;
         var totalBounds = textInfo.totalBounds;
         uniforms.uTroikaSDFTexture.value = sdfTexture;
+        uniforms.uTroikaSDFTextureSize.value.set(sdfTexture.image.width, sdfTexture.image.height);
+        uniforms.uTroikaSDFGlyphSize.value = textInfo.sdfGlyphSize;
         uniforms.uTroikaSDFMinDistancePct.value = textInfo.sdfMinDistancePercent;
-        uniforms.uTroikaGlyphVSize.value = sdfTexture.image.width / sdfTexture.image.height;
         uniforms.uTroikaTotalBounds.value.fromArray(totalBounds);
 
         var clipRect = this.clipRect;
@@ -5950,7 +5855,7 @@
      * TODO is there any reason to make this more granular, like within individual line or glyph rects?
      */
     TextMesh.prototype.raycast = function raycast (raycaster, intersects) {
-      var textInfo = this._textRenderInfo;
+      var textInfo = this.textRenderInfo;
       if (textInfo) {
         var bounds = textInfo.totalBounds;
         raycastMesh.matrixWorld.multiplyMatrices(
@@ -6069,6 +5974,7 @@
       mesh.anchor[0] = anchorMapping[data.anchor];
       mesh.anchor[1] = baselineMapping[data.baseline];
       mesh.color = data.color;
+      mesh.depthOffset = data.depthOffset || 0;
       mesh.font = data.font; //TODO allow aframe stock font names
       mesh.fontSize = data.fontSize;
       mesh.letterSpacing = data.letterSpacing || 0;
