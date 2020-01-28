@@ -15,9 +15,9 @@
     "aframe": "^1.0.3"
   },
   "devDependencies": {
-    "aframe": "^1.0.3",
-    "rollup": "^1.27.0",
-    "rollup-plugin-node-resolve": "^5.2.0",
-    "rollup-plugin-terser": "^5.1.2"
+    "aframe": "1.0.3",
+    "rollup": "1.29.0",
+    "rollup-plugin-node-resolve": "5.2.0",
+    "rollup-plugin-terser": "5.2.0"
   }
 }
