@@ -22,24 +22,24 @@
    * implementation I've found. And also, exercises like this are challenging and fun.)
    */
   function BespokeThenable() {
-    var state = 0; // 0=pending, 1=fulfilled, -1=rejected
-    var queue = [];
-    var value;
-    var scheduled = 0;
-    var completeCalled = 0;
+    let state = 0; // 0=pending, 1=fulfilled, -1=rejected
+    let queue = [];
+    let value;
+    let scheduled = 0;
+    let completeCalled = 0;
 
     function then(onResolve, onReject) {
-      var nextThenable = BespokeThenable();
+      const nextThenable = BespokeThenable();
 
       function handleNext() {
-        var cb = state > 0 ? onResolve : onReject;
+        const cb = state > 0 ? onResolve : onReject;
         if (isFn(cb)) {
           try {
-            var result = cb(value);
+            const result = cb(value);
             if (result === nextThenable) {
               recursiveError();
             }
-            var resultThen = getThenableThen(result);
+            const resultThen = getThenableThen(result);
             if (resultThen) {
               resultThen.call(result, nextThenable.resolve, nextThenable.reject);
             } else {
@@ -60,13 +60,13 @@
       return nextThenable
     }
 
-    var resolve = oneTime(function (val) {
+    const resolve = oneTime(val => {
       if (!completeCalled) {
         complete(1, val);
       }
     });
 
-    var reject = oneTime(function (reason) {
+    const reject = oneTime(reason => {
       if (!completeCalled) {
         complete(-1, reason);
       }
@@ -74,17 +74,17 @@
 
     function complete(st, val) {
       completeCalled++;
-      var ignoreThrow = 0;
+      let ignoreThrow = 0;
       try {
         if (val === thenableObj) {
           recursiveError();
         }
-        var valThen = st > 0 && getThenableThen(val);
+        const valThen = st > 0 && getThenableThen(val);
         if (valThen) {
-          valThen.call(val, oneTime(function (v) {
+          valThen.call(val, oneTime(v => {
             ignoreThrow++;
             complete(1, v);
-          }), oneTime(function (v) {
+          }), oneTime(v => {
             ignoreThrow++;
             complete(-1, v);
           }));
@@ -108,7 +108,7 @@
     }
 
     function flushQueue() {
-      var q = queue;
+      const q = queue;
       scheduled = 0;
       queue = [];
       q.forEach(callIt);
@@ -119,16 +119,13 @@
     }
 
     function getThenableThen(val) {
-      var valThen = val && (isFn(val) || typeof val === 'object') && val.then;
+      const valThen = val && (isFn(val) || typeof val === 'object') && val.then;
       return isFn(valThen) && valThen
     }
 
     function oneTime(fn) {
-      var called = 0;
-      return function() {
-        var args = [], len = arguments.length;
-        while ( len-- ) args[ len ] = arguments[ len ];
-
+      let called = 0;
+      return function(...args) {
         if (!called++) {
           fn.apply(this, args);
         }
@@ -139,12 +136,12 @@
       throw new TypeError('Chaining cycle detected')
     }
 
-    var isFn = function (v) { return typeof v === 'function'; };
+    const isFn = v => typeof v === 'function';
 
-    var thenableObj = {
-      then: then,
-      resolve: resolve,
-      reject: reject
+    const thenableObj = {
+      then,
+      resolve,
+      reject
     };
     return thenableObj
   }
@@ -156,15 +153,15 @@
    * @constructor
    */
   function NativePromiseThenable() {
-    var resolve, reject;
-    var promise = new Promise(function (res, rej) {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
       resolve = res;
       reject = rej;
     });
     return {
       then: promise.then.bind(promise),
-      resolve: resolve,
-      reject: reject
+      resolve,
+      reject
     }
   }
 
@@ -176,10 +173,10 @@
     typeof Promise === 'function' ? NativePromiseThenable : BespokeThenable
   );
 
-  var _workerModuleId = 0;
-  var _messageId = 0;
-  var workers = Object.create(null);
-  var openRequests = Object.create(null);
+  let _workerModuleId = 0;
+  let _messageId = 0;
+  const workers = Object.create(null);
+  const openRequests = Object.create(null);
   openRequests._count = 0;
 
 
@@ -217,22 +214,19 @@
     if (!options || typeof options.init !== 'function') {
       throw new Error('requires `options.init` function')
     }
-    var dependencies = options.dependencies;
-    var init = options.init;
-    var getTransferables = options.getTransferables;
-    var workerId = options.workerId;
+    let {dependencies, init, getTransferables, workerId} = options;
     if (workerId == null) {
       workerId = '#default';
     }
-    var id = "workerModule" + (++_workerModuleId);
-    var registrationThenable = null;
+    const id = `workerModule${++_workerModuleId}`;
+    let registrationThenable = null;
 
-    dependencies = dependencies && dependencies.map(function (dep) {
+    dependencies = dependencies && dependencies.map(dep => {
       // Wrap raw functions as worker modules with no dependencies
       if (typeof dep === 'function' && !dep.workerModuleData) {
         dep = defineWorkerModule({
-          workerId: workerId,
-          init: new Function(("return function(){return (" + (stringifyFunction(dep)) + ")}"))()
+          workerId,
+          init: new Function(`return function(){return (${stringifyFunction(dep)})}`)()
         });
       }
       // Grab postable data for worker modules
@@ -242,21 +236,16 @@
       return dep
     });
 
-    function moduleFunc() {
-      var args = [], len = arguments.length;
-      while ( len-- ) args[ len ] = arguments[ len ];
-
+    function moduleFunc(...args) {
       // Register this module if needed
       if (!registrationThenable) {
         registrationThenable = callWorker(workerId,'registerModule', moduleFunc.workerModuleData);
       }
 
       // Invoke the module, returning a thenable
-      return registrationThenable.then(function (ref) {
-        var isCallable = ref.isCallable;
-
+      return registrationThenable.then(({isCallable}) => {
         if (isCallable) {
-          return callWorker(workerId,'callModule', {id: id, args: args})
+          return callWorker(workerId,'callModule', {id, args})
         } else {
           throw new Error('Worker module function was called but `init` did not return a callable function')
         }
@@ -264,8 +253,8 @@
     }
     moduleFunc.workerModuleData = {
       isWorkerModule: true,
-      id: id,
-      dependencies: dependencies,
+      id,
+      dependencies,
       init: stringifyFunction(init),
       getTransferables: getTransferables && stringifyFunction(getTransferables)
     };
@@ -277,7 +266,7 @@
    * @param fn
    */
   function stringifyFunction(fn) {
-    var str = fn.toString();
+    let str = fn.toString();
     // If it was defined in object method/property format, it needs to be modified
     if (!/^function/.test(str) && /^\w+\s*\(/.test(str)) {
       str = 'function ' + str;
@@ -287,28 +276,23 @@
 
 
   function getWorker(workerId) {
-    var worker = workers[workerId];
+    let worker = workers[workerId];
     if (!worker) {
       // Bootstrap the worker's content
-      var bootstrap = (function() {
-        var modules = Object.create(null);
+      const bootstrap = (function() {
+        const modules = Object.create(null);
 
         // Handle messages for registering a module
-        function registerModule(ref, callback) {
-          var id = ref.id;
-          var dependencies = ref.dependencies; if ( dependencies === void 0 ) dependencies = [];
-          var init = ref.init; if ( init === void 0 ) init = function(){};
-          var getTransferables = ref.getTransferables; if ( getTransferables === void 0 ) getTransferables = null;
-
+        function registerModule({id, dependencies=[], init=function(){}, getTransferables=null}, callback) {
           // Only register once
-          if (modules[id]) { return }
+          if (modules[id]) return
 
           try {
             // If any dependencies are modules, ensure they're registered and grab their value
-            dependencies = dependencies.map(function (dep) {
+            dependencies = dependencies.map(dep => {
               if (dep && dep.isWorkerModule) {
-                registerModule(dep, function (depResult) {
-                  if (depResult instanceof Error) { throw depResult }
+                registerModule(dep, depResult => {
+                  if (depResult instanceof Error) throw depResult
                 });
                 dep = modules[dep.id].value;
               }
@@ -316,17 +300,17 @@
             });
 
             // Rehydrate functions
-            init = new Function(("return (" + init + ")"))();
+            init = new Function(`return (${init})`)();
             if (getTransferables) {
-              getTransferables = new Function(("return (" + getTransferables + ")"))();
+              getTransferables = new Function(`return (${getTransferables})`)();
             }
 
             // Initialize the module and store its value
-            var value = init.apply(void 0, dependencies);
+            const value = init(...dependencies);
             modules[id] = {
-              id: id,
-              value: value,
-              getTransferables: getTransferables
+              id,
+              value,
+              getTransferables
             };
             callback(value);
           } catch(err) {
@@ -338,18 +322,14 @@
         }
 
         // Handle messages for calling a registered module's result function
-        function callModule(ref, callback) {
-          var ref$1;
-
-          var id = ref.id;
-          var args = ref.args;
+        function callModule({id, args}, callback) {
           if (!modules[id] || typeof modules[id].value !== 'function') {
-            callback(new Error(("Worker module " + id + ": not found or its 'init' did not return a function")));
+            callback(new Error(`Worker module ${id}: not found or its 'init' did not return a function`));
           }
           try {
-            var result = (ref$1 = modules[id]).value.apply(ref$1, args);
+            const result = modules[id].value(...args);
             if (result && typeof result.then === 'function') {
-              result.then(handleResult, function (rej) { return callback(rej instanceof Error ? rej : new Error('' + rej)); });
+              result.then(handleResult, rej => callback(rej instanceof Error ? rej : new Error('' + rej)));
             } else {
               handleResult(result);
             }
@@ -358,7 +338,7 @@
           }
           function handleResult(result) {
             try {
-              var tx = modules[id].getTransferables && modules[id].getTransferables(result);
+              let tx = modules[id].getTransferables && modules[id].getTransferables(result);
               if (!tx || !Array.isArray(tx) || !tx.length) {
                 tx = undefined; //postMessage is very picky about not passing null or empty transferables
               }
@@ -371,24 +351,21 @@
         }
 
         // Handler for all messages within the worker
-        self.addEventListener('message', function (e) {
-          var ref = e.data;
-          var messageId = ref.messageId;
-          var action = ref.action;
-          var data = ref.data;
+        self.addEventListener('message', e => {
+          const {messageId, action, data} = e.data;
           try {
             // Module registration
             if (action === 'registerModule') {
-              registerModule(data, function (result) {
+              registerModule(data, result => {
                 if (result instanceof Error) {
                   postMessage({
-                    messageId: messageId,
+                    messageId,
                     success: false,
                     error: result.message
                   });
                 } else {
                   postMessage({
-                    messageId: messageId,
+                    messageId,
                     success: true,
                     result: {isCallable: typeof result === 'function'}
                   });
@@ -397,25 +374,25 @@
             }
             // Invocation
             if (action === 'callModule') {
-              callModule(data, function (result, transferables) {
+              callModule(data, (result, transferables) => {
                 if (result instanceof Error) {
                   postMessage({
-                    messageId: messageId,
+                    messageId,
                     success: false,
                     error: result.message
                   });
                 } else {
                   postMessage({
-                    messageId: messageId,
+                    messageId,
                     success: true,
-                    result: result
+                    result
                   }, transferables || undefined);
                 }
               });
             }
           } catch(err) {
             postMessage({
-              messageId: messageId,
+              messageId,
               success: false,
               error: err.stack
             });
@@ -426,15 +403,15 @@
       // Create the worker from the bootstrap function content
       worker = workers[workerId] = new Worker(
         URL.createObjectURL(
-          new Blob([(";(" + bootstrap + ")()")], {type: 'application/javascript'})
+          new Blob([`;(${bootstrap})()`], {type: 'application/javascript'})
         )
       );
 
       // Single handler for response messages from the worker
-      worker.onmessage = function (e) {
-        var response = e.data;
-        var msgId = response.messageId;
-        var callback = openRequests[msgId];
+      worker.onmessage = e => {
+        const response = e.data;
+        const msgId = response.messageId;
+        const callback = openRequests[msgId];
         if (!callback) {
           throw new Error('WorkerModule response with empty or unknown messageId')
         }
@@ -448,13 +425,13 @@
 
   // Issue a call to the worker with a callback to handle the response
   function callWorker(workerId, action, data) {
-    var thenable = Thenable();
-    var messageId = ++_messageId;
-    openRequests[messageId] = function (response) {
+    const thenable = Thenable();
+    const messageId = ++_messageId;
+    openRequests[messageId] = response => {
       if (response.success) {
         thenable.resolve(response.result);
       } else {
-        thenable.reject(new Error(("Error in worker " + action + " call: " + (response.error))));
+        thenable.reject(new Error(`Error in worker ${action} call: ${response.error}`));
       }
     };
     openRequests._count++;
@@ -462,9 +439,9 @@
       console.warn('Large number of open WorkerModule requests, some may not be returning');
     }
     getWorker(workerId).postMessage({
-      messageId: messageId,
-      action: action,
-      data: data
+      messageId,
+      action,
+      data
     });
     return thenable
   }
@@ -485,7 +462,7 @@
    * Regular expression for matching the `void main() {` opener line in GLSL.
    * @type {RegExp}
    */
-  var voidMainRegExp = /\bvoid\s+main\s*\(\s*\)\s*{/g;
+  const voidMainRegExp = /\bvoid\s+main\s*\(\s*\)\s*{/g;
 
   /**
    * Recursively expands all `#include <xyz>` statements within string of shader code.
@@ -495,23 +472,21 @@
    * @return {string} The GLSL code with all includes expanded
    */
   function expandShaderIncludes( source ) {
-    var pattern = /^[ \t]*#include +<([\w\d./]+)>/gm;
+    const pattern = /^[ \t]*#include +<([\w\d./]+)>/gm;
     function replace(match, include) {
-      var chunk = three.ShaderChunk[include];
+      let chunk = three.ShaderChunk[include];
       return chunk ? expandShaderIncludes(chunk) : match
     }
     return source.replace( pattern, replace )
   }
 
   // Local assign polyfill to avoid importing troika-core
-  var assign = Object.assign || function(/*target, ...sources*/) {
-    var arguments$1 = arguments;
-
-    var target = arguments[0];
-    for (var i = 1, len = arguments.length; i < len; i++) {
-      var source = arguments$1[i];
+  const assign = Object.assign || function(/*target, ...sources*/) {
+    let target = arguments[0];
+    for (let i = 1, len = arguments.length; i < len; i++) {
+      let source = arguments[i];
       if (source) {
-        for (var prop in source) {
+        for (let prop in source) {
           if (source.hasOwnProperty(prop)) {
             target[prop] = source[prop];
           }
@@ -522,9 +497,9 @@
   };
 
 
-  var idCtr = 0;
-  var epoch = Date.now();
-  var CACHE = new WeakMap(); //threejs requires WeakMap internally so should be safe to assume support
+  let idCtr = 0;
+  const epoch = Date.now();
+  const CACHE = new WeakMap(); //threejs requires WeakMap internally so should be safe to assume support
 
 
   /**
@@ -574,8 +549,8 @@
     // First check the cache to see if we've already derived from this baseMaterial using
     // this unique set of options, and if so just return a clone instead of a new subclass
     // which is faster and allows their shader program to be shared when rendering.
-    var optionsHash = getOptionsHash(options);
-    var cached = CACHE.get(baseMaterial);
+    const optionsHash = getOptionsHash(options);
+    let cached = CACHE.get(baseMaterial);
     if (!cached) {
       cached = Object.create(null);
       CACHE.set(baseMaterial, cached);
@@ -584,10 +559,10 @@
       return cached[optionsHash].clone()
     }
 
-    var id = ++idCtr;
-    var privateDerivedShadersProp = "_derivedShaders" + id;
-    var privateBeforeCompileProp = "_onBeforeCompile" + id;
-    var distanceMaterialTpl, depthMaterialTpl;
+    const id = ++idCtr;
+    const privateDerivedShadersProp = `_derivedShaders${id}`;
+    const privateBeforeCompileProp = `_onBeforeCompile${id}`;
+    let distanceMaterialTpl, depthMaterialTpl;
 
     // Private onBeforeCompile handler that injects the modified shaders and uniforms when
     // the renderer switches to this material's program
@@ -595,11 +570,9 @@
       baseMaterial.onBeforeCompile.call(this, shaderInfo);
 
       // Upgrade the shaders, caching the result
-      var ref = this[privateDerivedShadersProp] || (this[privateDerivedShadersProp] = {vertex: {}, fragment: {}});
-      var vertex = ref.vertex;
-      var fragment = ref.fragment;
+      const {vertex, fragment} = this[privateDerivedShadersProp] || (this[privateDerivedShadersProp] = {vertex: {}, fragment: {}});
       if (vertex.source !== shaderInfo.vertexShader || fragment.source !== shaderInfo.fragmentShader) {
-        var upgraded = upgradeShaders(shaderInfo, options, id);
+        const upgraded = upgradeShaders(shaderInfo, options, id);
         vertex.source = shaderInfo.vertexShader;
         vertex.result = upgraded.vertexShader;
         fragment.source = shaderInfo.fragmentShader;
@@ -634,10 +607,10 @@
       baseMaterial: {value: baseMaterial},
 
       onBeforeCompile: {
-        get: function get() {
+        get() {
           return onBeforeCompile
         },
-        set: function set(fn) {
+        set(fn) {
           this[privateBeforeCompileProp] = fn;
         }
       },
@@ -659,7 +632,7 @@
        * transformations and discarded fragments.
        */
       getDepthMaterial: {value: function() {
-        var depthMaterial = this._depthMaterial;
+        let depthMaterial = this._depthMaterial;
         if (!depthMaterial) {
           if (!depthMaterialTpl) {
             depthMaterialTpl = createDerivedMaterial(
@@ -680,7 +653,7 @@
        * transformations and discarded fragments.
        */
       getDistanceMaterial: {value: function() {
-        var distanceMaterial = this._distanceMaterial;
+        let distanceMaterial = this._distanceMaterial;
         if (!distanceMaterial) {
           if (!distanceMaterialTpl) {
             distanceMaterialTpl = createDerivedMaterial(
@@ -696,17 +669,15 @@
         return distanceMaterial
       }},
 
-      dispose: {value: function value() {
-        var ref = this;
-        var _depthMaterial = ref._depthMaterial;
-        var _distanceMaterial = ref._distanceMaterial;
-        if (_depthMaterial) { _depthMaterial.dispose(); }
-        if (_distanceMaterial) { _distanceMaterial.dispose(); }
+      dispose: {value() {
+        const {_depthMaterial, _distanceMaterial} = this;
+        if (_depthMaterial) _depthMaterial.dispose();
+        if (_distanceMaterial) _distanceMaterial.dispose();
         baseMaterial.dispose.call(this);
       }}
     });
 
-    var material = new DerivedMaterial();
+    const material = new DerivedMaterial();
     material.copy(baseMaterial);
 
     // Merge uniforms, defines, and extensions
@@ -720,21 +691,20 @@
   }
 
 
-  function upgradeShaders(ref, options, id) {
-    var vertexShader = ref.vertexShader;
-    var fragmentShader = ref.fragmentShader;
-
-    var vertexDefs = options.vertexDefs;
-    var vertexMainIntro = options.vertexMainIntro;
-    var vertexTransform = options.vertexTransform;
-    var fragmentDefs = options.fragmentDefs;
-    var fragmentMainIntro = options.fragmentMainIntro;
-    var fragmentColorTransform = options.fragmentColorTransform;
-    var timeUniform = options.timeUniform;
+  function upgradeShaders({vertexShader, fragmentShader}, options, id) {
+    let {
+      vertexDefs,
+      vertexMainIntro,
+      vertexTransform,
+      fragmentDefs,
+      fragmentMainIntro,
+      fragmentColorTransform,
+      timeUniform
+    } = options;
 
     // Inject auto-updating time uniform if requested
     if (timeUniform) {
-      var code = "\nuniform float " + timeUniform + ";\n";
+      const code = `\nuniform float ${timeUniform};\n`;
       vertexDefs = (vertexDefs || '') + code;
       fragmentDefs = (fragmentDefs || '') + code;
     }
@@ -747,28 +717,46 @@
       // - inject the transform code into a function and call it to transform the position
       if (vertexTransform) {
         vertexShader = expandShaderIncludes(vertexShader);
-        vertexDefs = (vertexDefs || '') + "\nvoid troikaVertexTransform" + id + "(inout vec3 position, inout vec3 normal, inout vec2 uv) {\n  " + vertexTransform + "\n}\n";
-        vertexShader = vertexShader.replace(/\b(position|normal|uv)\b/g, function (match, match1, index, fullStr) {
-          return /\battribute\s+vec[23]\s+$/.test(fullStr.substr(0, index)) ? match1 : ("troika_" + match1 + "_" + id)
+        vertexDefs = `${vertexDefs || ''}
+void troikaVertexTransform${id}(inout vec3 position, inout vec3 normal, inout vec2 uv) {
+  ${vertexTransform}
+}
+`;
+        vertexShader = vertexShader.replace(/\b(position|normal|uv)\b/g, (match, match1, index, fullStr) => {
+          return /\battribute\s+vec[23]\s+$/.test(fullStr.substr(0, index)) ? match1 : `troika_${match1}_${id}`
         });
-        vertexMainIntro = "\nvec3 troika_position_" + id + " = vec3(position);\nvec3 troika_normal_" + id + " = vec3(normal);\nvec2 troika_uv_" + id + " = vec2(uv);\ntroikaVertexTransform" + id + "(troika_position_" + id + ", troika_normal_" + id + ", troika_uv_" + id + ");\n" + (vertexMainIntro || '') + "\n";
+        vertexMainIntro = `
+vec3 troika_position_${id} = vec3(position);
+vec3 troika_normal_${id} = vec3(normal);
+vec2 troika_uv_${id} = vec2(uv);
+troikaVertexTransform${id}(troika_position_${id}, troika_normal_${id}, troika_uv_${id});
+${vertexMainIntro || ''}
+`;
       }
 
       vertexShader = vertexShader.replace(
         voidMainRegExp,
-        ((vertexDefs || '') + "\n\n$&\n\n" + (vertexMainIntro || '')));
+        `${vertexDefs || ''}\n\n$&\n\n${vertexMainIntro || ''}`);
     }
 
     // Modify fragment shader
     if (fragmentDefs || fragmentMainIntro || fragmentColorTransform) {
       fragmentShader = expandShaderIncludes(fragmentShader);
-      fragmentShader = fragmentShader.replace(voidMainRegExp, ("\n" + (fragmentDefs || '') + "\nvoid troikaOrigMain" + id + "() {\n" + (fragmentMainIntro || '') + "\n"));
-      fragmentShader += "\nvoid main() {\n  troikaOrigMain" + id + "();\n  " + (fragmentColorTransform || '') + "\n}";
+      fragmentShader = fragmentShader.replace(voidMainRegExp, `
+${fragmentDefs || ''}
+void troikaOrigMain${id}() {
+${fragmentMainIntro || ''}
+`);
+      fragmentShader += `
+void main() {
+  troikaOrigMain${id}();
+  ${fragmentColorTransform || ''}
+}`;
     }
 
     return {
-      vertexShader: vertexShader,
-      fragmentShader: fragmentShader
+      vertexShader,
+      fragmentShader
     }
   }
 
@@ -780,259 +768,7 @@
     return key === 'uniforms' ? undefined : value
   }
 
-  /**
-   * @class ShaderFloatArray
-   *
-   * When writing a custom WebGL shader, sometimes you need to pass it an array of floating
-   * point numbers that it can read from. Unfortunately this is very difficult to do in WebGL,
-   * because:
-   *
-   *   - GLSL "array" uniforms can only be of a constant length.
-   *   - Textures can only hold floating point numbers in WebGL1 if the `OES_texture_float`
-   *     extension is available.
-   *
-   * ShaderFloatArray is an array-like abstraction that encodes its floating point data into
-   * an RGBA texture's four Uint8 components, and provides the corresponding ThreeJS uniforms
-   * and GLSL code for you to put in your custom shader to query the float values by array index.
-   *
-   * This should generally only be used within a fragment shader, as some environments (e.g. iOS)
-   * only allow texture lookups in fragment shaders.
-   *
-   * TODO:
-   *   - Use a float texture if the extension is available so we can skip the encoding process
-   */
-  var ShaderFloatArray = function ShaderFloatArray(name) {
-    this.name = name;
-    this.textureUniform = "dataTex_" + name;
-    this.textureSizeUniform = "dataTexSize_" + name;
-    this.multiplierUniform = "dataMultiplier_" + name;
-
-    /**
-     * @property dataSizeUniform - the name of the GLSL uniform that will hold the
-     * length of the data array.
-     * @type {string}
-     */
-    this.dataSizeUniform = "dataSize_" + name;
-
-    /**
-     * @property readFunction - the name of the GLSL function that should be called to
-     * read data out of the array by index.
-     * @type {string}
-     */
-    this.readFunction = "readData_" + name;
-
-    this._raw = new Float32Array(0);
-    this._texture = new three.DataTexture(new Uint8Array(0), 0, 1);
-    this._length = 0;
-    this._multiplier = 1;
-  };
-
-  var prototypeAccessors = { length: { configurable: true } };
-
-  /**
-   * @property length - the current length of the data array
-   * @type {number}
-   */
-  prototypeAccessors.length.set = function (value) {
-    if (value !== this._length) {
-      // Find nearest power-of-2 that holds the new length
-      var size = Math.pow(2, Math.ceil(Math.log2(value)));
-      var raw = this._raw;
-      if (size < raw.length) {
-        this._raw = raw.subarray(0, size);
-      }
-      else if(size > raw.length) {
-        this._raw = new Float32Array(size);
-        this._raw.set(raw);
-      }
-      this._length = value;
-    }
-  };
-  prototypeAccessors.length.get = function () {
-    return this._length
-  };
-
-  /**
-   * Add a value to the end of the data array
-   * @param {number} value
-   */
-  ShaderFloatArray.prototype.push = function push (value) {
-    return this.set(this.length++, value)
-  };
-
-  /**
-   * Replace the existing data with that from a new array
-   * @param {ArrayLike<number>} array
-   */
-  ShaderFloatArray.prototype.setArray = function setArray (array) {
-    this.length = array.length;
-    this._raw.set(array);
-    this._needsRepack = true;
-  };
-
-  /**
-   * Get the current value at index
-   * @param {number} index
-   * @return {number}
-   */
-  ShaderFloatArray.prototype.get = function get (index) {
-    return this._raw[index]
-  };
-
-  ShaderFloatArray.prototype.set = function set (index, value) {
-    if (index + 1 > this._length) {
-      this.length = index + 1;
-    }
-    if (value !== this._raw[index]) {
-      this._raw[index] = value;
-      encodeFloatToFourInts(
-        value / this._multiplier,
-        this._texture.image.data,
-        index * 4
-      );
-      this._needsMultCheck = true;
-    }
-  };
-
-  /**
-   * Make a copy of this ShaderFloatArray
-   * @return {ShaderFloatArray}
-   */
-  ShaderFloatArray.prototype.clone = function clone () {
-    var clone = new ShaderFloatArray(this.name);
-    clone.setArray(this._raw);
-    return clone
-  };
-
-  /**
-   * Retrieve the set of Uniforms that must to be added to the target ShaderMaterial or
-   * DerivedMaterial, to feed the GLSL code generated by {@link #getShaderHeaderCode}.
-   * @return {Object}
-   */
-  ShaderFloatArray.prototype.getShaderUniforms = function getShaderUniforms () {
-      var obj;
-
-    var me = this;
-    return ( obj = {}, obj[this.textureUniform] = {get value() {
-        me._sync();
-        return me._texture
-      }}, obj[this.textureSizeUniform] = {get value() {
-        me._sync();
-        return me._texture.image.width
-      }}, obj[this.dataSizeUniform] = {get value() {
-        me._sync();
-        return me.length
-      }}, obj[this.multiplierUniform] = {get value() {
-        me._sync();
-        return me._multiplier
-      }}, obj )
-  };
-
-  /**
-   * Retrieve the GLSL code that must be injected into the shader's definitions area to
-   * enable reading from the data array. This exposes a function with a name matching
-   * the {@link #readFunction} property, which other shader code can call to read values
-   * from the array by their index.
-   * @return {string}
-   */
-  ShaderFloatArray.prototype.getShaderHeaderCode = function getShaderHeaderCode () {
-    var ref = this;
-      var textureUniform = ref.textureUniform;
-      var textureSizeUniform = ref.textureSizeUniform;
-      var dataSizeUniform = ref.dataSizeUniform;
-      var multiplierUniform = ref.multiplierUniform;
-      var readFunction = ref.readFunction;
-    return ("\nuniform sampler2D " + textureUniform + ";\nuniform float " + textureSizeUniform + ";\nuniform float " + dataSizeUniform + ";\nuniform float " + multiplierUniform + ";\n\nfloat " + readFunction + "(float index) {\n  vec2 texUV = vec2((index + 0.5) / " + textureSizeUniform + ", 0.5);\n  vec4 pixel = texture2D(" + textureUniform + ", texUV);\n  return dot(pixel, 1.0 / vec4(1.0, 255.0, 65025.0, 16581375.0)) * " + multiplierUniform + ";\n}\n")
-  };
-
-  /**
-   * @private Synchronize any pending changes to the underlying DataTexture
-   */
-  ShaderFloatArray.prototype._sync = function _sync () {
-    var tex = this._texture;
-    var raw = this._raw;
-    var needsRepack = this._needsRepack;
-
-    // If the size of the raw array changed, resize the texture to match
-    if (raw.length !== tex.image.width) {
-      tex.image = {
-        data: new Uint8Array(raw.length * 4),
-        width: raw.length,
-        height: 1
-      };
-      needsRepack = true;
-    }
-
-    // If the values changed, check the multiplier. This should be a value by which
-    // all the values are divided to constrain them to the [0,1] range required by
-    // the Uint8 packing algorithm. We pick the nearest power of 2 that holds the
-    // maximum value for greatest accuracy.
-    if (needsRepack || this._needsMultCheck) {
-      var maxVal = this._raw.reduce(function (a, b) { return Math.max(a, b); }, 0);
-      var mult = Math.pow(2, Math.ceil(Math.log2(maxVal)));
-      if (mult !== this._multiplier) {
-        this._multiplier = mult;
-        needsRepack = true;
-      }
-      tex.needsUpdate = true;
-      this._needsMultCheck = false;
-    }
-
-    // If things changed in a way we need to repack, do so
-    if (needsRepack) {
-      for (var i = 0, len = raw.length, mult$1 = this._multiplier; i < len; i++) {
-        encodeFloatToFourInts(raw[i] / mult$1, tex.image.data, i * 4);
-      }
-      this._needsRepack = false;
-    }
-  };
-
-  Object.defineProperties( ShaderFloatArray.prototype, prototypeAccessors );
-
-
-
-  /**
-   * Encode a floating point number into a set of four 8-bit integers.
-   * Also see the companion decoder function #decodeFloatFromFourInts.
-   *
-   * This is adapted to JavaScript from the basic approach at
-   * http://aras-p.info/blog/2009/07/30/encoding-floats-to-rgba-the-final/
-   * but writes out integers in the range 0-255 instead of floats in the range 0-1
-   * so they can be more easily used in a Uint8Array for standard WebGL rgba textures.
-   *
-   * Some precision will necessarily be lost during the encoding and decoding process.
-   * Testing shows that the maximum precision error is ~1.18e-10 which should be good
-   * enough for most cases.
-   *
-   * @param {Number} value - the floating point number to encode. Must be in the range [0, 1]
-   *        otherwise the results will be incorrect.
-   * @param {Array|Uint8Array} array - an array into which the four ints should be written
-   * @param {Number} startIndex - index in the output array at which to start writing the ints
-   * @return {Array|Uint8Array}
-   */
-  function encodeFloatToFourInts(value, array, startIndex) {
-    // This is adapted to JS from the basic approach at
-    // http://aras-p.info/blog/2009/07/30/encoding-floats-to-rgba-the-final/
-    // but writes to a Uint8Array instead of floats. Input values must be in
-    // the range [0, 1]. The maximum error after encoding and decoding is ~1.18e-10
-    var enc0 = 255 * value;
-    var enc1 = 255 * (enc0 % 1);
-    var enc2 = 255 * (enc1 % 1);
-    var enc3 = 255 * (enc2 % 1);
-
-    enc0 = enc0 & 255;
-    enc1 = enc1 & 255;
-    enc2 = enc2 & 255;
-    enc3 = Math.round(enc3) & 255;
-
-    array[startIndex] = enc0;
-    array[startIndex + 1] = enc1;
-    array[startIndex + 2] = enc2;
-    array[startIndex + 3] = enc3;
-    return array
-  }
-
-  var defaultBaseMaterial = new three.MeshStandardMaterial({color: 0xffffff, side: three.DoubleSide});
+  const defaultBaseMaterial = new three.MeshStandardMaterial({color: 0xffffff, side: three.DoubleSide});
 
   /**
    * Initializes and returns a function to generate an SDF texture for a given glyph.
@@ -1043,21 +779,23 @@
    * @return {function(Object): {renderingBounds: [minX, minY, maxX, maxY], textureData: Uint8Array}}
    */
   function createSDFGenerator(config) {
-    var sdfTextureSize = config.sdfTextureSize;
-    var sdfDistancePercent = config.sdfDistancePercent;
+    const {
+      sdfTextureSize,
+      sdfDistancePercent
+    } = config;
 
     /**
      * How many straight line segments to use when approximating a glyph's quadratic/cubic bezier curves.
      */
-    var CURVE_POINTS = 16;
+    const CURVE_POINTS = 16;
 
-    var INF = Infinity;
+    const INF = Infinity;
 
     /**
      * Find the point on a quadratic bezier curve at t where t is in the range [0, 1]
      */
     function pointOnQuadraticBezier(x0, y0, x1, y1, x2, y2, t) {
-      var t2 = 1 - t;
+      const t2 = 1 - t;
       return {
         x: t2 * t2 * x0 + 2 * t2 * t * x1 + t * t * x2,
         y: t2 * t2 * y0 + 2 * t2 * t * y1 + t * t * y2
@@ -1068,7 +806,7 @@
      * Find the point on a cubic bezier curve at t where t is in the range [0, 1]
      */
     function pointOnCubicBezier(x0, y0, x1, y1, x2, y2, x3, y3, t) {
-      var t2 = 1 - t;
+      const t2 = 1 - t;
       return {
         x: t2 * t2 * t2 * x0 + 3 * t2 * t2 * t * x1 + 3 * t2 * t * t * x2 + t * t * t * x3,
         y: t2 * t2 * t2 * y0 + 3 * t2 * t2 * t * y1 + 3 * t2 * t * t * y2 + t * t * t * y3
@@ -1086,10 +824,10 @@
      * Find the absolute distance from a point to a line segment at closest approach
      */
     function absDistanceToLineSegment(x, y, lineX0, lineY0, lineX1, lineY1) {
-      var ldx = lineX1 - lineX0;
-      var ldy = lineY1 - lineY0;
-      var lengthSq = square(ldx) + square(ldy);
-      var t = lengthSq ? Math.max(0, Math.min(1, ((x - lineX0) * ldx + (y - lineY0) * ldy) / lengthSq)) : 0;
+      const ldx = lineX1 - lineX0;
+      const ldy = lineY1 - lineY0;
+      const lengthSq = square(ldx) + square(ldy);
+      const t = lengthSq ? Math.max(0, Math.min(1, ((x - lineX0) * ldx + (y - lineY0) * ldy) / lengthSq)) : 0;
       return Math.sqrt(square(x - (lineX0 + t * ldx)) + square(y - (lineY0 + t * ldy)))
     }
 
@@ -1097,178 +835,169 @@
     /**
      * Basic quadtree impl for performing fast spatial searches of a glyph's line segments
      */
-    var GlyphSegmentsQuadtree = function GlyphSegmentsQuadtree(glyphObj) {
-      // Pick a good initial power-of-two bounding box that will hold all possible segments
-      var xMin = glyphObj.xMin;
-      var yMin = glyphObj.yMin;
-      var xMax = glyphObj.xMax;
-      var yMax = glyphObj.yMax;
-      var dx = xMax - xMin;
-      var dy = yMax - yMin;
-      var cx = Math.round(xMin + dx / 2);
-      var cy = Math.round(yMin + dy / 2);
-      var r = Math.pow(2, Math.floor(Math.log(Math.max(dx, dy)) * Math.LOG2E));
+    class GlyphSegmentsQuadtree {
+      constructor(glyphObj) {
+        // Pick a good initial power-of-two bounding box that will hold all possible segments
+        const {xMin, yMin, xMax, yMax} = glyphObj;
+        const dx = xMax - xMin;
+        const dy = yMax - yMin;
+        const cx = Math.round(xMin + dx / 2);
+        const cy = Math.round(yMin + dy / 2);
+        const r = Math.pow(2, Math.floor(Math.log(Math.max(dx, dy)) * Math.LOG2E));
 
-      this._root = {
-        0: null,
-        1: null,
-        2: null,
-        3: null,
-        data: null,
-        cx: cx,
-        cy: cy,
-        r: r,
-        minX: INF,
-        minY: INF,
-        maxX: -INF,
-        maxY: -INF
-      };
-    };
-
-    GlyphSegmentsQuadtree.prototype.addLineSegment = function addLineSegment (x0, y0, x1, y1) {
-      var cx = (x0 + x1) / 2;
-      var cy = (y0 + y1) / 2;
-      var segment = {
-        x0: x0, y0: y0, x1: x1, y1: y1, cx: cx, cy: cy,
-        minX: Math.min(x0, x1),
-        minY: Math.min(y0, y1),
-        maxX: Math.max(x0, x1),
-        maxY: Math.max(y0, y1),
-        next: null
-      };
-      this._insertSegment(segment, this._root);
-    };
-
-    GlyphSegmentsQuadtree.prototype._insertSegment = function _insertSegment (segment, node) {
-      // update node min/max stats
-      var minX = segment.minX;
-        var minY = segment.minY;
-        var maxX = segment.maxX;
-        var maxY = segment.maxY;
-        var cx = segment.cx;
-        var cy = segment.cy;
-      if (minX < node.minX) { node.minX = minX; }
-      if (minY < node.minY) { node.minY = minY; }
-      if (maxX > node.maxX) { node.maxX = maxX; }
-      if (maxY > node.maxY) { node.maxY = maxY; }
-
-      // leaf
-      var leafSegment = node.data;
-      if (leafSegment) {
-        // coincident; push as linked list
-        if (leafSegment.cx === cx && leafSegment.cy === cy) {
-          while (leafSegment.next) { leafSegment = leafSegment.next; }
-          leafSegment.next = segment;
-        }
-        // non-coincident; split leaf to branch
-        else {
-          node.data = null;
-          this._insertSegment(leafSegment, node);
-          this._insertSegment(segment, node);
-        }
+        this._root = {
+          0: null,
+          1: null,
+          2: null,
+          3: null,
+          data: null,
+          cx: cx,
+          cy: cy,
+          r: r,
+          minX: INF,
+          minY: INF,
+          maxX: -INF,
+          maxY: -INF
+        };
       }
-      // branch
-      else {
-        // find target sub-index for the segment's centerpoint
-        var subIndex = (cy < node.cy ? 0 : 2) + (cx < node.cx ? 0 : 1);
 
-        // subnode already at index: recurse
-        if (node[subIndex]) {
-          this._insertSegment(segment, node[subIndex]);
-        }
-        // create new leaf
-        else {
-          node[subIndex] = {
-            0: null,
-            1: null,
-            2: null,
-            3: null,
-            data: segment,
-            cx: node.cx + node.r / 2 * (subIndex % 2 ? 1 : -1),
-            cy: node.cy + node.r / 2 * (subIndex < 2 ? -1 : 1),
-            r: node.r / 2,
-            minX: minX,
-            minY: minY,
-            maxX: maxX,
-            maxY: maxY
-          };
-        }
+      addLineSegment(x0, y0, x1, y1) {
+        const cx = (x0 + x1) / 2;
+        const cy = (y0 + y1) / 2;
+        const segment = {
+          x0, y0, x1, y1, cx, cy,
+          minX: Math.min(x0, x1),
+          minY: Math.min(y0, y1),
+          maxX: Math.max(x0, x1),
+          maxY: Math.max(y0, y1),
+          next: null
+        };
+        this._insertSegment(segment, this._root);
       }
-    };
 
-    GlyphSegmentsQuadtree.prototype.walkTree = function walkTree (callback) {
-      this.walkBranch(this._root, callback);
-    };
-    GlyphSegmentsQuadtree.prototype.walkBranch = function walkBranch (root, callback) {
-      if (callback(root) !== false && !root.data) {
-        for (var i = 0; i < 4; i++) {
-          if (root[i] !== null) {
-            this.walkBranch(root[i], callback);
+      _insertSegment(segment, node) {
+        // update node min/max stats
+        const {minX, minY, maxX, maxY, cx, cy} = segment;
+        if (minX < node.minX) node.minX = minX;
+        if (minY < node.minY) node.minY = minY;
+        if (maxX > node.maxX) node.maxX = maxX;
+        if (maxY > node.maxY) node.maxY = maxY;
+
+        // leaf
+        let leafSegment = node.data;
+        if (leafSegment) {
+          // coincident; push as linked list
+          if (leafSegment.cx === cx && leafSegment.cy === cy) {
+            while (leafSegment.next) leafSegment = leafSegment.next;
+            leafSegment.next = segment;
+          }
+          // non-coincident; split leaf to branch
+          else {
+            node.data = null;
+            this._insertSegment(leafSegment, node);
+            this._insertSegment(segment, node);
+          }
+        }
+        // branch
+        else {
+          // find target sub-index for the segment's centerpoint
+          const subIndex = (cy < node.cy ? 0 : 2) + (cx < node.cx ? 0 : 1);
+
+          // subnode already at index: recurse
+          if (node[subIndex]) {
+            this._insertSegment(segment, node[subIndex]);
+          }
+          // create new leaf
+          else {
+            node[subIndex] = {
+              0: null,
+              1: null,
+              2: null,
+              3: null,
+              data: segment,
+              cx: node.cx + node.r / 2 * (subIndex % 2 ? 1 : -1),
+              cy: node.cy + node.r / 2 * (subIndex < 2 ? -1 : 1),
+              r: node.r / 2,
+              minX: minX,
+              minY: minY,
+              maxX: maxX,
+              maxY: maxY
+            };
           }
         }
       }
-    };
 
-    GlyphSegmentsQuadtree.prototype.findNearestSignedDistance = function findNearestSignedDistance (x, y, maxSearchRadius) {
-      var closestDist = maxSearchRadius;
-
-      this.walkTree(function visit(node) {
-        // Ignore nodes that can't possibly have segments closer than what we've already found. We base
-        // this on a simple rect bounds check; radial would be more accurate but much slower.
-        if (
-          x - closestDist > node.maxX || x + closestDist < node.minX ||
-          y - closestDist > node.maxY || y + closestDist < node.minY
-        ) {
-          return false
+      walkTree(callback) {
+        this.walkBranch(this._root, callback);
+      }
+      walkBranch(root, callback) {
+        if (callback(root) !== false && !root.data) {
+          for (let i = 0; i < 4; i++) {
+            if (root[i] !== null) {
+              this.walkBranch(root[i], callback);
+            }
+          }
         }
+      }
 
-        // Leaf - check each segment's actual distance
-        if (node.data) {
-          for (var segment = node.data; segment; segment = segment.next) {
-            if ( //fast prefilter for segment to avoid dist calc
-              x - closestDist < segment.maxX || x + closestDist > segment.minX ||
-              y - closestDist < segment.maxY || y + closestDist > segment.minY
-            ) {
-              var dist = absDistanceToLineSegment(x, y, segment.x0, segment.y0, segment.x1, segment.y1);
-              if (dist < closestDist) {
-                closestDist = dist;
+      findNearestSignedDistance(x, y, maxSearchRadius) {
+        let closestDist = maxSearchRadius;
+
+        this.walkTree(function visit(node) {
+          // Ignore nodes that can't possibly have segments closer than what we've already found. We base
+          // this on a simple rect bounds check; radial would be more accurate but much slower.
+          if (
+            x - closestDist > node.maxX || x + closestDist < node.minX ||
+            y - closestDist > node.maxY || y + closestDist < node.minY
+          ) {
+            return false
+          }
+
+          // Leaf - check each segment's actual distance
+          if (node.data) {
+            for (let segment = node.data; segment; segment = segment.next) {
+              if ( //fast prefilter for segment to avoid dist calc
+                x - closestDist < segment.maxX || x + closestDist > segment.minX ||
+                y - closestDist < segment.maxY || y + closestDist > segment.minY
+              ) {
+                const dist = absDistanceToLineSegment(x, y, segment.x0, segment.y0, segment.x1, segment.y1);
+                if (dist < closestDist) {
+                  closestDist = dist;
+                }
               }
             }
           }
-        }
-      });
+        });
 
-      // Flip to negative distance if outside the poly
-      if (!this.isPointInPoly(x, y)) {
-        closestDist = -closestDist;
+        // Flip to negative distance if outside the poly
+        if (!this.isPointInPoly(x, y)) {
+          closestDist = -closestDist;
+        }
+        return closestDist
       }
-      return closestDist
-    };
 
-    GlyphSegmentsQuadtree.prototype.isPointInPoly = function isPointInPoly (x, y) {
-      var inside = false;
-      this.walkTree(function (node) {
-        // Ignore nodes whose bounds can't possibly cross our east-pointing ray
-        if (node.maxX < x || node.minY > y || node.maxY < y) {
-          return false
-        }
+      isPointInPoly(x, y) {
+        let inside = false;
+        this.walkTree(node => {
+          // Ignore nodes whose bounds can't possibly cross our east-pointing ray
+          if (node.maxX < x || node.minY > y || node.maxY < y) {
+            return false
+          }
 
-        // Leaf - test each segment for whether it crosses our east-pointing ray
-        if (node.data) {
-          for (var segment = node.data; segment; segment = segment.next) {
-            var x0 = segment.x0;
-              var y0 = segment.y0;
-              var x1 = segment.x1;
-              var y1 = segment.y1;
-            var intersects = ((y0 > y) !== (y1 > y)) && (x < (x1 - x0) * (y - y0) / (y1 - y0) + x0);
-            if (intersects) {
-              inside = !inside;
+          // Leaf - test each segment for whether it crosses our east-pointing ray
+          if (node.data) {
+            for (let segment = node.data; segment; segment = segment.next) {
+              const {x0, y0, x1, y1} = segment;
+              const intersects = ((y0 > y) !== (y1 > y)) && (x < (x1 - x0) * (y - y0) / (y1 - y0) + x0);
+              if (intersects) {
+                inside = !inside;
+              }
             }
           }
-        }
-      });
-      return inside
-    };
+        });
+        return inside
+      }
+    }
 
     /**
      * Generate an SDF texture segment for a single glyph.
@@ -1278,23 +1007,23 @@
     function generateSDF(glyphObj) {
       //console.time('glyphSDF')
 
-      var textureData = new Uint8Array(square(sdfTextureSize));
+      const textureData = new Uint8Array(square(sdfTextureSize));
 
       // Determine mapping between glyph grid coords and sdf grid coords
-      var glyphW = glyphObj.xMax - glyphObj.xMin;
-      var glyphH = glyphObj.yMax - glyphObj.yMin;
+      const glyphW = glyphObj.xMax - glyphObj.xMin;
+      const glyphH = glyphObj.yMax - glyphObj.yMin;
 
       // Choose a maximum distance radius in font units, based on the glyph's max dimensions
-      var fontUnitsMaxDist = Math.max(glyphW, glyphH) * sdfDistancePercent;
+      const fontUnitsMaxDist = Math.max(glyphW, glyphH) * sdfDistancePercent;
 
       // Use that, extending to the texture edges, to find conversion ratios between texture units and font units
-      var fontUnitsPerXTexel = (glyphW + fontUnitsMaxDist * 2) / sdfTextureSize;
-      var fontUnitsPerYTexel = (glyphH + fontUnitsMaxDist * 2) / sdfTextureSize;
+      const fontUnitsPerXTexel = (glyphW + fontUnitsMaxDist * 2) / sdfTextureSize;
+      const fontUnitsPerYTexel = (glyphH + fontUnitsMaxDist * 2) / sdfTextureSize;
 
-      var textureMinFontX = glyphObj.xMin - fontUnitsMaxDist - fontUnitsPerXTexel;
-      var textureMinFontY = glyphObj.yMin - fontUnitsMaxDist - fontUnitsPerYTexel;
-      var textureMaxFontX = glyphObj.xMax + fontUnitsMaxDist + fontUnitsPerXTexel;
-      var textureMaxFontY = glyphObj.yMax + fontUnitsMaxDist + fontUnitsPerYTexel;
+      const textureMinFontX = glyphObj.xMin - fontUnitsMaxDist - fontUnitsPerXTexel;
+      const textureMinFontY = glyphObj.yMin - fontUnitsMaxDist - fontUnitsPerYTexel;
+      const textureMaxFontX = glyphObj.xMax + fontUnitsMaxDist + fontUnitsPerXTexel;
+      const textureMaxFontY = glyphObj.yMax + fontUnitsMaxDist + fontUnitsPerYTexel;
 
       function textureXToFontX(x) {
         return textureMinFontX + (textureMaxFontX - textureMinFontX) * x / sdfTextureSize
@@ -1306,9 +1035,9 @@
 
       if (glyphObj.pathCommandCount) { //whitespace chars will have no commands, so we can skip all this
         // Decompose all paths into straight line segments and add them to a quadtree
-        var lineSegmentsIndex = new GlyphSegmentsQuadtree(glyphObj);
-        var firstX, firstY, prevX, prevY;
-        glyphObj.forEachPathCommand(function (type, x0, y0, x1, y1, x2, y2) {
+        const lineSegmentsIndex = new GlyphSegmentsQuadtree(glyphObj);
+        let firstX, firstY, prevX, prevY;
+        glyphObj.forEachPathCommand((type, x0, y0, x1, y1, x2, y2) => {
           switch (type) {
             case 'M':
               prevX = firstX = x0;
@@ -1320,9 +1049,9 @@
               }
               break
             case 'Q': {
-              var prevPoint = {x: prevX, y: prevY};
-              for (var i = 1; i < CURVE_POINTS; i++) {
-                var nextPoint = pointOnQuadraticBezier(
+              let prevPoint = {x: prevX, y: prevY};
+              for (let i = 1; i < CURVE_POINTS; i++) {
+                let nextPoint = pointOnQuadraticBezier(
                   prevX, prevY,
                   x0, y0,
                   x1, y1,
@@ -1336,17 +1065,17 @@
               break
             }
             case 'C': {
-              var prevPoint$1 = {x: prevX, y: prevY};
-              for (var i$1 = 1; i$1 < CURVE_POINTS; i$1++) {
-                var nextPoint$1 = pointOnCubicBezier(
+              let prevPoint = {x: prevX, y: prevY};
+              for (let i = 1; i < CURVE_POINTS; i++) {
+                let nextPoint = pointOnCubicBezier(
                   prevX, prevY,
                   x0, y0,
                   x1, y1,
                   x2, y2,
-                  i$1 / (CURVE_POINTS - 1)
+                  i / (CURVE_POINTS - 1)
                 );
-                lineSegmentsIndex.addLineSegment(prevPoint$1.x, prevPoint$1.y, nextPoint$1.x, nextPoint$1.y);
-                prevPoint$1 = nextPoint$1;
+                lineSegmentsIndex.addLineSegment(prevPoint.x, prevPoint.y, nextPoint.x, nextPoint.y);
+                prevPoint = nextPoint;
               }
               prevX = x2;
               prevY = y2;
@@ -1362,15 +1091,15 @@
 
         // For each target SDF texel, find the distance from its center to its nearest line segment,
         // map that distance to an alpha value, and write that alpha to the texel
-        for (var sdfX = 0; sdfX < sdfTextureSize; sdfX++) {
-          for (var sdfY = 0; sdfY < sdfTextureSize; sdfY++) {
-            var signedDist = lineSegmentsIndex.findNearestSignedDistance(
+        for (let sdfX = 0; sdfX < sdfTextureSize; sdfX++) {
+          for (let sdfY = 0; sdfY < sdfTextureSize; sdfY++) {
+            const signedDist = lineSegmentsIndex.findNearestSignedDistance(
               textureXToFontX(sdfX + 0.5),
               textureYToFontY(sdfY + 0.5),
               fontUnitsMaxDist
             );
             //if (!isFinite(signedDist)) throw 'infinite distance!'
-            var alpha = isFinite(signedDist) ? Math.round(255 * (1 + signedDist / fontUnitsMaxDist) * 0.5) : signedDist;
+            let alpha = isFinite(signedDist) ? Math.round(255 * (1 + signedDist / fontUnitsMaxDist) * 0.5) : signedDist;
             alpha = Math.max(0, Math.min(255, alpha)); //clamp
             textureData[sdfY * sdfTextureSize + sdfX] = alpha;
           }
@@ -1435,7 +1164,9 @@
    */
   function createFontProcessor(fontParser, sdfGenerator, config) {
 
-    var defaultFontUrl = config.defaultFontUrl;
+    const {
+      defaultFontUrl
+    } = config;
 
 
     /**
@@ -1457,9 +1188,9 @@
      *   }
      * }
      */
-    var fonts = Object.create(null);
+    const fonts = Object.create(null);
 
-    var INF = Infinity;
+    const INF = Infinity;
 
 
     /**
@@ -1467,15 +1198,15 @@
      */
     function doLoadFont(url, callback) {
       function tryLoad() {
-        var onError = function (err) {
-          console.error(("Failure loading font " + url + (url === defaultFontUrl ? '' : '; trying fallback')), err);
+        const onError = err => {
+          console.error(`Failure loading font ${url}${url === defaultFontUrl ? '' : '; trying fallback'}`, err);
           if (url !== defaultFontUrl) {
             url = defaultFontUrl;
             tryLoad();
           }
         };
         try {
-          var request = new XMLHttpRequest();
+          const request = new XMLHttpRequest();
           request.open('get', url, true);
           request.responseType = 'arraybuffer';
           request.onload = function () {
@@ -1484,7 +1215,7 @@
             }
             else if (request.status > 0) {
               try {
-                var fontObj = fontParser(request.response);
+                const fontObj = fontParser(request.response);
                 callback(fontObj);
               } catch (e) {
                 onError(e);
@@ -1506,8 +1237,8 @@
      * loaded, the callback will be called synchronously.
      */
     function loadFont(fontUrl, callback) {
-      if (!fontUrl) { fontUrl = defaultFontUrl; }
-      var atlas = fonts[fontUrl];
+      if (!fontUrl) fontUrl = defaultFontUrl;
+      let atlas = fonts[fontUrl];
       if (atlas) {
         // if currently loading font, add to callbacks, otherwise execute immediately
         if (atlas.onload) {
@@ -1516,14 +1247,14 @@
           callback();
         }
       } else {
-        var loadingAtlas = fonts[fontUrl] = {onload: [callback]};
-        doLoadFont(fontUrl, function (fontObj) {
+        const loadingAtlas = fonts[fontUrl] = {onload: [callback]};
+        doLoadFont(fontUrl, fontObj => {
           atlas = fonts[fontUrl] = {
             fontObj: fontObj,
             glyphs: {},
             glyphCount: 0
           };
-          loadingAtlas.onload.forEach(function (cb) { return cb(); });
+          loadingAtlas.onload.forEach(cb => cb());
         });
       }
     }
@@ -1534,8 +1265,8 @@
      * its atlas data objects if necessary.
      */
     function getSdfAtlas(fontUrl, callback) {
-      if (!fontUrl) { fontUrl = defaultFontUrl; }
-      loadFont(fontUrl, function () {
+      if (!fontUrl) fontUrl = defaultFontUrl;
+      loadFont(fontUrl, () => {
         callback(fonts[fontUrl]);
       });
     }
@@ -1547,46 +1278,48 @@
      * necessary to render all its glyphs.
      */
     function process(
-      ref,
+      {
+        text='',
+        font=defaultFontUrl,
+        fontSize=1,
+        letterSpacing=0,
+        lineHeight='normal',
+        maxWidth=INF,
+        textAlign='left',
+        whiteSpace='normal',
+        overflowWrap='normal',
+        anchor,
+        includeCaretPositions=false
+      },
       callback,
-      metricsOnly
+      metricsOnly=false
     ) {
-      var text = ref.text; if ( text === void 0 ) text = '';
-      var font = ref.font; if ( font === void 0 ) font = defaultFontUrl;
-      var fontSize = ref.fontSize; if ( fontSize === void 0 ) fontSize = 1;
-      var letterSpacing = ref.letterSpacing; if ( letterSpacing === void 0 ) letterSpacing = 0;
-      var lineHeight = ref.lineHeight; if ( lineHeight === void 0 ) lineHeight = 'normal';
-      var maxWidth = ref.maxWidth; if ( maxWidth === void 0 ) maxWidth = INF;
-      var textAlign = ref.textAlign; if ( textAlign === void 0 ) textAlign = 'left';
-      var whiteSpace = ref.whiteSpace; if ( whiteSpace === void 0 ) whiteSpace = 'normal';
-      var overflowWrap = ref.overflowWrap; if ( overflowWrap === void 0 ) overflowWrap = 'normal';
-      var anchor = ref.anchor;
-      var includeCaretPositions = ref.includeCaretPositions; if ( includeCaretPositions === void 0 ) includeCaretPositions = false;
-      if ( metricsOnly === void 0 ) metricsOnly=false;
-
       // Ensure newlines are normalized
       if (text.indexOf('\r') > -1) {
         console.warn('FontProcessor.process: got text with \\r chars; normalizing to \\n');
         text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       }
 
-      getSdfAtlas(font, function (atlas) {
-        var fontObj = atlas.fontObj;
-        var hasMaxWidth = isFinite(maxWidth);
-        var newGlyphs = null;
-        var glyphBounds = null;
-        var glyphAtlasIndices = null;
-        var caretPositions = null;
-        var totalBounds = null;
-        var maxLineWidth = 0;
-        var canWrap = whiteSpace !== 'nowrap';
-        var ascender = fontObj.ascender;
-        var descender = fontObj.descender;
-        var unitsPerEm = fontObj.unitsPerEm;
+      // Ensure we've got numbers not strings
+      fontSize = +fontSize;
+      letterSpacing = +letterSpacing;
+      maxWidth = +maxWidth;
+
+      getSdfAtlas(font, atlas => {
+        const fontObj = atlas.fontObj;
+        const hasMaxWidth = isFinite(maxWidth);
+        let newGlyphs = null;
+        let glyphBounds = null;
+        let glyphAtlasIndices = null;
+        let caretPositions = null;
+        let totalBounds = null;
+        let maxLineWidth = 0;
+        let canWrap = whiteSpace !== 'nowrap';
+        const {ascender, descender, unitsPerEm} = fontObj;
 
         // Find conversion between native font units and fontSize units; this will already be done
         // for the gx/gy values below but everything else we'll need to convert
-        var fontSizeMult = fontSize / unitsPerEm;
+        const fontSizeMult = fontSize / unitsPerEm;
 
         // Determine appropriate value for 'normal' line height based on the font's actual metrics
         // TODO this does not guarantee individual glyphs won't exceed the line height, e.g. Roboto; should we use yMin/Max instead?
@@ -1596,20 +1329,20 @@
 
         // Determine line height and leading adjustments
         lineHeight = lineHeight * fontSize;
-        var halfLeading = (lineHeight - (ascender - descender) * fontSizeMult) / 2;
-        var caretHeight = Math.min(lineHeight, (ascender - descender) * fontSizeMult);
-        var caretBottomOffset = (ascender + descender) / 2 * fontSizeMult - caretHeight / 2;
+        const halfLeading = (lineHeight - (ascender - descender) * fontSizeMult) / 2;
+        const caretHeight = Math.min(lineHeight, (ascender - descender) * fontSizeMult);
+        const caretBottomOffset = (ascender + descender) / 2 * fontSizeMult - caretHeight / 2;
 
         // Distribute glyphs into lines based on wrapping
-        var lineXOffset = 0;
-        var currentLine = {glyphs: [], width: 0};
-        var lines = [currentLine];
-        fontObj.forEachGlyph(text, fontSize, letterSpacing, function (glyphObj, glyphX, charIndex) {
-          var char = text.charAt(charIndex);
-          var glyphWidth = glyphObj.advanceWidth * fontSizeMult;
-          var isWhitespace = !!char && /\s/.test(char);
-          var curLineGlyphs = currentLine.glyphs;
-          var nextLineGlyphs;
+        let lineXOffset = 0;
+        let currentLine = {glyphs: [], width: 0};
+        const lines = [currentLine];
+        fontObj.forEachGlyph(text, fontSize, letterSpacing, (glyphObj, glyphX, charIndex) => {
+          const char = text.charAt(charIndex);
+          const glyphWidth = glyphObj.advanceWidth * fontSizeMult;
+          const isWhitespace = !!char && /\s/.test(char);
+          const curLineGlyphs = currentLine.glyphs;
+          let nextLineGlyphs;
 
           // If a non-whitespace character overflows the max width, we need to soft-wrap
           if (canWrap && hasMaxWidth && !isWhitespace && glyphX + glyphWidth + lineXOffset > maxWidth && curLineGlyphs.length) {
@@ -1619,7 +1352,7 @@
               lineXOffset = -glyphX;
             } else {
               // Back up looking for a whitespace character to wrap at
-              for (var i = curLineGlyphs.length; i--;) {
+              for (let i = curLineGlyphs.length; i--;) {
                 // If we got the start of the line there's no soft break point; make hard break if overflowWrap='break-word'
                 if (i === 0 && overflowWrap === 'break-word') {
                   nextLineGlyphs = [];
@@ -1629,9 +1362,9 @@
                 // Found a soft break point; move all chars since it to a new line
                 else if (curLineGlyphs[i].isWhitespace) {
                   nextLineGlyphs = curLineGlyphs.splice(i + 1);
-                  var adjustX = nextLineGlyphs[0].x;
+                  const adjustX = nextLineGlyphs[0].x;
                   lineXOffset -= adjustX;
-                  for (var j = 0; j < nextLineGlyphs.length; j++) {
+                  for (let j = 0; j < nextLineGlyphs.length; j++) {
                     nextLineGlyphs[j].x -= adjustX;
                   }
                   break
@@ -1647,13 +1380,13 @@
           }
 
           currentLine.glyphs.push({
-            glyphObj: glyphObj,
+            glyphObj,
             x: glyphX + lineXOffset,
             y: 0, //added later
             width: glyphWidth,
             char: char,
-            charIndex: charIndex,
-            isWhitespace: isWhitespace,
+            charIndex,
+            isWhitespace,
             isEmpty: glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax,
             atlasInfo: null //added later
           });
@@ -1667,10 +1400,10 @@
         });
 
         // Calculate width of each line (excluding trailing whitespace) and maximum block width
-        lines.forEach(function (line) {
-          var lineGlyphs = line.glyphs;
-          for (var i = lineGlyphs.length; i--;) {
-            var lastChar = lineGlyphs[i];
+        lines.forEach(line => {
+          const lineGlyphs = line.glyphs;
+          for (let i = lineGlyphs.length; i--;) {
+            const lastChar = lineGlyphs[i];
             if (!lastChar.isWhitespace) {
               line.width = lastChar.x + lastChar.width;
               if (line.width > maxLineWidth) {
@@ -1684,21 +1417,20 @@
         if (!metricsOnly) {
           // Process each line, applying alignment offsets, adding each glyph to the atlas, and
           // collecting all renderable glyphs into a single collection.
-          var renderableGlyphs = [];
-          var lineYOffset = -(fontSize + halfLeading);
+          const renderableGlyphs = [];
+          let lineYOffset = -(fontSize + halfLeading);
           if (includeCaretPositions) {
             caretPositions = new Float32Array(text.length * 3);
           }
-          var prevCharIndex = -1;
-          lines.forEach(function (line) {
-            var lineGlyphs = line.glyphs;
-            var lineWidth = line.width;
+          let prevCharIndex = -1;
+          lines.forEach(line => {
+            const {glyphs:lineGlyphs, width:lineWidth} = line;
 
             // Ignore empty lines
             if (lineGlyphs.length) {
               // Find x offset for horizontal alignment
-              var lineXOffset = 0;
-              var whitespaceCount = 0;
+              let lineXOffset = 0;
+              let whitespaceCount = 0;
               if (textAlign === 'center') {
                 lineXOffset = (maxLineWidth - lineWidth) / 2;
               } else if (textAlign === 'right') {
@@ -1706,7 +1438,7 @@
               } else if (textAlign === 'justify') {
                 // just count the non-trailing whitespace characters, and we'll adjust the offsets per
                 // character in the next loop
-                for (var i = lineGlyphs.length; i--;) {
+                for (let i = lineGlyphs.length; i--;) {
                   if (!lineGlyphs[i].isWhitespace) {
                     while (i--) {
                       if (lineGlyphs[i].isWhitespace) {
@@ -1718,23 +1450,23 @@
                 }
               }
 
-              for (var i$1 = 0, len = lineGlyphs.length; i$1 < len; i$1++) {
-                var glyphInfo = lineGlyphs[i$1];
+              for (let i = 0, len = lineGlyphs.length; i < len; i++) {
+                const glyphInfo = lineGlyphs[i];
 
                 // Apply position adjustments
-                if (lineXOffset) { glyphInfo.x += lineXOffset; }
+                if (lineXOffset) glyphInfo.x += lineXOffset;
                 glyphInfo.y = lineYOffset;
 
                 // Expand whitespaces for justify alignment
                 if (glyphInfo.isWhitespace && textAlign === 'justify' && line.isSoftWrapped) {
-                  var adjust = (maxLineWidth - lineWidth) / whitespaceCount;
+                  const adjust = (maxLineWidth - lineWidth) / whitespaceCount;
                   lineXOffset += adjust;
                   glyphInfo.width += adjust;
                 }
 
                 // Add initial caret positions
                 if (includeCaretPositions) {
-                  var charIndex = glyphInfo.charIndex;
+                  const {charIndex} = glyphInfo;
                   caretPositions[charIndex * 3] = glyphInfo.x; //left edge x
                   caretPositions[charIndex * 3 + 1] = glyphInfo.x + glyphInfo.width; //right edge x
                   caretPositions[charIndex * 3 + 2] = glyphInfo.y + caretBottomOffset; //common bottom y
@@ -1753,18 +1485,18 @@
 
                 // Get atlas data for renderable glyphs
                 if (!glyphInfo.isWhitespace && !glyphInfo.isEmpty) {
-                  var glyphObj = glyphInfo.glyphObj;
+                  const glyphObj = glyphInfo.glyphObj;
 
                   // If we haven't seen this glyph yet, generate its SDF
-                  var glyphAtlasInfo = atlas.glyphs[glyphObj.index];
+                  let glyphAtlasInfo = atlas.glyphs[glyphObj.index];
                   if (!glyphAtlasInfo) {
-                    var glyphSDFData = sdfGenerator(glyphObj);
+                    const glyphSDFData = sdfGenerator(glyphObj);
 
                     // Assign this glyph the next available atlas index
                     glyphSDFData.atlasIndex = atlas.glyphCount++;
 
                     // Queue it up in the response's newGlyphs list
-                    if (!newGlyphs) { newGlyphs = []; }
+                    if (!newGlyphs) newGlyphs = [];
                     newGlyphs.push(glyphSDFData);
 
                     // Store its metadata (not the texture) in our atlas info
@@ -1786,8 +1518,8 @@
           });
 
           // Find overall position adjustments for anchoring
-          var anchorXOffset = 0;
-          var anchorYOffset = 0;
+          let anchorXOffset = 0;
+          let anchorYOffset = 0;
           if (anchor) {
             // TODO allow string keywords?
             if (anchor[0]) {
@@ -1800,7 +1532,7 @@
 
           // Adjust caret positions by anchoring offsets
           if (includeCaretPositions && (anchorXOffset || anchorYOffset)) {
-            for (var i = 0, len = caretPositions.length; i < len; i += 3) {
+            for (let i = 0, len = caretPositions.length; i < len; i += 3) {
               caretPositions[i] += anchorXOffset;
               caretPositions[i + 1] += anchorXOffset;
               caretPositions[i + 2] += anchorYOffset;
@@ -1811,30 +1543,28 @@
           glyphBounds = new Float32Array(renderableGlyphs.length * 4);
           glyphAtlasIndices = new Float32Array(renderableGlyphs.length);
           totalBounds = [INF, INF, -INF, -INF];
-          renderableGlyphs.forEach(function (glyphInfo, i) {
-            var ref = glyphInfo.atlasInfo;
-            var renderingBounds = ref.renderingBounds;
-            var atlasIndex = ref.atlasIndex;
-            var x0 = glyphBounds[i * 4] = glyphInfo.x + renderingBounds[0] * fontSizeMult + anchorXOffset;
-            var y0 = glyphBounds[i * 4 + 1] = glyphInfo.y + renderingBounds[1] * fontSizeMult + anchorYOffset;
-            var x1 = glyphBounds[i * 4 + 2] = glyphInfo.x + renderingBounds[2] * fontSizeMult + anchorXOffset;
-            var y1 = glyphBounds[i * 4 + 3] = glyphInfo.y + renderingBounds[3] * fontSizeMult + anchorYOffset;
+          renderableGlyphs.forEach((glyphInfo, i) => {
+            const {renderingBounds, atlasIndex} = glyphInfo.atlasInfo;
+            const x0 = glyphBounds[i * 4] = glyphInfo.x + renderingBounds[0] * fontSizeMult + anchorXOffset;
+            const y0 = glyphBounds[i * 4 + 1] = glyphInfo.y + renderingBounds[1] * fontSizeMult + anchorYOffset;
+            const x1 = glyphBounds[i * 4 + 2] = glyphInfo.x + renderingBounds[2] * fontSizeMult + anchorXOffset;
+            const y1 = glyphBounds[i * 4 + 3] = glyphInfo.y + renderingBounds[3] * fontSizeMult + anchorYOffset;
 
-            if (x0 < totalBounds[0]) { totalBounds[0] = x0; }
-            if (y0 < totalBounds[1]) { totalBounds[1] = y0; }
-            if (x1 > totalBounds[2]) { totalBounds[2] = x1; }
-            if (y1 > totalBounds[3]) { totalBounds[3] = y1; }
+            if (x0 < totalBounds[0]) totalBounds[0] = x0;
+            if (y0 < totalBounds[1]) totalBounds[1] = y0;
+            if (x1 > totalBounds[2]) totalBounds[2] = x1;
+            if (y1 > totalBounds[3]) totalBounds[3] = y1;
 
             glyphAtlasIndices[i] = atlasIndex;
           });
         }
 
         callback({
-          glyphBounds: glyphBounds, //rendering quad bounds for each glyph [x1, y1, x2, y2]
-          glyphAtlasIndices: glyphAtlasIndices, //atlas indices for each glyph
-          caretPositions: caretPositions, //x,y of bottom of cursor position before each char, plus one after last char
-          caretHeight: caretHeight, //height of cursor from bottom to top
-          totalBounds: totalBounds, //total rect including all glyphBounds; will be slightly larger than glyph edges due to SDF padding
+          glyphBounds, //rendering quad bounds for each glyph [x1, y1, x2, y2]
+          glyphAtlasIndices, //atlas indices for each glyph
+          caretPositions, //x,y of bottom of cursor position before each char, plus one after last char
+          caretHeight, //height of cursor from bottom to top
+          totalBounds, //total rect including all glyphBounds; will be slightly larger than glyph edges due to SDF padding
           totalBlockSize: [maxLineWidth, lines.length * lineHeight], //width and height of the text block; accurate for layout measurement
           newGlyphSDFs: newGlyphs //if this request included any new SDFs for the atlas, they'll be included here
         });
@@ -1849,7 +1579,7 @@
      * @param callback
      */
     function measure(args, callback) {
-      process(args, function (result) {
+      process(args, (result) => {
         callback({
           width: result.totalBlockSize[0],
           height: result.totalBlockSize[1]
@@ -1858,9 +1588,9 @@
     }
 
     return {
-      process: process,
-      measure: measure,
-      loadFont: loadFont
+      process,
+      measure,
+      loadFont
     }
   }
 
@@ -1869,7 +1599,7 @@
 
   function typrFactory() {
 
-  var window = self;
+  const window = self;
 
   // Begin Typr.js
 
@@ -1894,7 +1624,7 @@
   		}
   		return fnts;
   	}
-  	else { return [Typr._readFont(data, 0)]; }
+  	else return [Typr._readFont(data, 0)];
   };
 
   Typr._readFont = function(data, offset) {
@@ -1937,7 +1667,9 @@
   		"GPOS",
   		"GSUB",
   		
-  		"SVG " ];
+  		"SVG "
+  		//"VORG",
+  		];
   	
   	var obj = {_data:data, _offset:ooff};
   	//console.log(sfnt_version, numTables, searchRange, entrySelector, rangeShift);
@@ -1960,7 +1692,7 @@
   		var t = tags[i];
   		//console.log(t);
   		//if(tabs[t]) console.log(t, tabs[t].offset, tabs[t].length);
-  		if(tabs[t]) { obj[t.trim()] = Typr[t.trim()].parse(data, tabs[t].offset, tabs[t].length, obj); }
+  		if(tabs[t]) obj[t.trim()] = Typr[t.trim()].parse(data, tabs[t].offset, tabs[t].length, obj);
   	}
   	
   	return obj;
@@ -1977,7 +1709,7 @@
   		var checkSum = bin.readUint(data, offset);  offset += 4;
   		var toffset = bin.readUint(data, offset);   offset += 4;
   		var length = bin.readUint(data, offset);    offset += 4;
-  		if(tag==tab) { return toffset; }
+  		if(tag==tab) return toffset;
   	}
   	return 0;
   };
@@ -2029,7 +1761,7 @@
   	readUshorts : function(buff, p, len)
   	{
   		var arr = [];
-  		for(var i=0; i<len; i++) { arr.push(Typr._bin.readUshort(buff, p+i*2)); }
+  		for(var i=0; i<len; i++) arr.push(Typr._bin.readUshort(buff, p+i*2));
   		return arr;
   	},
   	readUint : function(buff, p)
@@ -2048,7 +1780,7 @@
   	{
   		//if(p>=buff.length) throw "error";
   		var s = "";
-  		for(var i = 0; i < l; i++) { s += String.fromCharCode(buff[p+i]); }
+  		for(var i = 0; i < l; i++) s += String.fromCharCode(buff[p+i]);
   		return s;
   	},
   	readUnicode : function(buff, p, l)
@@ -2065,14 +1797,14 @@
   	_tdec : window["TextDecoder"] ? new window["TextDecoder"]() : null,
   	readUTF8 : function(buff, p, l) {
   		var tdec = Typr._bin._tdec;
-  		if(tdec && p==0 && l==buff.length) { return tdec["decode"](buff); }
+  		if(tdec && p==0 && l==buff.length) return tdec["decode"](buff);
   		return Typr._bin.readASCII(buff,p,l);
   	},
   	readBytes : function(buff, p, l)
   	{
   		//if(p>=buff.length) throw "error";
   		var arr = [];
-  		for(var i=0; i<l; i++) { arr.push(buff[p+i]); }
+  		for(var i=0; i<l; i++) arr.push(buff[p+i]);
   		return arr;
   	},
   	readASCIIArray : function(buff, p, l)	// l : length in Characters (not Bytes)
@@ -2080,7 +1812,7 @@
   		//if(p>=buff.length) throw "error";
   		var s = [];
   		for(var i = 0; i < l; i++)	
-  			{ s.push(String.fromCharCode(buff[p+i])); }
+  			s.push(String.fromCharCode(buff[p+i]));
   		return s;
   	}
   };
@@ -2161,7 +1893,7 @@
   Typr._lctf.numOfOnes = function(n)
   {
   	var num = 0;
-  	for(var i=0; i<32; i++) { if(((n>>>i)&1) != 0) { num++; } }
+  	for(var i=0; i<32; i++) if(((n>>>i)&1) != 0) num++;
   	return num;
   };
 
@@ -2198,7 +1930,7 @@
   	for(var i=0; i<tab.length; i+=3)
   	{
   		var start = tab[i], end = tab[i+1], index = tab[i+2];
-  		if(start<=val && val<=end) { return i; }
+  		if(start<=val && val<=end) return i;
   	}
   	return -1;
   };
@@ -2211,18 +1943,18 @@
   	cvg.fmt   = bin.readUshort(data, offset);  offset+=2;
   	var count = bin.readUshort(data, offset);  offset+=2;
   	//console.log("parsing coverage", offset-4, format, count);
-  	if(cvg.fmt==1) { cvg.tab = bin.readUshorts(data, offset, count); } 
-  	if(cvg.fmt==2) { cvg.tab = bin.readUshorts(data, offset, count*3); }
+  	if(cvg.fmt==1) cvg.tab = bin.readUshorts(data, offset, count); 
+  	if(cvg.fmt==2) cvg.tab = bin.readUshorts(data, offset, count*3);
   	return cvg;
   };
 
   Typr._lctf.coverageIndex = function(cvg, val)
   {
   	var tab = cvg.tab;
-  	if(cvg.fmt==1) { return tab.indexOf(val); }
+  	if(cvg.fmt==1) return tab.indexOf(val);
   	if(cvg.fmt==2) {
   		var ind = Typr._lctf.getInterval(tab, val);
-  		if(ind!=-1) { return tab[ind+2] + (val - tab[ind]); }
+  		if(ind!=-1) return tab[ind+2] + (val - tab[ind]);
   	}
   	return -1;
   };
@@ -2252,7 +1984,7 @@
   	var lookupCount = bin.readUshort(data, offset);  offset+=2;
   	
   	var indices = [];
-  	for(var i=0; i<lookupCount; i++) { indices.push(bin.readUshort(data, offset+2*i)); }
+  	for(var i=0; i<lookupCount; i++) indices.push(bin.readUshort(data, offset+2*i));
   	return indices;
   };
 
@@ -2331,7 +2063,7 @@
   		offset = Typr.CFF.readIndex(data, offset, ninds);
   		var names = [];
   		
-  		for(var i=0; i<ninds.length-1; i++) { names.push(bin.readASCII(data, offset+ninds[i], ninds[i+1]-ninds[i])); }
+  		for(var i=0; i<ninds.length-1; i++) names.push(bin.readASCII(data, offset+ninds[i], ninds[i+1]-ninds[i]));
   		offset += ninds[ninds.length-1];
   		
   		
@@ -2340,7 +2072,7 @@
   		offset = Typr.CFF.readIndex(data, offset, tdinds);  //console.log(tdinds);
   		// Top DICT Data
   		var topDicts = [];
-  		for(var i=0; i<tdinds.length-1; i++) { topDicts.push( Typr.CFF.readDict(data, offset+tdinds[i], offset+tdinds[i+1]) ); }
+  		for(var i=0; i<tdinds.length-1; i++) topDicts.push( Typr.CFF.readDict(data, offset+tdinds[i], offset+tdinds[i+1]) );
   		offset += tdinds[tdinds.length-1];
   		var topdict = topDicts[0];
   		//console.log(topdict);
@@ -2350,7 +2082,7 @@
   		offset = Typr.CFF.readIndex(data, offset, sinds);
   		// String Data
   		var strings = [];
-  		for(var i=0; i<sinds.length-1; i++) { strings.push(bin.readASCII(data, offset+sinds[i], sinds[i+1]-sinds[i])); }
+  		for(var i=0; i<sinds.length-1; i++) strings.push(bin.readASCII(data, offset+sinds[i], sinds[i+1]-sinds[i]));
   		offset += sinds[sinds.length-1];
   		
   		// Global Subr INDEX  (subroutines)		
@@ -2364,7 +2096,7 @@
   			offset = Typr.CFF.readIndex(data, offset, sinds);
   			
   			var cstr = [];
-  			for(var i=0; i<sinds.length-1; i++) { cstr.push(bin.readBytes(data, offset+sinds[i], sinds[i+1]-sinds[i])); }
+  			for(var i=0; i<sinds.length-1; i++) cstr.push(bin.readBytes(data, offset+sinds[i], sinds[i+1]-sinds[i]));
   			//offset += sinds[sinds.length-1];
   			topdict.CharStrings = cstr;
   			//console.log(topdict.CharStrings);
@@ -2393,14 +2125,14 @@
   					topdict.FDSelect.push(bin.readUshort(data, offset), data[offset+2]);  offset+=3;
   				}
   			}
-  			else { throw fmt; }
+  			else throw fmt;
   		}
   		
   		// Encoding
-  		if(topdict.Encoding) { topdict.Encoding = Typr.CFF.readEncoding(data, topdict.Encoding, topdict.CharStrings.length); }
+  		if(topdict.Encoding) topdict.Encoding = Typr.CFF.readEncoding(data, topdict.Encoding, topdict.CharStrings.length);
   		
   		// charset
-  		if(topdict.charset ) { topdict.charset  = Typr.CFF.readCharset (data, topdict.charset , topdict.CharStrings.length); }
+  		if(topdict.charset ) topdict.charset  = Typr.CFF.readCharset (data, topdict.charset , topdict.CharStrings.length);
   		
   		Typr.CFF._readFDict(data, topdict, strings);
   		return topdict;
@@ -2410,9 +2142,9 @@
   		if(dict.Private) {
   			offset = dict.Private[1];
   			dict.Private = Typr.CFF.readDict(data, offset, offset+dict.Private[0]);
-  			if(dict.Private.Subrs)  { Typr.CFF.readSubrs(data, offset+dict.Private.Subrs, dict.Private); }
+  			if(dict.Private.Subrs)  Typr.CFF.readSubrs(data, offset+dict.Private.Subrs, dict.Private);
   		}
-  		for(var p in dict) { if(["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(p)!=-1)  { dict[p]=ss[dict[p] -426 + 35]; } }
+  		for(var p in dict) if(["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(p)!=-1)  dict[p]=ss[dict[p] -426 + 35];
   	};
   	
   	Typr.CFF.readSubrs = function(data, offset, obj)
@@ -2422,13 +2154,13 @@
   		offset = Typr.CFF.readIndex(data, offset, gsubinds);
   		
   		var bias, nSubrs = gsubinds.length;
-  		if (nSubrs <  1240) { bias = 107; }
-  		else if (nSubrs < 33900) { bias = 1131; }
-  		else { bias = 32768; }
+  		if (nSubrs <  1240) bias = 107;
+  		else if (nSubrs < 33900) bias = 1131;
+  		else bias = 32768;
   		obj.Bias = bias;
   		
   		obj.Subrs = [];
-  		for(var i=0; i<gsubinds.length-1; i++) { obj.Subrs.push(bin.readBytes(data, offset+gsubinds[i], gsubinds[i+1]-gsubinds[i])); }
+  		for(var i=0; i<gsubinds.length-1; i++) obj.Subrs.push(bin.readBytes(data, offset+gsubinds[i], gsubinds[i+1]-gsubinds[i]));
   		//offset += gsubinds[gsubinds.length-1];
   	};
   	
@@ -2469,13 +2201,13 @@
     
   	Typr.CFF.glyphByUnicode = function(cff, code)
   	{
-  		for(var i=0; i<cff.charset.length; i++) { if(cff.charset[i]==code) { return i; } }
+  		for(var i=0; i<cff.charset.length; i++) if(cff.charset[i]==code) return i;
   		return -1;
   	};
   	
   	Typr.CFF.glyphBySE = function(cff, charcode)	// glyph by standard encoding
   	{
-  		if ( charcode < 0 || charcode > 255 ) { return -1; }
+  		if ( charcode < 0 || charcode > 255 ) return -1;
   		return Typr.CFF.glyphByUnicode(cff, Typr.CFF.tableSE[charcode]);		
   	};
   	
@@ -2491,7 +2223,7 @@
   		if(format==0)
   		{
   			var nCodes = data[offset];  offset++;
-  			for(var i=0; i<nCodes; i++)  { array.push(data[offset+i]); }
+  			for(var i=0; i<nCodes; i++)  array.push(data[offset+i]);
   		}
   		/*
   		else if(format==1 || format==2)
@@ -2506,7 +2238,7 @@
   			}
   		}
   		*/
-  		else { throw "error: unknown encoding format: " + format; }
+  		else throw "error: unknown encoding format: " + format;
   		
   		return array;
   	};
@@ -2537,7 +2269,7 @@
   				for(var i=0; i<=nLeft; i++)  {  charset.push(first);  first++;  }
   			}
   		}
-  		else { throw "error: format: " + format; }
+  		else throw "error: format: " + format;
   		
   		return charset;
   	};
@@ -2549,10 +2281,10 @@
   		var count = bin.readUshort(data, offset)+1;  offset+=2;
   		var offsize = data[offset];  offset++;
   		
-  		if     (offsize==1) { for(var i=0; i<count; i++) { inds.push( data[offset+i] ); } }
-  		else if(offsize==2) { for(var i=0; i<count; i++) { inds.push( bin.readUshort(data, offset+i*2) ); } }
-  		else if(offsize==3) { for(var i=0; i<count; i++) { inds.push( bin.readUint  (data, offset+i*3 - 1) & 0x00ffffff ); } }
-  		else if(count!=1) { throw "unsupported offset size: " + offsize + ", count: " + count; }
+  		if     (offsize==1) for(var i=0; i<count; i++) inds.push( data[offset+i] );
+  		else if(offsize==2) for(var i=0; i<count; i++) inds.push( bin.readUshort(data, offset+i*2) );
+  		else if(offsize==3) for(var i=0; i<count; i++) inds.push( bin.readUint  (data, offset+i*3 - 1) & 0x00ffffff );
+  		else if(count!=1) throw "unsupported offset size: " + offsize + ", count: " + count;
   		
   		offset += count*offsize;
   		return offset-1;
@@ -2642,12 +2374,12 @@
   				{
   					var b = data[offset+vs];  vs++;
   					var nib0 = b>>4, nib1 = b&0xf;
-  					if(nib0 != 0xf) { nibs.push(nib0); }  if(nib1!=0xf) { nibs.push(nib1); }
-  					if(nib1==0xf) { break; }
+  					if(nib0 != 0xf) nibs.push(nib0);  if(nib1!=0xf) nibs.push(nib1);
+  					if(nib1==0xf) break;
   				}
   				var s = "";
   				var chars = [0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"];
-  				for(var i=0; i<nibs.length; i++) { s += chars[nibs[i]]; }
+  				for(var i=0; i<nibs.length; i++) s += chars[nibs[i]];
   				//console.log(nibs);
   				val = parseFloat(s);
   			}
@@ -2669,7 +2401,7 @@
   			}
   			
   			if(key!=null) {  dict[key] = carr.length==1 ? carr[0] : carr;  carr=[]; }
-  			else  { carr.push(val); }  
+  			else  carr.push(val);  
   			
   			offset += vs;		
   		}	
@@ -2712,15 +2444,15 @@
   			var subt;
   			offs.push(noffset);
   			var format = bin.readUshort(data, noffset);
-  			if     (format== 0) { subt = Typr.cmap.parse0(data, noffset); }
-  			else if(format== 4) { subt = Typr.cmap.parse4(data, noffset); }
-  			else if(format== 6) { subt = Typr.cmap.parse6(data, noffset); }
-  			else if(format==12) { subt = Typr.cmap.parse12(data,noffset); }
-  			else { console.log("unknown format: "+format, platformID, encodingID, noffset); }
+  			if     (format== 0) subt = Typr.cmap.parse0(data, noffset);
+  			else if(format== 4) subt = Typr.cmap.parse4(data, noffset);
+  			else if(format== 6) subt = Typr.cmap.parse6(data, noffset);
+  			else if(format==12) subt = Typr.cmap.parse12(data,noffset);
+  			else console.log("unknown format: "+format, platformID, encodingID, noffset);
   			obj.tables.push(subt);
   		}
   		
-  		if(obj[id]!=null) { throw "multiple tables for one platform+encoding"; }
+  		if(obj[id]!=null) throw "multiple tables for one platform+encoding";
   		obj[id] = tind;
   	}
   	return obj;
@@ -2734,7 +2466,7 @@
   	var len    = bin.readUshort(data, offset);  offset += 2;
   	var lang   = bin.readUshort(data, offset);  offset += 2;
   	obj.map = [];
-  	for(var i=0; i<len-6; i++) { obj.map.push(data[offset+i]); }
+  	for(var i=0; i<len-6; i++) obj.map.push(data[offset+i]);
   	return obj;
   };
 
@@ -2806,7 +2538,7 @@
   Typr.glyf.parse = function(data, offset, length, font)
   {
   	var obj = [];
-  	for(var g=0; g<font.maxp.numGlyphs; g++) { obj.push(null); }
+  	for(var g=0; g<font.maxp.numGlyphs; g++) obj.push(null);
   	return obj;
   };
 
@@ -2817,7 +2549,7 @@
   	
   	var offset = Typr._tabOffset(data, "glyf", font._offset) + font.loca[g];
   		
-  	if(font.loca[g]==font.loca[g+1]) { return null; }
+  	if(font.loca[g]==font.loca[g+1]) return null;
   		
   	var gl = {};
   		
@@ -2827,7 +2559,7 @@
   	gl.xMax = bin.readShort(data, offset);  offset+=2;
   	gl.yMax = bin.readShort(data, offset);  offset+=2;
   	
-  	if(gl.xMin>=gl.xMax || gl.yMin>=gl.yMax) { return null; }
+  	if(gl.xMin>=gl.xMax || gl.yMin>=gl.yMax) return null;
   		
   	if(gl.noc>0)
   	{
@@ -2835,7 +2567,7 @@
   		for(var i=0; i<gl.noc; i++) { gl.endPts.push(bin.readUshort(data,offset)); offset+=2; }
   		
   		var instructionLength = bin.readUshort(data,offset); offset+=2;
-  		if((data.length-offset)<instructionLength) { return null; }
+  		if((data.length-offset)<instructionLength) return null;
   		gl.instructions = bin.readBytes(data, offset, instructionLength);   offset+=instructionLength;
   		
   		var crdnum = gl.endPts[gl.noc-1]+1;
@@ -2856,7 +2588,7 @@
   			if(i8) { gl.xs.push(same ? data[offset] : -data[offset]);  offset++; }
   			else
   			{
-  				if(same) { gl.xs.push(0); }
+  				if(same) gl.xs.push(0);
   				else { gl.xs.push(bin.readShort(data, offset));  offset+=2; }
   			}
   		}
@@ -2866,7 +2598,7 @@
   			if(i8) { gl.ys.push(same ? data[offset] : -data[offset]);  offset++; }
   			else
   			{
-  				if(same) { gl.ys.push(0); }
+  				if(same) gl.ys.push(0);
   				else { gl.ys.push(bin.readShort(data, offset));  offset+=2; }
   			}
   		}
@@ -2944,7 +2676,7 @@
   	if(ltype==1 && tab.fmt==1) {
   		var valFmt1 = bin.readUshort(data, offset);  offset+=2;
   		var ones1 = Typr._lctf.numOfOnes(valFmt1);
-  		if(valFmt1!=0)  { tab.pos = Typr.GPOS.readValueRecord(data, offset, valFmt1); }
+  		if(valFmt1!=0)  tab.pos = Typr.GPOS.readValueRecord(data, offset, valFmt1);
   	}
   	else if(ltype==2) {
   		var valFmt1 = bin.readUshort(data, offset);  offset+=2;
@@ -3024,7 +2756,7 @@
   	
   	tab.fmt  = bin.readUshort(data, offset);  offset+=2;
   	
-  	if(ltype!=1 && ltype!=4 && ltype!=5 && ltype!=6) { return null; }
+  	if(ltype!=1 && ltype!=4 && ltype!=5 && ltype!=6) return null;
   	
   	if(ltype==1 || ltype==4 || (ltype==5 && tab.fmt<=2) || (ltype==6 && tab.fmt<=2)) {
   		var covOff  = bin.readUshort(data, offset);  offset+=2;
@@ -3090,11 +2822,11 @@
   			for(var i=0; i<3; i++) {
   				var cnt = bin.readUshort(data, offset);  offset+=2;
   				var cvgs = [];
-  				for(var j=0; j<cnt; j++) { cvgs.push(  Typr._lctf.readCoverage(data, offset0 + bin.readUshort(data, offset+j*2))   ); }
+  				for(var j=0; j<cnt; j++) cvgs.push(  Typr._lctf.readCoverage(data, offset0 + bin.readUshort(data, offset+j*2))   );
   				offset+=cnt*2;
-  				if(i==0) { tab.backCvg = cvgs; }
-  				if(i==1) { tab.inptCvg = cvgs; }
-  				if(i==2) { tab.ahedCvg = cvgs; }
+  				if(i==0) tab.backCvg = cvgs;
+  				if(i==1) tab.inptCvg = cvgs;
+  				if(i==2) tab.ahedCvg = cvgs;
   			}
   			var cnt = bin.readUshort(data, offset);  offset+=2;
   			tab.lookupRec = Typr.GSUB.readSubstLookupRecords(data, offset, cnt);
@@ -3151,7 +2883,7 @@
   	var bin = Typr._bin, rule = {};
   	var pps = ["backtrack", "input", "lookahead"];
   	for(var pi=0; pi<pps.length; pi++) {
-  		var cnt = bin.readUshort(data, offset);  offset+=2;  if(pi==1) { cnt--; }
+  		var cnt = bin.readUshort(data, offset);  offset+=2;  if(pi==1) cnt--;
   		rule[pps[pi]]=bin.readUshorts(data, offset, cnt);  offset+= rule[pps[pi]].length*2;
   	}
   	var cnt = bin.readUshort(data, offset);  offset+=2;
@@ -3262,7 +2994,7 @@
   	var bin = Typr._bin;
   	
   	var version = bin.readUshort(data, offset);  offset+=2;
-  	if(version==1) { return Typr.kern.parseV1(data, offset-2, length, font); }
+  	if(version==1) return Typr.kern.parseV1(data, offset-2, length, font);
   	var nTables = bin.readUshort(data, offset);  offset+=2;
   	
   	var map = {glyph1: [], rval:[]};
@@ -3273,8 +3005,8 @@
   		var coverage = bin.readUshort(data, offset);  offset+=2;
   		var format = coverage>>>8;
   		/* I have seen format 128 once, that's why I do */ format &= 0xf;
-  		if(format==0) { offset = Typr.kern.readFormat0(data, offset, map); }
-  		else { throw "unknown kern table format: "+format; }
+  		if(format==0) offset = Typr.kern.readFormat0(data, offset, map);
+  		else throw "unknown kern table format: "+format;
   	}
   	return map;
   };
@@ -3294,8 +3026,8 @@
   		var tupleIndex = bin.readUshort(data, offset);  offset+=2;
   		var format = coverage>>>8;
   		/* I have seen format 128 once, that's why I do */ format &= 0xf;
-  		if(format==0) { offset = Typr.kern.readFormat0(data, offset, map); }
-  		else { throw "unknown kern table format: "+format; }
+  		if(format==0) offset = Typr.kern.readFormat0(data, offset, map);
+  		else throw "unknown kern table format: "+format;
   	}
   	return map;
   };
@@ -3333,8 +3065,8 @@
   	//console.log("loca", ver, length, 4*font.maxp.numGlyphs);
   	var len = font.maxp.numGlyphs+1;
   	
-  	if(ver==0) { for(var i=0; i<len; i++) { obj.push(bin.readUshort(data, offset+(i<<1))<<1); } }
-  	if(ver==1) { for(var i=0; i<len; i++) { obj.push(bin.readUint  (data, offset+(i<<2))   ); } }
+  	if(ver==0) for(var i=0; i<len; i++) obj.push(bin.readUshort(data, offset+(i<<1))<<1);
+  	if(ver==1) for(var i=0; i<len; i++) obj.push(bin.readUint  (data, offset+(i<<2))   );
   	
   	return obj;
   };
@@ -3428,17 +3160,17 @@
   		var cname = names[nameID];
   		var soff = offset0 + count*12 + noffset;
   		var str;
-  		if(platformID == 0) { str = bin.readUnicode(data, soff, slen/2); }
-  		else if(platformID == 3 && encodingID == 0) { str = bin.readUnicode(data, soff, slen/2); }
-  		else if(encodingID == 0) { str = bin.readASCII  (data, soff, slen); }
-  		else if(encodingID == 1) { str = bin.readUnicode(data, soff, slen/2); }
-  		else if(encodingID == 3) { str = bin.readUnicode(data, soff, slen/2); }
+  		if(platformID == 0) str = bin.readUnicode(data, soff, slen/2);
+  		else if(platformID == 3 && encodingID == 0) str = bin.readUnicode(data, soff, slen/2);
+  		else if(encodingID == 0) str = bin.readASCII  (data, soff, slen);
+  		else if(encodingID == 1) str = bin.readUnicode(data, soff, slen/2);
+  		else if(encodingID == 3) str = bin.readUnicode(data, soff, slen/2);
   		
   		else if(platformID == 1) { str = bin.readASCII(data, soff, slen);  console.log("reading unknown MAC encoding "+encodingID+" as ASCII"); }
-  		else { throw "unknown encoding "+encodingID + ", platformID: "+platformID; }
+  		else throw "unknown encoding "+encodingID + ", platformID: "+platformID;
   		
   		var tid = "p"+platformID+","+(languageID).toString(16);//Typr._platforms[platformID];
-  		if(obj[tid]==null) { obj[tid] = {}; }
+  		if(obj[tid]==null) obj[tid] = {};
   		obj[tid][cname] = str;
   		obj[tid]._lang = languageID;
   		//console.log(tid, obj[tid]);
@@ -3457,10 +3189,10 @@
   	
   	//console.log(obj);
   	
-  	for(var p in obj) { if(obj[p].postScriptName!=null && obj[p]._lang==0x0409) { return obj[p]; } }		// United States
-  	for(var p in obj) { if(obj[p].postScriptName!=null && obj[p]._lang==0x0000) { return obj[p]; } }		// Universal
-  	for(var p in obj) { if(obj[p].postScriptName!=null && obj[p]._lang==0x0c0c) { return obj[p]; } }		// Canada
-  	for(var p in obj) { if(obj[p].postScriptName!=null) { return obj[p]; } }
+  	for(var p in obj) if(obj[p].postScriptName!=null && obj[p]._lang==0x0409) return obj[p];		// United States
+  	for(var p in obj) if(obj[p].postScriptName!=null && obj[p]._lang==0x0000) return obj[p];		// Universal
+  	for(var p in obj) if(obj[p].postScriptName!=null && obj[p]._lang==0x0c0c) return obj[p];		// Canada
+  	for(var p in obj) if(obj[p].postScriptName!=null) return obj[p];
   	
   	var tname;
   	for(var p in obj) { tname=p; break; }
@@ -3476,11 +3208,11 @@
   	var ver = bin.readUshort(data, offset); offset += 2;
   	
   	var obj = {};
-  	if     (ver==0) { Typr["OS/2"].version0(data, offset, obj); }
-  	else if(ver==1) { Typr["OS/2"].version1(data, offset, obj); }
-  	else if(ver==2 || ver==3 || ver==4) { Typr["OS/2"].version2(data, offset, obj); }
-  	else if(ver==5) { Typr["OS/2"].version5(data, offset, obj); }
-  	else { throw "unknown OS/2 table version: "+ver; }
+  	if     (ver==0) Typr["OS/2"].version0(data, offset, obj);
+  	else if(ver==1) Typr["OS/2"].version1(data, offset, obj);
+  	else if(ver==2 || ver==3 || ver==4) Typr["OS/2"].version2(data, offset, obj);
+  	else if(ver==5) Typr["OS/2"].version5(data, offset, obj);
+  	else throw "unknown OS/2 table version: "+ver;
   	
   	return obj;
   };
@@ -3602,14 +3334,14 @@
   Typr.SVG.toPath = function(str)
   {
   	var pth = {cmds:[], crds:[]};
-  	if(str==null) { return pth; }
+  	if(str==null) return pth;
   	
   	var prsr = new DOMParser();
   	var doc = prsr["parseFromString"](str,"image/svg+xml");
   	
-  	var svg = doc.firstChild;  while(svg.tagName!="svg") { svg = svg.nextSibling; }
+  	var svg = doc.firstChild;  while(svg.tagName!="svg") svg = svg.nextSibling;
   	var vb = svg.getAttribute("viewBox");
-  	if(vb) { vb = vb.trim().split(" ").map(parseFloat); }  else   { vb = [0,0,1000,1000]; }
+  	if(vb) vb = vb.trim().split(" ").map(parseFloat);  else   vb = [0,0,1000,1000];
   	Typr.SVG._toPath(svg.children, pth);
   	for(var i=0; i<pth.crds.length; i+=2) {
   		var x = pth.crds[i], y = pth.crds[i+1];
@@ -3625,8 +3357,8 @@
   Typr.SVG._toPath = function(nds, pth, fill) {
   	for(var ni=0; ni<nds.length; ni++) {
   		var nd = nds[ni], tn = nd.tagName;
-  		var cfl = nd.getAttribute("fill");  if(cfl==null) { cfl = fill; }
-  		if(tn=="g") { Typr.SVG._toPath(nd.children, pth, cfl); }
+  		var cfl = nd.getAttribute("fill");  if(cfl==null) cfl = fill;
+  		if(tn=="g") Typr.SVG._toPath(nd.children, pth, cfl);
   		else if(tn=="path") {
   			pth.cmds.push(cfl?cfl:"#000000");
   			var d = nd.getAttribute("d");  //console.log(d);
@@ -3634,7 +3366,7 @@
   			Typr.SVG._toksToPath(toks, pth);  pth.cmds.push("X");
   		}
   		else if(tn=="defs") ;
-  		else { console.log(tn, nd); }
+  		else console.log(tn, nd);
   	}
   };
 
@@ -3646,15 +3378,15 @@
   		
   		if(rn) {
   			if(ch=="-") {  ts.push(parseFloat(cn));  cn=ch;  }
-  			else if(isNum) { cn+=ch; }
-  			else {  ts.push(parseFloat(cn));  if(ch!="," && ch!=" ") { ts.push(ch); }  rn=false;  }
+  			else if(isNum) cn+=ch;
+  			else {  ts.push(parseFloat(cn));  if(ch!="," && ch!=" ") ts.push(ch);  rn=false;  }
   		}
   		else {
   			if(isNum) {  cn=ch;  rn=true;  }
-  			else if(ch!="," && ch!=" ") { ts.push(ch); }
+  			else if(ch!="," && ch!=" ") ts.push(ch);
   		}
   	}
-  	if(rn) { ts.push(parseFloat(cn)); }
+  	if(rn) ts.push(parseFloat(cn));
   	return ts;
   };
 
@@ -3688,22 +3420,22 @@
   					var x2=xi+ts[i++], y2=yi+ts[i++], x3=xi+ts[i++], y3=yi+ts[i++];  
   					cmds.push("C");  crds.push(x1,y1,x2,y2,x3,y3);  x=x3;  y=y3;
   				}
-  				else { console.log("Unknown SVG command "+cmd); }
+  				else console.log("Unknown SVG command "+cmd);
   			}
   		}
   	}
   };
   Typr.SVG._reps = function(ts, off, ps) {
   	var i = off;
-  	while(i<ts.length) {  if((typeof ts[i]) == "string") { break; }  i+=ps;  }
+  	while(i<ts.length) {  if((typeof ts[i]) == "string") break;  i+=ps;  }
   	return (i-off)/ps;
   };
   // End Typr.js
 
   // Begin Typr.U.js
 
-  if(Typr  ==null) { Typr   = {}; }
-  if(Typr.U==null) { Typr.U = {}; }
+  if(Typr  ==null) Typr   = {};
+  if(Typr.U==null) Typr.U = {};
 
 
   Typr.U.codeToGlyph = function(font, code)
@@ -3711,43 +3443,43 @@
   	var cmap = font.cmap;
   	
   	var tind = -1;
-  	if(cmap.p0e4!=null) { tind = cmap.p0e4; }
-  	else if(cmap.p3e1!=null) { tind = cmap.p3e1; }
-  	else if(cmap.p1e0!=null) { tind = cmap.p1e0; }
-  	else if(cmap.p0e3!=null) { tind = cmap.p0e3; }
+  	if(cmap.p0e4!=null) tind = cmap.p0e4;
+  	else if(cmap.p3e1!=null) tind = cmap.p3e1;
+  	else if(cmap.p1e0!=null) tind = cmap.p1e0;
+  	else if(cmap.p0e3!=null) tind = cmap.p0e3;
   	
-  	if(tind==-1) { throw "no familiar platform and encoding!"; }
+  	if(tind==-1) throw "no familiar platform and encoding!";
   	
   	var tab = cmap.tables[tind];
   	
   	if(tab.format==0)
   	{
-  		if(code>=tab.map.length) { return 0; }
+  		if(code>=tab.map.length) return 0;
   		return tab.map[code];
   	}
   	else if(tab.format==4)
   	{
   		var sind = -1;
-  		for(var i=0; i<tab.endCount.length; i++)   { if(code<=tab.endCount[i]){  sind=i;  break;  } } 
-  		if(sind==-1) { return 0; }
-  		if(tab.startCount[sind]>code) { return 0; }
+  		for(var i=0; i<tab.endCount.length; i++)   if(code<=tab.endCount[i]){  sind=i;  break;  } 
+  		if(sind==-1) return 0;
+  		if(tab.startCount[sind]>code) return 0;
   		
   		var gli = 0;
-  		if(tab.idRangeOffset[sind]!=0) { gli = tab.glyphIdArray[(code-tab.startCount[sind]) + (tab.idRangeOffset[sind]>>1) - (tab.idRangeOffset.length-sind)]; }
-  		else                           { gli = code + tab.idDelta[sind]; }
+  		if(tab.idRangeOffset[sind]!=0) gli = tab.glyphIdArray[(code-tab.startCount[sind]) + (tab.idRangeOffset[sind]>>1) - (tab.idRangeOffset.length-sind)];
+  		else                           gli = code + tab.idDelta[sind];
   		return gli & 0xFFFF;
   	}
   	else if(tab.format==12)
   	{
-  		if(code>tab.groups[tab.groups.length-1][1]) { return 0; }
+  		if(code>tab.groups[tab.groups.length-1][1]) return 0;
   		for(var i=0; i<tab.groups.length; i++)
   		{
   			var grp = tab.groups[i];
-  			if(grp[0]<=code && code<=grp[1]) { return grp[2] + (code-grp[0]); }
+  			if(grp[0]<=code && code<=grp[1]) return grp[2] + (code-grp[0]);
   		}
   		return 0;
   	}
-  	else { throw "unknown cmap table format "+tab.format; }
+  	else throw "unknown cmap table format "+tab.format;
   };
 
 
@@ -3755,7 +3487,7 @@
   {
   	var path = { cmds:[], crds:[] };
   	if(font.SVG && font.SVG.entries[gid]) {
-  		var p = font.SVG.entries[gid];  if(p==null) { return path; }
+  		var p = font.SVG.entries[gid];  if(p==null) return path;
   		if(typeof p == "string") {  p = Typr.SVG.toPath(p);  font.SVG.entries[gid]=p;  }
   		return p;
   	}
@@ -3764,7 +3496,7 @@
   		var cff=font.CFF, pdct = font.CFF.Private;
   		if(cff.ROS) {
   			var gi = 0;
-  			while(cff.FDSelect[gi+2]<=gid) { gi+=2; }
+  			while(cff.FDSelect[gi+2]<=gid) gi+=2;
   			pdct = cff.FDArray[cff.FDSelect[gi+1]].Private;
   		}
   		Typr.U._drawCFF(font.CFF.CharStrings[gid], state, cff, pdct, path);
@@ -3776,10 +3508,10 @@
   Typr.U._drawGlyf = function(gid, font, path)
   {
   	var gl = font.glyf[gid];
-  	if(gl==null) { gl = font.glyf[gid] = Typr.glyf._parseGlyf(font, gid); }
+  	if(gl==null) gl = font.glyf[gid] = Typr.glyf._parseGlyf(font, gid);
   	if(gl!=null){
-  		if(gl.noc>-1) { Typr.U._simpleGlyph(gl, path); }
-  		else          { Typr.U._compoGlyph (gl, font, path); }
+  		if(gl.noc>-1) Typr.U._simpleGlyph(gl, path);
+  		else          Typr.U._compoGlyph (gl, font, path);
   	}
   };
   Typr.U._simpleGlyph = function(gl, p)
@@ -3802,23 +3534,23 @@
   			if(i==i0) { 
   				if(onCurve)  
   				{
-  					if(prOnCurve) { Typr.U.P.moveTo(p, gl.xs[pr], gl.ys[pr]); } 
+  					if(prOnCurve) Typr.U.P.moveTo(p, gl.xs[pr], gl.ys[pr]); 
   					else          {  Typr.U.P.moveTo(p,x,y);  continue;  /*  will do curveTo at il  */  }
   				}
   				else        
   				{
-  					if(prOnCurve) { Typr.U.P.moveTo(p,  gl.xs[pr],       gl.ys[pr]        ); }
-  					else          { Typr.U.P.moveTo(p, (gl.xs[pr]+x)/2, (gl.ys[pr]+y)/2   ); } 
+  					if(prOnCurve) Typr.U.P.moveTo(p,  gl.xs[pr],       gl.ys[pr]        );
+  					else          Typr.U.P.moveTo(p, (gl.xs[pr]+x)/2, (gl.ys[pr]+y)/2   ); 
   				}
   			}
   			if(onCurve)
   			{
-  				if(prOnCurve) { Typr.U.P.lineTo(p,x,y); }
+  				if(prOnCurve) Typr.U.P.lineTo(p,x,y);
   			}
   			else
   			{
-  				if(nxOnCurve) { Typr.U.P.qcurveTo(p, x, y, gl.xs[nx], gl.ys[nx]); } 
-  				else          { Typr.U.P.qcurveTo(p, x, y, (x+gl.xs[nx])/2, (y+gl.ys[nx])/2); } 
+  				if(nxOnCurve) Typr.U.P.qcurveTo(p, x, y, gl.xs[nx], gl.ys[nx]); 
+  				else          Typr.U.P.qcurveTo(p, x, y, (x+gl.xs[nx])/2, (y+gl.ys[nx])/2); 
   			}
   		}
   		Typr.U.P.closePath(p);
@@ -3839,7 +3571,7 @@
   			p.crds.push(x*m.a + y*m.b + m.tx);
   			p.crds.push(x*m.c + y*m.d + m.ty);
   		}
-  		for(var i=0; i<path.cmds.length; i++) { p.cmds.push(path.cmds[i]); }
+  		for(var i=0; i<path.cmds.length; i++) p.cmds.push(path.cmds[i]);
   	}
   };
 
@@ -3863,17 +3595,17 @@
   		for(var i=0; i<flist.length; i++) 
   		{
   			var fl = flist[i];  //console.log(fl);
-  			if(fl.tag!="kern") { continue; }
+  			if(fl.tag!="kern") continue;
   			for(var ti=0; ti<fl.tab.length; ti++) {
-  				if(tused[fl.tab[ti]]) { continue; }  tused[fl.tab[ti]] = true;
+  				if(tused[fl.tab[ti]]) continue;  tused[fl.tab[ti]] = true;
   				var tab = llist[fl.tab[ti]];
   				//console.log(tab);
   				
   				for(var j=0; j<tab.tabs.length; j++)
   				{
-  					if(tab.tabs[i]==null) { continue; }
+  					if(tab.tabs[i]==null) continue;
   					var ltab = tab.tabs[j], ind;
-  					if(ltab.coverage) {  ind = Typr._lctf.coverageIndex(ltab.coverage, g1);  if(ind==-1) { continue; }  }
+  					if(ltab.coverage) {  ind = Typr._lctf.coverageIndex(ltab.coverage, g1);  if(ind==-1) continue;  }
   					
   					if(tab.ltype==1) ;
   					else if(tab.ltype==2)
@@ -3882,7 +3614,7 @@
   						if(ltab.fmt==1)
   						{
   							var right = ltab.pairsets[ind];
-  							for(var i=0; i<right.length; i++) { if(right[i].gid2==g2) { adj = right[i]; } }
+  							for(var i=0; i<right.length; i++) if(right[i].gid2==g2) adj = right[i];
   						}
   						else if(ltab.fmt==2)
   						{
@@ -3891,7 +3623,7 @@
   							adj = ltab.matrix[c1][c2];
   						}
   						//if(adj) console.log(ltab, adj);
-  						if(adj && adj.val2) { return adj.val2[2]; }
+  						if(adj && adj.val2) return adj.val2[2];
   					}
   				}
   			}
@@ -3903,7 +3635,7 @@
   		if(ind1!=-1)
   		{
   			var ind2 = font.kern.rval[ind1].glyph2.indexOf(g2);
-  			if(ind2!=-1) { return font.kern.rval[ind1].vals[ind2]; }
+  			if(ind2!=-1) return font.kern.rval[ind1].vals[ind2];
   		}
   	}
   	
@@ -3914,20 +3646,20 @@
   {
   	var gls = [];
   	for(var i=0; i<str.length; i++) {
-  		var cc = str.codePointAt(i);  if(cc>0xffff) { i++; }
+  		var cc = str.codePointAt(i);  if(cc>0xffff) i++;
   		gls.push(Typr.U.codeToGlyph(font, cc));
   	}
   	for(var i=0; i<str.length; i++) {
   		var cc = str.codePointAt(i);  //
   		if(cc==2367) {  var t=gls[i-1];  gls[i-1]=gls[i];  gls[i]=t;  }
   		//if(cc==2381) {  var t=gls[i+1];  gls[i+1]=gls[i];  gls[i]=t;  }
-  		if(cc>0xffff) { i++; }
+  		if(cc>0xffff) i++;
   	}
   	//console.log(gls.slice(0));
   	
   	//console.log(gls);  return gls;
   	
-  	var gsub = font["GSUB"];  if(gsub==null) { return gls; }
+  	var gsub = font["GSUB"];  if(gsub==null) return gls;
   	var llist = gsub.lookupList, flist = gsub.featureList;
   	
   	var cligs = ["rlig", "liga", "mset",  "isol","init","fina","medi",   "half", "pres", 
@@ -3937,18 +3669,18 @@
   	var tused = [];
   	for(var fi=0; fi<flist.length; fi++)
   	{
-  		var fl = flist[fi];  if(cligs.indexOf(fl.tag)==-1) { continue; }
+  		var fl = flist[fi];  if(cligs.indexOf(fl.tag)==-1) continue;
   		//if(fl.tag=="blwf") continue;
   		//console.log(fl);
   		//console.log(fl.tag);
   		for(var ti=0; ti<fl.tab.length; ti++) {
-  			if(tused[fl.tab[ti]]) { continue; }  tused[fl.tab[ti]] = true;
+  			if(tused[fl.tab[ti]]) continue;  tused[fl.tab[ti]] = true;
   			var tab = llist[fl.tab[ti]];
   			//console.log(fl.tab[ti], tab.ltype);
   			//console.log(fl.tag, tab);
   			for(var ci=0; ci<gls.length; ci++) {
   				var feat = Typr.U._getWPfeature(str, ci);
-  				if("isol,init,fina,medi".indexOf(fl.tag)!=-1 && fl.tag!=feat) { continue; }
+  				if("isol,init,fina,medi".indexOf(fl.tag)!=-1 && fl.tag!=feat) continue;
   				
   				Typr.U._applySubs(gls, ci, tab, llist);
   			}
@@ -3965,15 +3697,15 @@
   	var slft = ci==0            || wsep.indexOf(str[ci-1])!=-1;
   	var srgt = ci==str.length-1 || wsep.indexOf(str[ci+1])!=-1;
   		
-  	if(!slft && R.indexOf(str[ci-1])!=-1) { slft=true; }
-  	if(!srgt && R.indexOf(str[ci  ])!=-1) { srgt=true; }
+  	if(!slft && R.indexOf(str[ci-1])!=-1) slft=true;
+  	if(!srgt && R.indexOf(str[ci  ])!=-1) srgt=true;
   		
-  	if(!srgt && L.indexOf(str[ci+1])!=-1) { srgt=true; }
-  	if(!slft && L.indexOf(str[ci  ])!=-1) { slft=true; }
+  	if(!srgt && L.indexOf(str[ci+1])!=-1) srgt=true;
+  	if(!slft && L.indexOf(str[ci  ])!=-1) slft=true;
   		
   	var feat = null;
-  	if(slft) { feat = srgt ? "isol" : "init"; }
-  	else     { feat = srgt ? "fina" : "medi"; }
+  	if(slft) feat = srgt ? "isol" : "init";
+  	else     feat = srgt ? "fina" : "medi";
   	
   	return feat;
   };
@@ -3982,27 +3714,27 @@
   	//if(ci==0) console.log("++++ ", tab.ltype);
   	for(var j=0; j<tab.tabs.length; j++)
   	{
-  		if(tab.tabs[j]==null) { continue; }
+  		if(tab.tabs[j]==null) continue;
   		var ltab = tab.tabs[j], ind;
-  		if(ltab.coverage) {  ind = Typr._lctf.coverageIndex(ltab.coverage, gls[ci]);  if(ind==-1) { continue; }  }
+  		if(ltab.coverage) {  ind = Typr._lctf.coverageIndex(ltab.coverage, gls[ci]);  if(ind==-1) continue;  }
   		//if(ci==0) console.log(ind, ltab);
   		//*
   		if(tab.ltype==1) {
   			var gl = gls[ci];
-  			if(ltab.fmt==1) { gls[ci] = gls[ci]+ltab.delta; }
-  			else            { gls[ci] = ltab.newg[ind]; }
+  			if(ltab.fmt==1) gls[ci] = gls[ci]+ltab.delta;
+  			else            gls[ci] = ltab.newg[ind];
   			//console.log("applying ... 1", ci, gl, gls[ci]);
   		}//*
   		else if(tab.ltype==4) {
   			var vals = ltab.vals[ind];
   			
   			for(var k=0; k<vals.length; k++) {
-  				var lig = vals[k], rl = lig.chain.length;  if(rl>rlim) { continue; }
+  				var lig = vals[k], rl = lig.chain.length;  if(rl>rlim) continue;
   				var good = true, em1 = 0;
-  				for(var l=0; l<rl; l++) {  while(gls[ci+em1+(1+l)]==-1){ em1++; }  if(lig.chain[l]!=gls[ci+em1+(1+l)]) { good=false; }  }
-  				if(!good) { continue; }
+  				for(var l=0; l<rl; l++) {  while(gls[ci+em1+(1+l)]==-1)em1++;  if(lig.chain[l]!=gls[ci+em1+(1+l)]) good=false;  }
+  				if(!good) continue;
   				gls[ci]=lig.nglyph;
-  				for(var l=0; l<rl+em1; l++) { gls[ci+l+1]=-1; }   break;  // first character changed, other ligatures do not apply anymore
+  				for(var l=0; l<rl+em1; l++) gls[ci+l+1]=-1;   break;  // first character changed, other ligatures do not apply anymore
   				//console.log("lig", ci, lig.chain, lig.nglyph);
   				//console.log("applying ...");
   			}
@@ -4012,13 +3744,13 @@
   			var cls = ltab.cDef[cind+2], scs = ltab.scset[cls]; 
   			for(var i=0; i<scs.length; i++) {
   				var sc = scs[i], inp = sc.input;
-  				if(inp.length>rlim) { continue; }
+  				if(inp.length>rlim) continue;
   				var good = true;
   				for(var l=0; l<inp.length; l++) {
   					var cind2 = Typr._lctf.getInterval(ltab.cDef, gls[ci+1+l]);
   					if(cind==-1 && ltab.cDef[cind2+2]!=inp[l]) {  good=false;  break;  }
   				}
-  				if(!good) { continue; }
+  				if(!good) continue;
   				//console.log(ci, gl);
   				var lrs = sc.substLookupRecords;
   				for(var k=0; k<lrs.length; k+=2)
@@ -4031,9 +3763,9 @@
   		}
   		else if(tab.ltype==6 && ltab.fmt==3) {
   			//if(ltab.backCvg.length==0) return;
-  			if(!Typr.U._glsCovered(gls, ltab.backCvg, ci-ltab.backCvg.length)) { continue; }
-  			if(!Typr.U._glsCovered(gls, ltab.inptCvg, ci)) { continue; }
-  			if(!Typr.U._glsCovered(gls, ltab.ahedCvg, ci+ltab.inptCvg.length)) { continue; }
+  			if(!Typr.U._glsCovered(gls, ltab.backCvg, ci-ltab.backCvg.length)) continue;
+  			if(!Typr.U._glsCovered(gls, ltab.inptCvg, ci)) continue;
+  			if(!Typr.U._glsCovered(gls, ltab.ahedCvg, ci+ltab.inptCvg.length)) continue;
   			//console.log(ci, ltab);
   			var lr = ltab.lookupRec;  //console.log(ci, gl, lr);
   			for(var i=0; i<lr.length; i+=2) {
@@ -4049,7 +3781,7 @@
 
   Typr.U._glsCovered = function(gls, cvgs, ci) {
   	for(var i=0; i<cvgs.length; i++) {
-  		var ind = Typr._lctf.coverageIndex(cvgs[i], gls[ci+i]);  if(ind==-1) { return false; }
+  		var ind = Typr._lctf.coverageIndex(cvgs[i], gls[ci+i]);  if(ind==-1) return false;
   	}
   	return true;
   };
@@ -4063,7 +3795,7 @@
   	
   	for(var i=0; i<gls.length; i++)
   	{
-  		var gid = gls[i];  if(gid==-1) { continue; }
+  		var gid = gls[i];  if(gid==-1) continue;
   		var gid2 = (i<gls.length-1 && gls[i+1]!=-1)  ? gls[i+1] : 0;
   		var path = Typr.U.glyphToPath(font, gid);
   		for(var j=0; j<path.crds.length; j+=2)
@@ -4071,18 +3803,18 @@
   			tpath.crds.push(path.crds[j] + x);
   			tpath.crds.push(path.crds[j+1]);
   		}
-  		if(clr) { tpath.cmds.push(clr); }
-  		for(var j=0; j<path.cmds.length; j++) { tpath.cmds.push(path.cmds[j]); }
-  		if(clr) { tpath.cmds.push("X"); }
+  		if(clr) tpath.cmds.push(clr);
+  		for(var j=0; j<path.cmds.length; j++) tpath.cmds.push(path.cmds[j]);
+  		if(clr) tpath.cmds.push("X");
   		x += font.hmtx.aWidth[gid];// - font.hmtx.lsBearing[gid];
-  		if(i<gls.length-1) { x += Typr.U.getPairAdjustment(font, gid, gid2); }
+  		if(i<gls.length-1) x += Typr.U.getPairAdjustment(font, gid, gid2);
   	}
   	return tpath;
   };
 
   Typr.U.pathToSVG = function(path, prec)
   {
-  	if(prec==null) { prec = 5; }
+  	if(prec==null) prec = 5;
   	var out = [], co = 0, lmap = {"M":2,"L":2,"Q":4,"C":6};
   	for(var i=0; i<path.cmds.length; i++)
   	{
@@ -4203,7 +3935,7 @@
                           width = stack.shift() + pdct.nominalWidthX;
                           haveWidth = true;
                       }
-  			if(open) { Typr.U.P.closePath(p); }
+  			if(open) Typr.U.P.closePath(p);
 
                       y += stack.pop();
   					Typr.U.P.moveTo(p,x,y);   open=true;
@@ -4224,7 +3956,7 @@
   			for(var j=0; j<count; j++) {
   				var sval = stack.shift();
   				
-  				if(isX) { x += sval; }  else  { y += sval; }
+  				if(isX) x += sval;  else  y += sval;
   				isX = !isX;
   				Typr.U.P.lineTo(p, x, y);
   			}
@@ -4250,7 +3982,7 @@
   				Typr.U.P.lineTo(p, x, y);
   			}
   		}
-  		else if(v=="o11")  { break; }
+  		else if(v=="o11")  break;
   		else if(v=="o1234" || v=="o1235" || v=="o1236" || v=="o1237")//if((v+"").slice(0,3)=="o12")
   		{
   			if(v=="o1234")
@@ -4381,7 +4113,7 @@
                       y += stack.pop();
                       x += stack.pop();
   					
-  					if(open) { Typr.U.P.closePath(p); }
+  					if(open) Typr.U.P.closePath(p);
                       Typr.U.P.moveTo(p,x,y);   open=true;
   		}
   		else if(v=="o22")
@@ -4393,7 +4125,7 @@
   					
                       x += stack.pop();
   					
-  					if(open) { Typr.U.P.closePath(p); }
+  					if(open) Typr.U.P.closePath(p);
   					Typr.U.P.moveTo(p,x,y);   open=true;                    
   		}
   		else if(v=="o25")
@@ -4476,7 +4208,7 @@
   					c2y = c1y + stack.shift();
   					y = c2y + stack.shift();
   					if(count-index == 5) {  x = c2x + stack.shift();  index++;  }
-  					else { x = c2x; }
+  					else x = c2x;
   					alternate = false;
   				}
   				else
@@ -4487,7 +4219,7 @@
   					c2y = c1y + stack.shift();
   					x = c2x + stack.shift();
   					if(count-index == 5) {  y = c2y + stack.shift();  index++;  }
-  					else { y = c2y; }
+  					else y = c2y;
   					alternate = true;
   				}
                   Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, x, y);
@@ -4496,7 +4228,7 @@
   		}
   		
   		else if((v+"").charAt(0)=="o") {   console.log("Unknown operation: "+v, cmds); throw v;  }
-  		else { stack.push(v); }
+  		else stack.push(v);
   	}
   	//console.log(cmds);
   	state.x=x; state.y=y; state.nStems=nStems; state.haveWidth=haveWidth; state.width=width; state.open=open;
@@ -4517,8 +4249,8 @@
   function woff2otfFactory() {
 
   // Begin tinyInflate
-  var tinyInflate = (function() {
-    var module = {};
+  const tinyInflate = (function() {
+    const module = {};
     var TINF_OK = 0;
   var TINF_DATA_ERROR = -3;
 
@@ -4575,8 +4307,8 @@
     var i, sum;
 
     /* build bits table */
-    for (i = 0; i < delta; ++i) { bits[i] = 0; }
-    for (i = 0; i < 30 - delta; ++i) { bits[i + delta] = i / delta | 0; }
+    for (i = 0; i < delta; ++i) bits[i] = 0;
+    for (i = 0; i < 30 - delta; ++i) bits[i + delta] = i / delta | 0;
 
     /* build base table */
     for (sum = first, i = 0; i < 30; ++i) {
@@ -4590,23 +4322,23 @@
     var i;
 
     /* build fixed length tree */
-    for (i = 0; i < 7; ++i) { lt.table[i] = 0; }
+    for (i = 0; i < 7; ++i) lt.table[i] = 0;
 
     lt.table[7] = 24;
     lt.table[8] = 152;
     lt.table[9] = 112;
 
-    for (i = 0; i < 24; ++i) { lt.trans[i] = 256 + i; }
-    for (i = 0; i < 144; ++i) { lt.trans[24 + i] = i; }
-    for (i = 0; i < 8; ++i) { lt.trans[24 + 144 + i] = 280 + i; }
-    for (i = 0; i < 112; ++i) { lt.trans[24 + 144 + 8 + i] = 144 + i; }
+    for (i = 0; i < 24; ++i) lt.trans[i] = 256 + i;
+    for (i = 0; i < 144; ++i) lt.trans[24 + i] = i;
+    for (i = 0; i < 8; ++i) lt.trans[24 + 144 + i] = 280 + i;
+    for (i = 0; i < 112; ++i) lt.trans[24 + 144 + 8 + i] = 144 + i;
 
     /* build fixed distance tree */
-    for (i = 0; i < 5; ++i) { dt.table[i] = 0; }
+    for (i = 0; i < 5; ++i) dt.table[i] = 0;
 
     dt.table[5] = 32;
 
-    for (i = 0; i < 32; ++i) { dt.trans[i] = i; }
+    for (i = 0; i < 32; ++i) dt.trans[i] = i;
   }
 
   /* given an array of code lengths, build a tree */
@@ -4616,10 +4348,10 @@
     var i, sum;
 
     /* clear code length count table */
-    for (i = 0; i < 16; ++i) { t.table[i] = 0; }
+    for (i = 0; i < 16; ++i) t.table[i] = 0;
 
     /* scan symbol lengths, and sum code length counts */
-    for (i = 0; i < num; ++i) { t.table[lengths[off + i]]++; }
+    for (i = 0; i < num; ++i) t.table[lengths[off + i]]++;
 
     t.table[0] = 0;
 
@@ -4631,7 +4363,7 @@
 
     /* create code->symbol translation table (symbols sorted by code) */
     for (i = 0; i < num; ++i) {
-      if (lengths[off + i]) { t.trans[offs[lengths[off + i]]++] = i; }
+      if (lengths[off + i]) t.trans[offs[lengths[off + i]]++] = i;
     }
   }
 
@@ -4658,7 +4390,7 @@
   /* read a num bit value from a stream and add base */
   function tinf_read_bits(d, num, base) {
     if (!num)
-      { return base; }
+      return base;
 
     while (d.bitcount < 24) {
       d.tag |= d.source[d.sourceIndex++] << d.bitcount;
@@ -4711,7 +4443,7 @@
     /* get 4 bits HCLEN (4-19) */
     hclen = tinf_read_bits(d, 4, 4);
 
-    for (i = 0; i < 19; ++i) { lengths[i] = 0; }
+    for (i = 0; i < 19; ++i) lengths[i] = 0;
 
     /* read code lengths for code length alphabet */
     for (i = 0; i < hclen; ++i) {
@@ -4818,13 +4550,13 @@
 
     /* check length */
     if (length !== (~invlength & 0x0000ffff))
-      { return TINF_DATA_ERROR; }
+      return TINF_DATA_ERROR;
 
     d.sourceIndex += 4;
 
     /* copy block */
     for (i = length; i; --i)
-      { d.dest[d.destLen++] = d.source[d.sourceIndex++]; }
+      d.dest[d.destLen++] = d.source[d.sourceIndex++];
 
     /* make sure we start next block on a byte boundary */
     d.bitcount = 0;
@@ -4864,15 +4596,15 @@
       }
 
       if (res !== TINF_OK)
-        { throw new Error('Data error'); }
+        throw new Error('Data error');
 
     } while (!bfinal);
 
     if (d.destLen < d.dest.length) {
       if (typeof d.dest.slice === 'function')
-        { return d.dest.slice(0, d.destLen); }
+        return d.dest.slice(0, d.destLen);
       else
-        { return d.dest.subarray(0, d.destLen); }
+        return d.dest.subarray(0, d.destLen);
     }
     
     return d.dest;
@@ -5062,7 +4794,7 @@
    */
 
   function parserFactory(Typr, woff2otf) {
-    var cmdArgLengths = {
+    const cmdArgLengths = {
       M: 2,
       L: 2,
       Q: 4,
@@ -5070,34 +4802,30 @@
       Z: 0
     };
 
-    function wrapFontObj(ref) {
-      var typrFont = ref[0];
+    function wrapFontObj([typrFont]) {
+      const glyphMap = Object.create(null);
 
-      var glyphMap = Object.create(null);
-
-      var fontObj = {
+      const fontObj = {
         unitsPerEm: typrFont.head.unitsPerEm,
         ascender: typrFont.hhea.ascender,
         descender: typrFont.hhea.descender,
-        forEachGlyph: function forEachGlyph(text, fontSize, letterSpacing, callback) {
-          var glyphX = 0;
-          var fontScale = 1 / fontObj.unitsPerEm * fontSize;
+        forEachGlyph(text, fontSize, letterSpacing, callback) {
+          let glyphX = 0;
+          const fontScale = 1 / fontObj.unitsPerEm * fontSize;
 
-          var glyphIndices = Typr.U.stringToGlyphs(typrFont, text);
-          var charIndex = 0;
-          glyphIndices.forEach(function (glyphIndex) {
+          const glyphIndices = Typr.U.stringToGlyphs(typrFont, text);
+          let charIndex = 0;
+          glyphIndices.forEach(glyphIndex => {
             // Typr returns a glyph index per string codepoint, with -1s in place of those that
             // were omitted due to ligature substitution. So we can track original index in the
             // string via simple increment, and skip everything else when seeing a -1.
             if (glyphIndex !== -1) {
-              var glyphObj = glyphMap[glyphIndex];
+              let glyphObj = glyphMap[glyphIndex];
               if (!glyphObj) {
                 // !!! NOTE: Typr doesn't expose a public accessor for the glyph data, so this just
                 // copies how it parses that data in Typr.U._drawGlyf -- this may be fragile.
-                var typrGlyph = Typr.glyf._parseGlyf(typrFont, glyphIndex) || {xMin: 0, xMax: 0, yMin: 0, yMax: 0};
-                var ref = Typr.U.glyphToPath(typrFont, glyphIndex);
-                var cmds = ref.cmds;
-                var crds = ref.crds;
+                const typrGlyph = Typr.glyf._parseGlyf(typrFont, glyphIndex) || {xMin: 0, xMax: 0, yMin: 0, yMax: 0};
+                const {cmds, crds} = Typr.U.glyphToPath(typrFont, glyphIndex);
 
                 glyphObj = glyphMap[glyphIndex] = {
                   index: glyphIndex,
@@ -5107,14 +4835,14 @@
                   xMax: typrGlyph.xMax,
                   yMax: typrGlyph.yMax,
                   pathCommandCount: cmds.length,
-                  forEachPathCommand: function forEachPathCommand(callback) {
-                    var argsIndex = 0;
-                    var argsArray = [];
-                    for (var i = 0, len = cmds.length; i < len; i++) {
-                      var numArgs = cmdArgLengths[cmds[i]];
+                  forEachPathCommand(callback) {
+                    let argsIndex = 0;
+                    const argsArray = [];
+                    for (let i = 0, len = cmds.length; i < len; i++) {
+                      const numArgs = cmdArgLengths[cmds[i]];
                       argsArray.length = 1 + numArgs;
                       argsArray[0] = cmds[i];
-                      for (var j = 1; j <= numArgs; j++) {
+                      for (let j = 1; j <= numArgs; j++) {
                         argsArray[j] = crds[argsIndex++];
                       }
                       callback.apply(null, argsArray);
@@ -5143,8 +4871,8 @@
 
     return function parse(buffer) {
       // Look to see if we have a WOFF file and convert it if so:
-      var peek = new Uint8Array(buffer, 0, 4);
-      var tag = Typr._bin.readASCII(peek, 0, 4);
+      const peek = new Uint8Array(buffer, 0, 4);
+      const tag = Typr._bin.readASCII(peek, 0, 4);
       if (tag === 'wOFF') {
         buffer = woff2otf(buffer);
       } else if (tag === 'wOF2') {
@@ -5155,11 +4883,11 @@
   }
 
 
-  var workerModule = defineWorkerModule({
+  const workerModule = defineWorkerModule({
     dependencies: [typrFactory, woff2otfFactory, parserFactory],
-    init: function init(typrFactory, woff2otfFactory, parserFactory) {
-      var Typr = typrFactory();
-      var woff2otf = woff2otfFactory();
+    init(typrFactory, woff2otfFactory, parserFactory) {
+      const Typr = typrFactory();
+      const woff2otf = woff2otfFactory();
       return parserFactory(Typr, woff2otf)
     }
   });
@@ -5167,12 +4895,12 @@
   //import fontParser from './FontParser_OpenType.js'
 
 
-  var CONFIG = {
+  const CONFIG = {
     defaultFontURL: 'https://fonts.gstatic.com/s/roboto/v18/KFOmCnqEu92Fr1Mu4mxM.woff', //Roboto Regular
     sdfGlyphSize: 64,
     textureWidth: 2048
   };
-  var linkEl = document.createElement('a'); //for resolving relative URLs to absolute
+  const linkEl = document.createElement('a'); //for resolving relative URLs to absolute
 
 
   /**
@@ -5183,7 +4911,7 @@
    * and improves readability/antialiasing quality at small display sizes, but also decreases the number
    * of texels available for encoding path details.
    */
-  var SDF_DISTANCE_PERCENT = 1 / 8;
+  const SDF_DISTANCE_PERCENT = 1 / 8;
 
 
   /**
@@ -5195,7 +4923,7 @@
    *     }
    *   }
    */
-  var atlases = Object.create(null);
+  const atlases = Object.create(null);
 
   /**
    * @typedef {object} TroikaTextRenderInfo - Format of the result from `getTextRenderInfo`.
@@ -5234,9 +4962,8 @@
     args.text = '' + args.text;
 
     // Init the atlas for this font if needed
-    var sdfGlyphSize = CONFIG.sdfGlyphSize;
-    var textureWidth = CONFIG.textureWidth;
-    var atlas = atlases[args.font];
+    const {sdfGlyphSize, textureWidth} = CONFIG;
+    let atlas = atlases[args.font];
     if (!atlas) {
       atlas = atlases[args.font] = {
         sdfTexture: new three.DataTexture(
@@ -5256,31 +4983,28 @@
     }
 
     // Issue request to the FontProcessor in the worker
-    processInWorker(args).then(function (result) {
+    processInWorker(args).then(result => {
       // If the response has newGlyphs, copy them into the atlas texture at the specified indices
       if (result.newGlyphSDFs) {
-        result.newGlyphSDFs.forEach(function (ref) {
-          var textureData = ref.textureData;
-          var atlasIndex = ref.atlasIndex;
-
-          var texImg = atlas.sdfTexture.image;
+        result.newGlyphSDFs.forEach(({textureData, atlasIndex}) => {
+          const texImg = atlas.sdfTexture.image;
 
           // Grow the texture by power of 2 if needed
           while (texImg.data.length < (atlasIndex + 1) * sdfGlyphSize * sdfGlyphSize) {
-            var biggerArray = new Uint8Array(texImg.data.length * 2);
+            const biggerArray = new Uint8Array(texImg.data.length * 2);
             biggerArray.set(texImg.data);
             texImg.data = biggerArray;
             texImg.height *= 2;
           }
 
           // Insert the new glyph's data into the full texture image at the correct offsets
-          var cols = texImg.width / sdfGlyphSize;
-          for (var y = 0; y < sdfGlyphSize; y++) {
-            var srcStartIndex = y * sdfGlyphSize;
-            var tgtStartIndex = texImg.width * sdfGlyphSize * Math.floor(atlasIndex / cols) //full rows
+          const cols = texImg.width / sdfGlyphSize;
+          for (let y = 0; y < sdfGlyphSize; y++) {
+            const srcStartIndex = y * sdfGlyphSize;
+            const tgtStartIndex = texImg.width * sdfGlyphSize * Math.floor(atlasIndex / cols) //full rows
               + (atlasIndex % cols) * sdfGlyphSize //partial row
               + (y * texImg.width); //row within glyph
-            for (var x = 0; x < sdfGlyphSize; x++) {
+            for (let x = 0; x < sdfGlyphSize; x++) {
               texImg.data[tgtStartIndex + x] = textureData[srcStartIndex + x];
             }
           }
@@ -5291,7 +5015,7 @@
       // Invoke callback with the text layout arrays and updated texture
       callback(Object.freeze({
         sdfTexture: atlas.sdfTexture,
-        sdfGlyphSize: sdfGlyphSize,
+        sdfGlyphSize,
         sdfMinDistancePercent: SDF_DISTANCE_PERCENT,
         glyphBounds: result.glyphBounds,
         glyphAtlasIndices: result.glyphAtlasIndices,
@@ -5305,7 +5029,7 @@
 
   // Local assign impl so we don't have to import troika-core
   function assign$1(toObj, fromObj) {
-    for (var key in fromObj) {
+    for (let key in fromObj) {
       if (fromObj.hasOwnProperty(key)) {
         toObj[key] = fromObj[key];
       }
@@ -5314,7 +5038,7 @@
   }
 
 
-  var fontProcessorWorkerModule = defineWorkerModule({
+  const fontProcessorWorkerModule = defineWorkerModule({
     dependencies: [
       CONFIG,
       SDF_DISTANCE_PERCENT,
@@ -5322,10 +5046,10 @@
       createSDFGenerator,
       createFontProcessor
     ],
-    init: function init(config, sdfDistancePercent, fontParser, createSDFGenerator, createFontProcessor) {
-      var sdfGenerator = createSDFGenerator({
+    init(config, sdfDistancePercent, fontParser, createSDFGenerator, createFontProcessor) {
+      const sdfGenerator = createSDFGenerator({
         sdfTextureSize: config.sdfGlyphSize,
-        sdfDistancePercent: sdfDistancePercent
+        sdfDistancePercent
       });
       return createFontProcessor(fontParser, sdfGenerator, {
         defaultFontUrl: config.defaultFontURL
@@ -5333,18 +5057,18 @@
     }
   });
 
-  var processInWorker = defineWorkerModule({
+  const processInWorker = defineWorkerModule({
     dependencies: [fontProcessorWorkerModule, ThenableWorkerModule],
-    init: function init(fontProcessor, Thenable) {
+    init(fontProcessor, Thenable) {
       return function(args) {
-        var thenable = new Thenable();
+        const thenable = new Thenable();
         fontProcessor.process(args, thenable.resolve);
         return thenable
       }
     },
-    getTransferables: function getTransferables(result) {
+    getTransferables(result) {
       // Mark array buffers as transferable to avoid cloning during postMessage
-      var transferables = [
+      const transferables = [
         result.glyphBounds.buffer,
         result.glyphAtlasIndices.buffer
       ];
@@ -5352,7 +5076,7 @@
         transferables.push(result.caretPositions.buffer);
       }
       if (result.newGlyphSDFs) {
-        result.newGlyphSDFs.forEach(function (d) {
+        result.newGlyphSDFs.forEach(d => {
           transferables.push(d.textureData.buffer);
         });
       }
@@ -5385,11 +5109,11 @@
   }
   */
 
-  var templateGeometry = new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0);
-  var tempVec3 = new three.Vector3();
+  const templateGeometry = new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0);
+  const tempVec3 = new three.Vector3();
 
-  var glyphBoundsAttrName = 'aTroikaGlyphBounds';
-  var glyphIndexAttrName = 'aTroikaGlyphIndex';
+  const glyphBoundsAttrName = 'aTroikaGlyphBounds';
+  const glyphIndexAttrName = 'aTroikaGlyphIndex';
 
 
 
@@ -5423,9 +5147,9 @@
   which we could potentially work around with a fallback non-instanced implementation.
 
   */
-  var GlyphsGeometry = /*@__PURE__*/(function (InstancedBufferGeometry) {
-    function GlyphsGeometry() {
-      InstancedBufferGeometry.call(this);
+  class GlyphsGeometry extends three.InstancedBufferGeometry {
+    constructor() {
+      super();
 
       // Base per-instance attributes
       this.copy(templateGeometry);
@@ -5434,13 +5158,9 @@
       this.boundingSphere = new three.Sphere();
     }
 
-    if ( InstancedBufferGeometry ) GlyphsGeometry.__proto__ = InstancedBufferGeometry;
-    GlyphsGeometry.prototype = Object.create( InstancedBufferGeometry && InstancedBufferGeometry.prototype );
-    GlyphsGeometry.prototype.constructor = GlyphsGeometry;
-
-    GlyphsGeometry.prototype.computeBoundingSphere = function computeBoundingSphere () {
+    computeBoundingSphere () {
       // No-op; we'll sync the boundingSphere proactively in `updateGlyphs`.
-    };
+    }
 
     /**
      * Update the geometry for a new set of glyphs.
@@ -5450,24 +5170,22 @@
      *        the SDF atlas texture.
      * @param {Array} totalBounds - An array holding the [minX, minY, maxX, maxY] across all glyphs
      */
-    GlyphsGeometry.prototype.updateGlyphs = function updateGlyphs (glyphBounds, glyphAtlasIndices, totalBounds) {
+    updateGlyphs(glyphBounds, glyphAtlasIndices, totalBounds) {
       // Update the instance attributes
       updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
       updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
       this.maxInstancedCount = glyphAtlasIndices.length;
 
       // Update the boundingSphere based on the total bounds
-      var sphere = this.boundingSphere;
+      const sphere = this.boundingSphere;
       sphere.center.set(
         (totalBounds[0] + totalBounds[2]) / 2,
         (totalBounds[1] + totalBounds[3]) / 2,
         0
       );
       sphere.radius = sphere.center.distanceTo(tempVec3.set(totalBounds[0], totalBounds[1], 0));
-    };
-
-    return GlyphsGeometry;
-  }(three.InstancedBufferGeometry));
+    }
+  }
 
   // Compat for pre r109:
   if (!GlyphsGeometry.prototype.setAttribute) {
@@ -5479,7 +5197,7 @@
 
 
   function updateBufferAttr(geom, attrName, newArray, itemSize) {
-    var attr = geom.getAttribute(attrName);
+    const attr = geom.getAttribute(attrName);
     // If length isn't changing, just update the attribute's array data
     if (attr && attr.array.length === newArray.length) {
       attr.array.set(newArray);
@@ -5490,23 +5208,116 @@
   }
 
   // language=GLSL
-  var VERTEX_DEFS = "\nuniform vec2 uTroikaSDFTextureSize;\nuniform float uTroikaSDFGlyphSize;\nuniform vec4 uTroikaTotalBounds;\nattribute vec4 aTroikaGlyphBounds;\nattribute float aTroikaGlyphIndex;\nvarying vec2 vTroikaSDFTextureUV;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n";
+  const VERTEX_DEFS = `
+uniform vec2 uTroikaSDFTextureSize;
+uniform float uTroikaSDFGlyphSize;
+uniform vec4 uTroikaTotalBounds;
+attribute vec4 aTroikaGlyphBounds;
+attribute float aTroikaGlyphIndex;
+varying vec2 vTroikaSDFTextureUV;
+varying vec2 vTroikaGlyphUV;
+varying vec3 vTroikaLocalPos;
+`;
 
   // language=GLSL prefix="void main() {" suffix="}"
-  var VERTEX_TRANSFORM = "\nvTroikaGlyphUV = vec2(position);\n\nvec2 colsAndRows = uTroikaSDFTextureSize / uTroikaSDFGlyphSize;\nvTroikaSDFTextureUV = vec2(\n  mod(aTroikaGlyphIndex, colsAndRows.x) + position.x,\n  floor(aTroikaGlyphIndex / colsAndRows.x) + position.y\n) * uTroikaSDFGlyphSize / uTroikaSDFTextureSize;\n\nposition = vec3(\n  mix(aTroikaGlyphBounds.x, aTroikaGlyphBounds.z, position.x),\n  mix(aTroikaGlyphBounds.y, aTroikaGlyphBounds.w, position.y),\n  position.z\n);\nvTroikaLocalPos = vec3(position);\n\nuv = vec2(\n  (position.x - uTroikaTotalBounds.x) / (uTroikaTotalBounds.z - uTroikaTotalBounds.x),\n  (position.y - uTroikaTotalBounds.y) / (uTroikaTotalBounds.w - uTroikaTotalBounds.y)\n);\n";
+  const VERTEX_TRANSFORM = `
+vTroikaGlyphUV = vec2(position);
+
+vec2 colsAndRows = uTroikaSDFTextureSize / uTroikaSDFGlyphSize;
+vTroikaSDFTextureUV = vec2(
+  mod(aTroikaGlyphIndex, colsAndRows.x) + position.x,
+  floor(aTroikaGlyphIndex / colsAndRows.x) + position.y
+) * uTroikaSDFGlyphSize / uTroikaSDFTextureSize;
+
+position = vec3(
+  mix(aTroikaGlyphBounds.x, aTroikaGlyphBounds.z, position.x),
+  mix(aTroikaGlyphBounds.y, aTroikaGlyphBounds.w, position.y),
+  position.z
+);
+vTroikaLocalPos = vec3(position);
+
+uv = vec2(
+  (position.x - uTroikaTotalBounds.x) / (uTroikaTotalBounds.z - uTroikaTotalBounds.x),
+  (position.y - uTroikaTotalBounds.y) / (uTroikaTotalBounds.w - uTroikaTotalBounds.y)
+);
+`;
 
   // language=GLSL
-  var FRAGMENT_DEFS = "\nuniform sampler2D uTroikaSDFTexture;\nuniform float uTroikaSDFMinDistancePct;\nuniform bool uTroikaSDFDebug;\nuniform vec4 uTroikaClipRect;\nvarying vec2 vTroikaSDFTextureUV;\nvarying vec2 vTroikaGlyphUV;\nvarying vec3 vTroikaLocalPos;\n\nfloat troikaGetClipAlpha() {\n  vec4 clip = uTroikaClipRect;\n  vec3 pos = vTroikaLocalPos;\n  float dClip = min(\n    min(pos.x - min(clip.x, clip.z), max(clip.x, clip.z) - pos.x),\n    min(pos.y - min(clip.y, clip.w), max(clip.y, clip.w) - pos.y)\n  );\n  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float aa = length(fwidth(pos)) * 0.5;\n  return smoothstep(-aa, aa, dClip);\n  #else\n  return step(0.0, dClip);\n  #endif\n}\n\nfloat troikaGetTextAlpha() {\n  float troikaSDFValue = texture2D(uTroikaSDFTexture, vTroikaSDFTextureUV).r;\n  \n  #if defined(IS_DEPTH_MATERIAL) || defined(IS_DISTANCE_MATERIAL)\n  float alpha = step(0.5, troikaSDFValue);\n  #else\n  " + ('') + "\n  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300\n  float aaDist = min(\n    0.5,\n    0.5 * min(\n      fwidth(vTroikaGlyphUV.x),\n      fwidth(vTroikaGlyphUV.y)\n    )\n  ) / uTroikaSDFMinDistancePct;\n  #else\n  float aaDist = 0.01;\n  #endif\n  \n  float alpha = uTroikaSDFDebug ? troikaSDFValue : smoothstep(\n    0.5 - aaDist,\n    0.5 + aaDist,\n    troikaSDFValue\n  );\n  #endif\n  \n  return min(alpha, troikaGetClipAlpha());\n}\n";
+  const FRAGMENT_DEFS = `
+uniform sampler2D uTroikaSDFTexture;
+uniform float uTroikaSDFMinDistancePct;
+uniform bool uTroikaSDFDebug;
+uniform vec4 uTroikaClipRect;
+varying vec2 vTroikaSDFTextureUV;
+varying vec2 vTroikaGlyphUV;
+varying vec3 vTroikaLocalPos;
+
+float troikaGetClipAlpha() {
+  vec4 clip = uTroikaClipRect;
+  vec3 pos = vTroikaLocalPos;
+  float dClip = min(
+    min(pos.x - min(clip.x, clip.z), max(clip.x, clip.z) - pos.x),
+    min(pos.y - min(clip.y, clip.w), max(clip.y, clip.w) - pos.y)
+  );
+  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300
+  float aa = length(fwidth(pos)) * 0.5;
+  return smoothstep(-aa, aa, dClip);
+  #else
+  return step(0.0, dClip);
+  #endif
+}
+
+float troikaGetTextAlpha() {
+  float troikaSDFValue = texture2D(uTroikaSDFTexture, vTroikaSDFTextureUV).r;
+  
+  #if defined(IS_DEPTH_MATERIAL) || defined(IS_DISTANCE_MATERIAL)
+  float alpha = step(0.5, troikaSDFValue);
+  #else
+  ${''/*
+    When the standard derivatives extension is available, we choose an antialiasing alpha threshold based
+    on the potential change in the SDF's alpha from this fragment to its neighbor. This strategy maximizes 
+    readability and edge crispness at all sizes and screen resolutions. Interestingly, this also means that 
+    below a minimum size we're effectively displaying the SDF texture unmodified.
+  */}
+  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300
+  float aaDist = min(
+    0.5,
+    0.5 * min(
+      fwidth(vTroikaGlyphUV.x),
+      fwidth(vTroikaGlyphUV.y)
+    )
+  ) / uTroikaSDFMinDistancePct;
+  #else
+  float aaDist = 0.01;
+  #endif
+  
+  float alpha = uTroikaSDFDebug ? troikaSDFValue : smoothstep(
+    0.5 - aaDist,
+    0.5 + aaDist,
+    troikaSDFValue
+  );
+  #endif
+  
+  return min(alpha, troikaGetClipAlpha());
+}
+`;
 
   // language=GLSL prefix="void main() {" suffix="}"
-  var FRAGMENT_TRANSFORM = "\nfloat troikaAlphaMult = troikaGetTextAlpha();\nif (troikaAlphaMult == 0.0) {\n  discard;\n} else {\n  gl_FragColor.a *= troikaAlphaMult;\n}\n";
+  const FRAGMENT_TRANSFORM = `
+float troikaAlphaMult = troikaGetTextAlpha();
+if (troikaAlphaMult == 0.0) {
+  discard;
+} else {
+  gl_FragColor.a *= troikaAlphaMult;
+}
+`;
 
 
   /**
    * Create a material for rendering text, derived from a baseMaterial
    */
   function createTextDerivedMaterial(baseMaterial) {
-    var textMaterial = createDerivedMaterial(baseMaterial, {
+    const textMaterial = createDerivedMaterial(baseMaterial, {
       extensions: {derivatives: true},
       uniforms: {
         uTroikaSDFTexture: {value: null},
@@ -5529,7 +5340,7 @@
     // WebGLShadowMap reverses the side of the shadow material by default, which fails
     // for planes, so here we force the `shadowSide` to always match the main side.
     Object.defineProperty(textMaterial, 'shadowSide', {
-      get: function get() {
+      get() {
         return this.side
       }
     });
@@ -5537,15 +5348,15 @@
     return textMaterial
   }
 
-  var defaultMaterial = new three.MeshBasicMaterial({
+  const defaultMaterial = new three.MeshBasicMaterial({
     color: 0xffffff,
     side: three.DoubleSide,
     transparent: true
   });
 
-  var tempMat4 = new three.Matrix4();
+  const tempMat4 = new three.Matrix4();
 
-  var raycastMesh = new three.Mesh(
+  const raycastMesh = new three.Mesh(
     new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0),
     defaultMaterial
   );
@@ -5558,10 +5369,10 @@
    * A ThreeJS Mesh that renders a string of text on a plane in 3D space using signed distance
    * fields (SDF).
    */
-  var TextMesh = /*@__PURE__*/(function (Mesh) {
-    function TextMesh(material) {
-      var geometry = new GlyphsGeometry();
-      Mesh.call(this, geometry, null);
+  class TextMesh extends three.Mesh {
+    constructor(material) {
+      const geometry = new GlyphsGeometry();
+      super(geometry, null);
 
       // === Text layout properties: === //
 
@@ -5680,21 +5491,13 @@
       this.debugSDF = false;
     }
 
-    if ( Mesh ) TextMesh.__proto__ = Mesh;
-    TextMesh.prototype = Object.create( Mesh && Mesh.prototype );
-    TextMesh.prototype.constructor = TextMesh;
-
-    var prototypeAccessors = { textRenderInfo: { configurable: true },material: { configurable: true },customDepthMaterial: { configurable: true },customDistanceMaterial: { configurable: true } };
-
     /**
      * Updates the text rendering according to the current text-related configuration properties.
      * This is an async process, so you can pass in a callback function to be executed when it
      * finishes.
      * @param {function} [callback]
      */
-    TextMesh.prototype.sync = function sync (callback) {
-      var this$1 = this;
-
+    sync(callback) {
       if (this._needsSync) {
         this._needsSync = false;
 
@@ -5716,22 +5519,22 @@
             overflowWrap: this.overflowWrap,
             anchor: this.anchor,
             includeCaretPositions: true //TODO parameterize
-          }, function (textRenderInfo) {
-            this$1._isSyncing = false;
+          }, textRenderInfo => {
+            this._isSyncing = false;
 
             // Save result for later use in onBeforeRender
-            this$1._textRenderInfo = textRenderInfo;
+            this._textRenderInfo = textRenderInfo;
 
             // Update the geometry attributes
-            this$1.geometry.updateGlyphs(textRenderInfo.glyphBounds, textRenderInfo.glyphAtlasIndices, textRenderInfo.totalBounds);
+            this.geometry.updateGlyphs(textRenderInfo.glyphBounds, textRenderInfo.glyphAtlasIndices, textRenderInfo.totalBounds);
 
             // If we had extra sync requests queued up, kick it off
-            var queued = this$1._queuedSyncs;
+            const queued = this._queuedSyncs;
             if (queued) {
-              this$1._queuedSyncs = null;
-              this$1._needsSync = true;
-              this$1.sync(function () {
-                queued.forEach(function (fn) { return fn && fn(); });
+              this._queuedSyncs = null;
+              this._needsSync = true;
+              this.sync(() => {
+                queued.forEach(fn => fn && fn());
               });
             }
 
@@ -5741,7 +5544,7 @@
           });
         }
       }
-    };
+    }
 
     /**
      * Initiate a sync if needed - note it won't complete until next frame at the
@@ -5749,10 +5552,10 @@
      * all the properties have been set.
      * @override
      */
-    TextMesh.prototype.onBeforeRender = function onBeforeRender () {
+    onBeforeRender() {
       this.sync();
       this._prepareMaterial();
-    };
+    }
 
     /**
      * Shortcut to dispose the geometry specific to this instance.
@@ -5761,9 +5564,9 @@
      * is recompiled. Instead users can dispose the base material manually, like normal,
      * and we'll also dispose the derived material at that time.
      */
-    TextMesh.prototype.dispose = function dispose () {
+    dispose() {
       this.geometry.dispose();
-    };
+    }
 
     /**
      * @property {TroikaTextRenderInfo|null} textRenderInfo
@@ -5772,15 +5575,15 @@
      * a `sync()` call. This will be `null` initially, and may be stale for a short period until
      * the asynchrous `sync()` process completes.
      */
-    prototypeAccessors.textRenderInfo.get = function () {
+    get textRenderInfo() {
       return this._textRenderInfo || null
-    };
+    }
 
     // Handler for automatically wrapping the base material with our upgrades. We do the wrapping
     // lazily on _read_ rather than write to avoid unnecessary wrapping on transient values.
-    prototypeAccessors.material.get = function () {
-      var derivedMaterial = this._derivedMaterial;
-      var baseMaterial = this._baseMaterial || defaultMaterial;
+    get material() {
+      let derivedMaterial = this._derivedMaterial;
+      const baseMaterial = this._baseMaterial || defaultMaterial;
       if (!derivedMaterial || derivedMaterial.baseMaterial !== baseMaterial) {
         if (derivedMaterial) {
           derivedMaterial.dispose();
@@ -5793,49 +5596,48 @@
         });
       }
       return derivedMaterial
-    };
-    prototypeAccessors.material.set = function (baseMaterial) {
+    }
+    set material(baseMaterial) {
       this._baseMaterial = baseMaterial;
-    };
+    }
 
     // Create and update material for shadows upon request:
-    prototypeAccessors.customDepthMaterial.get = function () {
+    get customDepthMaterial() {
       return this._updateLayoutUniforms(this.material.getDepthMaterial())
-    };
-    prototypeAccessors.customDistanceMaterial.get = function () {
+    }
+    get customDistanceMaterial() {
       return this._updateLayoutUniforms(this.material.getDistanceMaterial())
-    };
+    }
 
-    TextMesh.prototype._prepareMaterial = function _prepareMaterial () {
-      var material = this._derivedMaterial;
+    _prepareMaterial() {
+      const material = this._derivedMaterial;
       this._updateLayoutUniforms(material);
 
       // presentation uniforms:
-      var uniforms = material.uniforms;
+      const uniforms = material.uniforms;
       uniforms.uTroikaSDFDebug.value = !!this.debugSDF;
       material.polygonOffset = !!this.depthOffset;
       material.polygonOffsetFactor = material.polygonOffsetUnits = this.depthOffset || 0;
 
       // shortcut for setting material color via facade prop:
-      var color = this.color;
+      const color = this.color;
       if (color != null && material.color && material.color.isColor && color !== material._troikaColor) {
         material.color.set(material._troikaColor = color);
       }
-    };
+    }
 
-    TextMesh.prototype._updateLayoutUniforms = function _updateLayoutUniforms (material) {
-      var textInfo = this.textRenderInfo;
-      var uniforms = material.uniforms;
+    _updateLayoutUniforms(material) {
+      const textInfo = this.textRenderInfo;
+      const uniforms = material.uniforms;
       if (textInfo) {
-        var sdfTexture = textInfo.sdfTexture;
-        var totalBounds = textInfo.totalBounds;
+        const {sdfTexture, totalBounds} = textInfo;
         uniforms.uTroikaSDFTexture.value = sdfTexture;
         uniforms.uTroikaSDFTextureSize.value.set(sdfTexture.image.width, sdfTexture.image.height);
         uniforms.uTroikaSDFGlyphSize.value = textInfo.sdfGlyphSize;
         uniforms.uTroikaSDFMinDistancePct.value = textInfo.sdfMinDistancePercent;
         uniforms.uTroikaTotalBounds.value.fromArray(totalBounds);
 
-        var clipRect = this.clipRect;
+        let clipRect = this.clipRect;
         if (!(clipRect && Array.isArray(clipRect) && clipRect.length === 4)) {
           uniforms.uTroikaClipRect.value.fromArray(totalBounds);
         } else {
@@ -5848,16 +5650,16 @@
         }
       }
       return material
-    };
+    }
 
     /**
      * @override Custom raycasting to test against the whole text block's max rectangular bounds
      * TODO is there any reason to make this more granular, like within individual line or glyph rects?
      */
-    TextMesh.prototype.raycast = function raycast (raycaster, intersects) {
-      var textInfo = this.textRenderInfo;
+    raycast(raycaster, intersects) {
+      const textInfo = this.textRenderInfo;
       if (textInfo) {
-        var bounds = textInfo.totalBounds;
+        const bounds = textInfo.totalBounds;
         raycastMesh.matrixWorld.multiplyMatrices(
           this.matrixWorld,
           tempMat4.set(
@@ -5869,16 +5671,13 @@
         );
         raycastMesh.raycast(raycaster, intersects);
       }
-    };
+    }
 
-    Object.defineProperties( TextMesh.prototype, prototypeAccessors );
-
-    return TextMesh;
-  }(three.Mesh));
+  }
 
 
   // Create setters for properties that affect text layout:
-  var SYNCABLE_PROPS = [
+  const SYNCABLE_PROPS = [
     'font',
     'fontSize',
     'letterSpacing',
@@ -5890,8 +5689,8 @@
     'whiteSpace',
     'anchor'
   ];
-  SYNCABLE_PROPS.forEach(function (prop) {
-    var privateKey = '_private_' + prop;
+  SYNCABLE_PROPS.forEach(prop => {
+    const privateKey = '_private_' + prop;
     Object.defineProperty(TextMesh.prototype, prop, {
       get: function() {
         return this[privateKey]
@@ -5978,7 +5777,7 @@
       mesh.font = data.font; //TODO allow aframe stock font names
       mesh.fontSize = data.fontSize;
       mesh.letterSpacing = data.letterSpacing || 0;
-      mesh.lineHeight = data.lineHeight || null;
+      mesh.lineHeight = data.lineHeight || 'normal';
       mesh.overflowWrap = data.overflowWrap;
       mesh.whiteSpace = data.whiteSpace;
       mesh.maxWidth = data.maxWidth;
