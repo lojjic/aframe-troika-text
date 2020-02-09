@@ -9,14 +9,14 @@
     "build": "rollup -c rollup.config.js"
   },
   "dependencies": {
-    "troika-3d-text": "^0.17.0"
+    "troika-3d-text": "0.17.0"
   },
   "peerDependencies": {
-    "aframe": "^1.0.3"
+    "aframe": "^1.0.4"
   },
   "devDependencies": {
-    "aframe": "1.0.3",
-    "rollup": "1.29.0",
+    "aframe": "1.0.4",
+    "rollup": "1.31.0",
     "rollup-plugin-node-resolve": "5.2.0",
     "rollup-plugin-terser": "5.2.0"
   }
