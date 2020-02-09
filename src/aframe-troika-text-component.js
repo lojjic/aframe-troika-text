@@ -70,7 +70,7 @@ aframe.registerComponent(COMPONENT_NAME, {
     mesh.font = data.font //TODO allow aframe stock font names
     mesh.fontSize = data.fontSize
     mesh.letterSpacing = data.letterSpacing || 0
-    mesh.lineHeight = data.lineHeight || null
+    mesh.lineHeight = data.lineHeight || 'normal'
     mesh.overflowWrap = data.overflowWrap
     mesh.whiteSpace = data.whiteSpace
     mesh.maxWidth = data.maxWidth
