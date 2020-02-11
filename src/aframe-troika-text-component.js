@@ -12,6 +12,25 @@ aframe.registerComponent(COMPONENT_NAME, {
     align: {type: 'string', default: 'left', oneOf: ['left', 'right', 'center']},
     anchor: {default: 'center', oneOf: ['left', 'right', 'center', 'align']},
     baseline: {default: 'center', oneOf: ['top', 'center', 'bottom']},
+    clipRect: {
+      type: 'string',
+      default: '',
+      parse: function(value) {
+        if (value) {
+          value = value.split(/[\s,]+/).reduce(function(out, val) {
+            val = +val
+            if (!isNaN(val)) {
+              out.push(val)
+            }
+            return out
+          }, [])
+        }
+        return value && value.length === 4 ? value : null
+      },
+      stringify: function(value) {
+        return value ? value.join(' ') : ''
+      }
+    },
     color: {type: 'color', default: '#FFF'},
     font: {type: 'string'},
     fontSize: {type: 'number', default: 0.2},
@@ -68,6 +87,7 @@ aframe.registerComponent(COMPONENT_NAME, {
     mesh.anchor[0] = anchorMapping[data.anchor]
     mesh.anchor[1] = baselineMapping[data.baseline]
     mesh.color = data.color
+    mesh.clipRect = data.clipRect
     mesh.depthOffset = data.depthOffset || 0
     mesh.font = data.font //TODO allow aframe stock font names
     mesh.fontSize = data.fontSize

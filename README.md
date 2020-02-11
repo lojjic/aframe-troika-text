@@ -25,6 +25,7 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | align                 | align                  | Multi-line text alignment (left, center, right, justify).                                                   | left                            |
 | anchor                | anchor                 | Horizontal positioning (left, center, right, align).                                                        | center                          |
 | baseline              | baseline               | Vertical positioning (top, center, bottom).                                                                 | center                          |
+| clipRect              | clip-rect              | Four comma- or space-separated numbers defining a rectangle (minX, minY, maxX, maxY) outside which pixels will be hidden. | *no clipping*     |
 | color                 | color                  | Text color. This is a shortcut for specifying a custom material.                                            | white                           |
 | depthOffset           | depth-offset           | Depth buffer offset to help prevent z-fighting. Negative numbers are closer to camera, positives further.   | 0                               |
 | font                  | font                   | URL to a font file - can be a .ttf, .otf, or .woff (no .woff2)                                              | Roboto loaded from Google Fonts |
