@@ -61,7 +61,9 @@ aframe.registerComponent(COMPONENT_NAME, {
     var entity = this.troikaTextEntity
 
     // Update the text mesh
-    mesh.text = data.value
+    mesh.text = (data.value || '')
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
     mesh.textAlign = data.align
     mesh.anchor[0] = anchorMapping[data.anchor]
     mesh.anchor[1] = baselineMapping[data.baseline]

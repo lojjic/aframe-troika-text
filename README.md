@@ -33,7 +33,7 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | lineHeight            | line-height            | Line height as a multiple of the fontSize.                                                                  | *derived from font metrics*     |
 | maxWidth              | max-width              | Maximum width of the text block at which text will start wrapping, in meters.                               | Infinity (no wrapping)          |
 | overflowWrap          | overflow-wrap          | Controls how text wraps: "normal" to break at whitespace characters, or "break-word" to break within words. | normal                          |
-| **value**             | value                  | The actual content of the text. Line breaks and tabs are supported (literal chars in HTML, `\n` or `\t` in JS). | ''                              |
+| **value**             | value                  | The actual content of the text. Line breaks and tabs are supported with `\n` and `\t`.                      | ''                              |
 | whiteSpace            | white-space            | How whitespace should be handled (i.e., normal, nowrap).                                                    | normal (behaves like pre-wrap)  |
 
 Note: It does not currently follow how the built-in `text` component interacts with a `geometry` component for auto-sizing and anchoring. I think that's a nice feature so it's probably worth adding; in the meantime just use the `maxWidth` and `anchor`/`baseline` attributes to control it manually.
