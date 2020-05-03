@@ -6023,6 +6023,25 @@ if (troikaAlphaMult == 0.0) {
       align: {type: 'string', default: 'left', oneOf: ['left', 'right', 'center']},
       anchor: {default: 'center', oneOf: ['left', 'right', 'center', 'align']},
       baseline: {default: 'center', oneOf: ['top', 'center', 'bottom']},
+      clipRect: {
+        type: 'string',
+        default: '',
+        parse: function(value) {
+          if (value) {
+            value = value.split(/[\s,]+/).reduce(function(out, val) {
+              val = +val;
+              if (!isNaN(val)) {
+                out.push(val);
+              }
+              return out
+            }, []);
+          }
+          return value && value.length === 4 ? value : null
+        },
+        stringify: function(value) {
+          return value ? value.join(' ') : ''
+        }
+      },
       color: {type: 'color', default: '#FFF'},
       font: {type: 'string'},
       fontSize: {type: 'number', default: 0.2},
@@ -6072,16 +6091,20 @@ if (troikaAlphaMult == 0.0) {
       var entity = this.troikaTextEntity;
 
       // Update the text mesh
-      mesh.text = data.value;
+      mesh.text = (data.value || '')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t');
       mesh.textAlign = data.align;
 
       mesh.anchorX = anchorMapping[data.anchor === 'align' ? data.align : data.anchor] || 'center';
       mesh.anchorY = baselineMapping[data.baseline] || 'middle';
       mesh.color = data.color;
+      mesh.clipRect = data.clipRect;
+      mesh.depthOffset = data.depthOffset || 0;
       mesh.font = data.font; //TODO allow aframe stock font names
       mesh.fontSize = data.fontSize;
       mesh.letterSpacing = data.letterSpacing || 0;
-      mesh.lineHeight = data.lineHeight || null;
+      mesh.lineHeight = data.lineHeight || 'normal';
       mesh.overflowWrap = data.overflowWrap;
       mesh.whiteSpace = data.whiteSpace;
       mesh.maxWidth = data.maxWidth;
