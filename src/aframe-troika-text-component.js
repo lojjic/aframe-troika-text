@@ -84,8 +84,9 @@ aframe.registerComponent(COMPONENT_NAME, {
       .replace(/\\n/g, '\n')
       .replace(/\\t/g, '\t')
     mesh.textAlign = data.align
-    mesh.anchor[0] = anchorMapping[data.anchor]
-    mesh.anchor[1] = baselineMapping[data.baseline]
+
+    mesh.anchorX = anchorMapping[data.anchor === 'align' ? data.align : data.anchor] || 'center'
+    mesh.anchorY = baselineMapping[data.baseline] || 'middle'
     mesh.color = data.color
     mesh.clipRect = data.clipRect
     mesh.depthOffset = data.depthOffset || 0
@@ -127,13 +128,13 @@ aframe.registerComponent(COMPONENT_NAME, {
 
 
 var anchorMapping = {
-  'left': 0,
-  'center': 0.5,
-  'right': 1
+  'left': 'left',
+  'center': 'center',
+  'right': 'right'
 }
 var baselineMapping = {
-  'top': 0,
-  'center': 0.5,
-  'bottom': 1
+  'top': 'top',
+  'center': 'middle',
+  'bottom': 'bottom'
 }
 

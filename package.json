@@ -1,6 +1,6 @@
 {
   "name": "aframe-troika-text",
-  "version": "0.2.2",
+  "version": "0.1.2",
   "description": "An A-Frame component to render text using the Troika 3D text renderer ",
   "main": "dist/aframe-troika-text.js",
   "author": "Jason Johnston",
@@ -9,15 +9,15 @@
     "build": "rollup -c rollup.config.js"
   },
   "dependencies": {
-    "troika-3d-text": "0.17.0"
+    "troika-3d-text": "^0.24.0"
   },
   "peerDependencies": {
     "aframe": "^1.0.4"
   },
   "devDependencies": {
-    "aframe": "1.0.4",
-    "rollup": "1.31.1",
-    "rollup-plugin-node-resolve": "5.2.0",
-    "rollup-plugin-terser": "5.2.0"
+    "aframe": "^1.0.4",
+    "rollup": "^2.7.6",
+    "rollup-plugin-node-resolve": "^5.2.0",
+    "rollup-plugin-terser": "^5.3.0"
   }
 }
