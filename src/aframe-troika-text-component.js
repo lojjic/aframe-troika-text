@@ -66,7 +66,6 @@ aframe.registerComponent(COMPONENT_NAME, {
 
     // Create TextMesh and add it to the entity as the 'mesh' object
     var textMesh = this.troikaTextMesh = new TextMesh()
-    textMesh.anchor = [0, 0]
     textEntity.setObject3D('mesh', textMesh)
   },
 
