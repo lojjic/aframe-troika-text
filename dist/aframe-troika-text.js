@@ -165,13 +165,36 @@
     }
   }
 
+  /**
+   * Promise.all() impl:
+   */
+  BespokeThenable.all = NativePromiseThenable.all = function(items) {
+    let resultCount = 0;
+    let results = [];
+    let out = DefaultThenable();
+    if (items.length === 0) {
+      out.resolve([]);
+    } else {
+      items.forEach((item, i) => {
+        let itemThenable = DefaultThenable();
+        itemThenable.resolve(item);
+        itemThenable.then(res => {
+          resultCount++;
+          results[i] = res;
+          if (resultCount === items.length) {
+            out.resolve(results);
+          }
+        }, out.reject);
+      });
+    }
+    return out
+  };
+
 
   /**
    * Choose the best Thenable implementation and export it as the default.
    */
-  var Thenable = (
-    typeof Promise === 'function' ? NativePromiseThenable : BespokeThenable
-  );
+  const DefaultThenable = typeof Promise === 'function' ? NativePromiseThenable : BespokeThenable;
 
   /**
    * Main content for the worker that handles the loading and execution of
@@ -322,6 +345,43 @@
     });
   }
 
+  /**
+   * Fallback for `defineWorkerModule` that behaves identically but runs in the main
+   * thread, for when the execution environment doesn't support web workers or they
+   * are disallowed due to e.g. CSP security restrictions.
+   */
+  function defineMainThreadModule(options) {
+    let moduleFunc = function(...args) {
+      return moduleFunc._getInitResult().then(initResult => {
+        if (typeof initResult === 'function') {
+          return initResult(...args)
+        } else {
+          throw new Error('Worker module function was called but `init` did not return a callable function')
+        }
+      })
+    };
+    moduleFunc._getInitResult = function() {
+      // We can ignore getTransferables in main thread. TODO workerId?
+      let {dependencies, init} = options;
+
+      // Resolve dependencies
+      dependencies = Array.isArray(dependencies) ? dependencies.map(dep =>
+        dep && dep._getInitResult ? dep._getInitResult() : dep
+      ) : [];
+
+      // Invoke init with the resolved dependencies
+      let initThenable = DefaultThenable.all(dependencies).then(deps => {
+        return init.apply(null, deps)
+      });
+
+      // Cache the resolved promise for subsequent calls
+      moduleFunc._getInitResult = () => initThenable;
+
+      return initThenable
+    };
+    return moduleFunc
+  }
+
   let _workerModuleId = 0;
   let _messageId = 0;
   let _allowInitAsString = false;
@@ -329,6 +389,24 @@
   const openRequests = Object.create(null);
   openRequests._count = 0;
 
+  let supportsWorkers = () => {
+    let supported = false;
+    try {
+      // TODO additional checks for things like importScripts within the worker?
+      //  Would need to be an async check.
+      let worker = new Worker(
+        URL.createObjectURL(
+          new Blob([''], {type: 'application/javascript'})
+        )
+      );
+      worker.terminate();
+      supported = true;
+    } catch(err) {
+      console.warn(`Troika createWorkerModule: web workers not allowed in current environment; falling back to main thread execution.`, err);
+    }
+    supportsWorkers = () => supported;
+    return supported
+  };
 
   /**
    * Define a module of code that will be executed with a web worker. This provides a simple
@@ -367,6 +445,11 @@
       throw new Error('requires `options.init` function')
     }
     let {dependencies, init, getTransferables, workerId} = options;
+
+    if (!supportsWorkers()) {
+      return defineMainThreadModule(options)
+    }
+
     if (workerId == null) {
       workerId = '#default';
     }
@@ -466,7 +549,7 @@
 
   // Issue a call to the worker with a callback to handle the response
   function callWorker(workerId, action, data) {
-    const thenable = Thenable();
+    const thenable = DefaultThenable();
     const messageId = ++_messageId;
     openRequests[messageId] = response => {
       if (response.success) {
@@ -494,7 +577,7 @@
    */
   var ThenableWorkerModule = defineWorkerModule({
     name: 'Thenable',
-    dependencies: [Thenable],
+    dependencies: [DefaultThenable],
     init: function(Thenable) {
       return Thenable
     }
@@ -1203,7 +1286,8 @@ void main() {
         anchorX = 0,
         anchorY = 0,
         includeCaretPositions=false,
-        chunkedBoundsSize=8192
+        chunkedBoundsSize=8192,
+        colorRanges=null
       },
       callback,
       metricsOnly=false
@@ -1229,6 +1313,7 @@ void main() {
         let newGlyphs = null;
         let glyphBounds = null;
         let glyphAtlasIndices = null;
+        let glyphColors = null;
         let caretPositions = null;
         let totalBounds = null;
         let chunkedBounds = null;
@@ -1380,9 +1465,14 @@ void main() {
           if (includeCaretPositions) {
             caretPositions = new Float32Array(text.length * 3);
           }
+          if (colorRanges) {
+            glyphColors = new Uint8Array(renderableGlyphCount * 3);
+          }
           let renderableGlyphIndex = 0;
           let prevCharIndex = -1;
+          let colorCharIndex = -1;
           let chunk;
+          let currentColor;
           lines.forEach(line => {
             const {count:lineGlyphCount, width:lineWidth} = line;
 
@@ -1447,6 +1537,17 @@ void main() {
                   prevCharIndex = charIndex;
                 }
 
+                // Track current color range
+                if (colorRanges) {
+                  const {charIndex} = glyphInfo;
+                  while(charIndex > colorCharIndex) {
+                    colorCharIndex++;
+                    if (colorRanges.hasOwnProperty(colorCharIndex)) {
+                      currentColor = colorRanges[colorCharIndex];
+                    }
+                  }
+                }
+
                 // Get atlas data for renderable glyphs
                 if (!glyphObj.isWhitespace && !glyphObj.isEmpty) {
                   const idx = renderableGlyphIndex++;
@@ -1500,6 +1601,14 @@ void main() {
 
                   // Add to atlas indices array
                   glyphAtlasIndices[idx] = glyphAtlasInfo.atlasIndex;
+
+                  // Add colors
+                  if (colorRanges) {
+                    const start = idx * 3;
+                    glyphColors[start] = currentColor >> 16 & 255;
+                    glyphColors[start + 1] = currentColor >> 8 & 255;
+                    glyphColors[start + 2] = currentColor & 255;
+                  }
                 }
               }
             }
@@ -1507,10 +1616,6 @@ void main() {
             // Increment y offset for next line
             lineYOffset -= lineHeight;
           });
-
-          // Create the final output for the rendeable glyphs
-          glyphBounds = new Float32Array(glyphBounds);
-          glyphAtlasIndices = new Float32Array(glyphAtlasIndices);
         }
 
         // Timing stats
@@ -1525,6 +1630,7 @@ void main() {
           glyphAtlasIndices, //atlas indices for each glyph
           caretPositions, //x,y of bottom of cursor position before each char, plus one after last char
           caretHeight, //height of cursor from bottom to top
+          glyphColors, //color for each glyph, if color ranges supplied
           chunkedBounds, //total rects per (n=chunkedBoundsSize) consecutive glyphs
           ascender: ascender * fontSizeMult, //font ascender
           descender: descender * fontSizeMult, //font descender
@@ -1731,6 +1837,7 @@ void main() {
      */
     function findNearestSignedDistance(x, y, maxSearchRadius) {
       let closestDist = maxSearchRadius;
+      let closestDistSq = closestDist * closestDist;
 
       walkTree(function visit(node) {
         // Ignore nodes that can't possibly have segments closer than what we've already found. We base
@@ -1743,17 +1850,11 @@ void main() {
         }
 
         // Leaf - check each segment's actual distance
-        if (node.data) {
-          for (let segment = node.data; segment; segment = segment.next) {
-            if ( //fast prefilter for segment to avoid dist calc
-              x - closestDist < segment.maxX || x + closestDist > segment.minX ||
-              y - closestDist < segment.maxY || y + closestDist > segment.minY
-            ) {
-              const dist = absDistanceToLineSegment(x, y, segment.x0, segment.y0, segment.x1, segment.y1);
-              if (dist < closestDist) {
-                closestDist = dist;
-              }
-            }
+        for (let segment = node.data; segment; segment = segment.next) {
+          const distSq = absSquareDistanceToLineSegment(x, y, segment.x0, segment.y0, segment.x1, segment.y1);
+          if (distSq < closestDistSq) {
+            closestDistSq = distSq;
+            closestDist = Math.sqrt(distSq);
           }
         }
       });
@@ -1777,30 +1878,26 @@ void main() {
         }
 
         // Leaf - test each segment for whether it crosses our east-pointing ray
-        if (node.data) {
-          for (let segment = node.data; segment; segment = segment.next) {
-            const {x0, y0, x1, y1} = segment;
-            const intersects = ((y0 > y) !== (y1 > y)) && (x < (x1 - x0) * (y - y0) / (y1 - y0) + x0);
-            if (intersects) {
-              inside = !inside;
-            }
+        for (let segment = node.data; segment; segment = segment.next) {
+          const {x0, y0, x1, y1} = segment;
+          const intersects = ((y0 > y) !== (y1 > y)) && (x < (x1 - x0) * (y - y0) / (y1 - y0) + x0);
+          if (intersects) {
+            inside = !inside;
           }
         }
       });
       return inside
     }
 
-    function square(n) {
-      return n * n
-    }
-
     // Find the absolute distance from a point to a line segment at closest approach
-    function absDistanceToLineSegment(x, y, lineX0, lineY0, lineX1, lineY1) {
+    function absSquareDistanceToLineSegment(x, y, lineX0, lineY0, lineX1, lineY1) {
       const ldx = lineX1 - lineX0;
       const ldy = lineY1 - lineY0;
-      const lengthSq = square(ldx) + square(ldy);
+      const lengthSq = ldx * ldx + ldy * ldy;
       const t = lengthSq ? Math.max(0, Math.min(1, ((x - lineX0) * ldx + (y - lineY0) * ldy) / lengthSq)) : 0;
-      return Math.sqrt(square(x - (lineX0 + t * ldx)) + square(y - (lineY0 + t * ldy)))
+      const dx = x - (lineX0 + t * ldx);
+      const dy = y - (lineY0 + t * ldy);
+      return dx * dx + dy * dy
     }
 
     return {
@@ -5131,7 +5228,7 @@ void main() {
     sdfGlyphSize: 64,
     textureWidth: 2048
   };
-  const linkEl = document.createElement('a'); //for resolving relative URLs to absolute
+  const tempColor = new three.Color();
 
 
   /**
@@ -5158,11 +5255,13 @@ void main() {
 
   /**
    * @typedef {object} TroikaTextRenderInfo - Format of the result from `getTextRenderInfo`.
+   * @property {object} parameters - The normalized input arguments to the render call.
    * @property {DataTexture} sdfTexture - The SDF atlas texture.
    * @property {number} sdfGlyphSize - See `configureTextBuilder#config.sdfGlyphSize`
    * @property {number} sdfMinDistancePercent - See `SDF_DISTANCE_PERCENT`
    * @property {Float32Array} glyphBounds - List of [minX, minY, maxX, maxY] quad bounds for each glyph.
-   * @property {Float32Array} glyphAtlasIndices - List holding each glyph's index in the SDF atlas
+   * @property {Float32Array} glyphAtlasIndices - List holding each glyph's index in the SDF atlas.
+   * @property {Uint8Array} [glyphColors] - List holding each glyph's [r, g, b] color, if `colorRanges` was supplied.
    * @property {Float32Array} [caretPositions] - A list of caret positions for all glyphs; this is
    *           the bottom [x,y] of the cursor position before each char, plus one after the last char.
    * @property {number} [caretHeight] - An appropriate height for all selection carets.
@@ -5197,11 +5296,27 @@ void main() {
 
     // Apply default font here to avoid a 'null' atlas, and convert relative
     // URLs to absolute so they can be resolved in the worker
-    linkEl.href = args.font || CONFIG.defaultFontURL;
-    args.font = linkEl.href;
+    args.font = toAbsoluteURL(args.font || CONFIG.defaultFontURL);
 
     // Normalize text to a string
     args.text = '' + args.text;
+
+    // Normalize colors
+    if (args.colorRanges != null) {
+      let colors = {};
+      for (let key in args.colorRanges) {
+        if (args.colorRanges.hasOwnProperty(key)) {
+          let val = args.colorRanges[key];
+          if (typeof val !== 'number') {
+            val = tempColor.set(val).getHex();
+          }
+          colors[key] = val;
+        }
+      }
+      args.colorRanges = colors;
+    }
+
+    Object.freeze(args);
 
     // Init the atlas for this font if needed
     const {sdfGlyphSize, textureWidth} = CONFIG;
@@ -5256,11 +5371,13 @@ void main() {
 
       // Invoke callback with the text layout arrays and updated texture
       callback(Object.freeze({
+        parameters: args,
         sdfTexture: atlas.sdfTexture,
         sdfGlyphSize,
         sdfMinDistancePercent: SDF_DISTANCE_PERCENT,
         glyphBounds: result.glyphBounds,
         glyphAtlasIndices: result.glyphAtlasIndices,
+        glyphColors: result.glyphColors,
         caretPositions: result.caretPositions,
         caretHeight: result.caretHeight,
         chunkedBounds: result.chunkedBounds,
@@ -5284,6 +5401,16 @@ void main() {
       }
     }
     return toObj
+  }
+
+  // Utility for making URLs absolute
+  let linkEl;
+  function toAbsoluteURL(path) {
+    if (!linkEl) {
+      linkEl = typeof document === 'undefined' ? {} : document.createElement('a');
+    }
+    linkEl.href = path;
+    return linkEl.href
   }
 
 
@@ -5344,6 +5471,7 @@ void main() {
 
   const glyphBoundsAttrName = 'aTroikaGlyphBounds';
   const glyphIndexAttrName = 'aTroikaGlyphIndex';
+  const glyphColorAttrName = 'aTroikaGlyphColor';
 
 
 
@@ -5402,11 +5530,13 @@ void main() {
      * @param {Array} [chunkedBounds] - An array of objects describing bounds for each chunk of N
      *        consecutive glyphs: `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`. This can be
      *        used with `applyClipRect` to choose an optimized `maxInstancedCount`.
+     * @param {Uint8Array} [glyphColors] - An array holding r,g,b values for each glyph.
      */
-    updateGlyphs(glyphBounds, glyphAtlasIndices, totalBounds, chunkedBounds) {
+    updateGlyphs(glyphBounds, glyphAtlasIndices, totalBounds, chunkedBounds, glyphColors) {
       // Update the instance attributes
       updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
       updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
+      updateBufferAttr(this, glyphColorAttrName, glyphColors, 3);
       this._chunkedBounds = chunkedBounds;
       this.maxInstancedCount = glyphAtlasIndices.length;
 
@@ -5461,12 +5591,16 @@ void main() {
 
   function updateBufferAttr(geom, attrName, newArray, itemSize) {
     const attr = geom.getAttribute(attrName);
-    // If length isn't changing, just update the attribute's array data
-    if (attr && attr.array.length === newArray.length) {
-      attr.array.set(newArray);
-      attr.needsUpdate = true;
-    } else {
-      geom.setAttribute(attrName, new three.InstancedBufferAttribute(newArray, itemSize));
+    if (newArray) {
+      // If length isn't changing, just update the attribute's array data
+      if (attr && attr.array.length === newArray.length) {
+        attr.array.set(newArray);
+        attr.needsUpdate = true;
+      } else {
+        geom.setAttribute(attrName, new three.InstancedBufferAttribute(newArray, itemSize));
+      }
+    } else if (attr) {
+      geom.deleteAttribute(attrName);
     }
   }
 
@@ -5477,10 +5611,13 @@ uniform float uTroikaSDFGlyphSize;
 uniform vec4 uTroikaTotalBounds;
 uniform vec4 uTroikaClipRect;
 uniform mat3 uTroikaOrient;
+uniform bool uTroikaUseGlyphColors;
 attribute vec4 aTroikaGlyphBounds;
 attribute float aTroikaGlyphIndex;
+attribute vec3 aTroikaGlyphColor;
 varying vec2 vTroikaSDFTextureUV;
 varying vec2 vTroikaGlyphUV;
+varying vec3 vTroikaGlyphColor;
 `;
 
   // language=GLSL prefix="void main() {" suffix="}"
@@ -5508,6 +5645,7 @@ uv = vec2(
 
 position = uTroikaOrient * position;
 normal = uTroikaOrient * normal;
+vTroikaGlyphColor = uTroikaUseGlyphColors ? aTroikaGlyphColor / 255.0 : diffuse;
 `;
 
   // language=GLSL
@@ -5578,12 +5716,27 @@ if (troikaAlphaMult == 0.0) {
         uTroikaTotalBounds: {value: new three.Vector4(0,0,0,0)},
         uTroikaClipRect: {value: new three.Vector4(0,0,0,0)},
         uTroikaOrient: {value: new three.Matrix3()},
+        uTroikaUseGlyphColors: {value: true},
         uTroikaSDFDebug: {value: false}
       },
       vertexDefs: VERTEX_DEFS,
       vertexTransform: VERTEX_TRANSFORM,
       fragmentDefs: FRAGMENT_DEFS,
-      fragmentColorTransform: FRAGMENT_TRANSFORM
+      fragmentColorTransform: FRAGMENT_TRANSFORM,
+      customRewriter({vertexShader, fragmentShader}) {
+        let uDiffuseRE = /\buniform\s+vec3\s+diffuse\b/;
+        if (uDiffuseRE.test(fragmentShader)) {
+          // Replace all instances of `diffuse` with our varying
+          fragmentShader = fragmentShader
+            .replace(uDiffuseRE, 'varying vec3 vTroikaGlyphColor')
+            .replace(/\bdiffuse\b/g, 'vTroikaGlyphColor');
+          // Make sure the vertex shader declares the uniform so we can grab it as a fallback
+          if (!uDiffuseRE.test(vertexShader)) {
+            vertexShader = vertexShader.replace(voidMainRegExp, 'uniform vec3 diffuse;\n$&');
+          }
+        }
+        return { vertexShader, fragmentShader }
+      }
     });
 
     // Force transparency - TODO is this reasonable?
@@ -5594,6 +5747,9 @@ if (troikaAlphaMult == 0.0) {
     Object.defineProperty(textMaterial, 'shadowSide', {
       get() {
         return this.side
+      },
+      set() {
+        //no-op
       }
     });
 
@@ -5616,6 +5772,9 @@ if (troikaAlphaMult == 0.0) {
     new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0),
     defaultMaterial
   );
+
+  const syncStartEvent = {type: 'syncstart'};
+  const syncCompleteEvent = {type: 'synccomplete'};
 
 
 
@@ -5748,6 +5907,17 @@ if (troikaAlphaMult == 0.0) {
       this.color = null;
 
       /**
+       * @member {object|null} colorRanges
+       * WARNING: This API is experimental and may change.
+       * This allows more fine-grained control of colors for individual or ranges of characters,
+       * taking precedence over the material's `color`. Its format is an Object whose keys each
+       * define a starting character index for a range, and whose values are the color for each
+       * range. The color value can be a numeric hex color value, a `THREE.Color` object, or
+       * any of the strings accepted by `THREE.Color`.
+       */
+      this.colorRanges = null;
+
+      /**
        * @member {number} depthOffset
        * This is a shortcut for setting the material's `polygonOffset` and related properties,
        * which can be useful in preventing z-fighting when this text is laid on top of another
@@ -5792,6 +5962,7 @@ if (troikaAlphaMult == 0.0) {
           (this._queuedSyncs || (this._queuedSyncs = [])).push(callback);
         } else {
           this._isSyncing = true;
+          this.dispatchEvent(syncStartEvent);
 
           getTextRenderInfo({
             text: this.text,
@@ -5805,6 +5976,7 @@ if (troikaAlphaMult == 0.0) {
             overflowWrap: this.overflowWrap,
             anchorX: this.anchorX,
             anchorY: this.anchorY,
+            colorRanges: this.colorRanges,
             includeCaretPositions: true //TODO parameterize
           }, textRenderInfo => {
             this._isSyncing = false;
@@ -5817,7 +5989,8 @@ if (troikaAlphaMult == 0.0) {
               textRenderInfo.glyphBounds,
               textRenderInfo.glyphAtlasIndices,
               textRenderInfo.totalBounds,
-              textRenderInfo.chunkedBounds
+              textRenderInfo.chunkedBounds,
+              textRenderInfo.glyphColors
             );
 
             // If we had extra sync requests queued up, kick it off
@@ -5830,6 +6003,7 @@ if (troikaAlphaMult == 0.0) {
               });
             }
 
+            this.dispatchEvent(syncCompleteEvent);
             if (callback) {
               callback();
             }
@@ -5912,6 +6086,7 @@ if (troikaAlphaMult == 0.0) {
         uniforms.uTroikaSDFGlyphSize.value = textInfo.sdfGlyphSize;
         uniforms.uTroikaSDFMinDistancePct.value = textInfo.sdfMinDistancePercent;
         uniforms.uTroikaTotalBounds.value.fromArray(totalBounds);
+        uniforms.uTroikaUseGlyphColors.value = !!textInfo.glyphColors;
 
         let clipRect = this.clipRect;
         if (!(clipRect && Array.isArray(clipRect) && clipRect.length === 4)) {
@@ -5991,7 +6166,8 @@ if (troikaAlphaMult == 0.0) {
     'textAlign',
     'whiteSpace',
     'anchorX',
-    'anchorY'
+    'anchorY',
+    'colorRanges'
   ];
   SYNCABLE_PROPS.forEach(prop => {
     const privateKey = '_private_' + prop;
