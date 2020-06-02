@@ -382,6 +382,32 @@
     return moduleFunc
   }
 
+  let supportsWorkers = () => {
+    let supported = false;
+
+    // Only attempt worker initialization in browsers; elsewhere it would just be
+    // noise e.g. loading into a Node environment for SSR.
+    if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
+      try {
+        // TODO additional checks for things like importScripts within the worker?
+        //  Would need to be an async check.
+        let worker = new Worker(
+          URL.createObjectURL(
+            new Blob([''], { type: 'application/javascript' })
+          )
+        );
+        worker.terminate();
+        supported = true;
+      } catch (err) {
+        console.warn(`Troika createWorkerModule: web workers not allowed; falling back to main thread execution. Cause: [${err.message}]`);
+      }
+    }
+
+    // Cached result
+    supportsWorkers = () => supported;
+    return supported
+  };
+
   let _workerModuleId = 0;
   let _messageId = 0;
   let _allowInitAsString = false;
@@ -389,24 +415,6 @@
   const openRequests = Object.create(null);
   openRequests._count = 0;
 
-  let supportsWorkers = () => {
-    let supported = false;
-    try {
-      // TODO additional checks for things like importScripts within the worker?
-      //  Would need to be an async check.
-      let worker = new Worker(
-        URL.createObjectURL(
-          new Blob([''], {type: 'application/javascript'})
-        )
-      );
-      worker.terminate();
-      supported = true;
-    } catch(err) {
-      console.warn(`Troika createWorkerModule: web workers not allowed in current environment; falling back to main thread execution.`, err);
-    }
-    supportsWorkers = () => supported;
-    return supported
-  };
 
   /**
    * Define a module of code that will be executed with a web worker. This provides a simple
@@ -5114,7 +5122,7 @@ void main() {
       Z: 0
     };
 
-    function wrapFontObj([typrFont]) {
+    function wrapFontObj(typrFont) {
       const glyphMap = Object.create(null);
 
       const fontObj = {
@@ -5205,7 +5213,7 @@ void main() {
       } else if (tag === 'wOF2') {
         throw new Error('woff2 fonts not supported')
       }
-      return wrapFontObj(Typr.parse(buffer))
+      return wrapFontObj(Typr.parse(buffer)[0])
     }
   }
 
@@ -5529,7 +5537,7 @@ void main() {
      * @param {Array} totalBounds - An array holding the [minX, minY, maxX, maxY] across all glyphs
      * @param {Array} [chunkedBounds] - An array of objects describing bounds for each chunk of N
      *        consecutive glyphs: `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`. This can be
-     *        used with `applyClipRect` to choose an optimized `maxInstancedCount`.
+     *        used with `applyClipRect` to choose an optimized `instanceCount`.
      * @param {Uint8Array} [glyphColors] - An array holding r,g,b values for each glyph.
      */
     updateGlyphs(glyphBounds, glyphAtlasIndices, totalBounds, chunkedBounds, glyphColors) {
@@ -5538,7 +5546,7 @@ void main() {
       updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
       updateBufferAttr(this, glyphColorAttrName, glyphColors, 3);
       this._chunkedBounds = chunkedBounds;
-      this.maxInstancedCount = glyphAtlasIndices.length;
+      setInstanceCount(this, glyphAtlasIndices.length);
 
       // Update the boundingSphere based on the total bounds
       const sphere = this.boundingSphere;
@@ -5552,7 +5560,7 @@ void main() {
 
     /**
      * Given a clipping rect, and the chunkedBounds from the last updateGlyphs call, choose the lowest
-     * `maxInstancedCount` that will show all glyphs within the clipped view. This is an optimization
+     * `instanceCount` that will show all glyphs within the clipped view. This is an optimization
      * for long blocks of text that are clipped, to skip vertex shader evaluation for glyphs that would
      * be clipped anyway.
      *
@@ -5576,7 +5584,7 @@ void main() {
           }
         }
       }
-      this.maxInstancedCount = count;
+      setInstanceCount(this, count);
     }
   }
 
@@ -5602,6 +5610,11 @@ void main() {
     } else if (attr) {
       geom.deleteAttribute(attrName);
     }
+  }
+
+  // Handle maxInstancedCount -> instanceCount rename that happened in three r117
+  function setInstanceCount(geom, count) {
+    geom[geom.hasOwnProperty('instanceCount') ? 'instanceCount' : 'maxInstancedCount'] = count;
   }
 
   // language=GLSL
