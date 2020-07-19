@@ -399,7 +399,7 @@
         worker.terminate();
         supported = true;
       } catch (err) {
-        console.warn(`Troika createWorkerModule: web workers not allowed; falling back to main thread execution. Cause: [${err.message}]`);
+        console.log(`Troika createWorkerModule: web workers not allowed; falling back to main thread execution. Cause: [${err.message}]`);
       }
     }
 
@@ -630,7 +630,6 @@
   };
 
 
-  let idCtr = 0;
   const epoch = Date.now();
   const CACHE = new WeakMap(); //threejs requires WeakMap internally so should be safe to assume support
 
@@ -703,7 +702,11 @@
       return cached[optionsHash].clone()
     }
 
-    const id = ++idCtr;
+    // Even if baseMaterial is changing, use a consistent id in shader rewrites based on the
+    // optionsHash. This makes it more likely that deriving from base materials of the same
+    // type/class, e.g. multiple instances of MeshStandardMaterial, will produce identical
+    // rewritten shader code so they can share a single WebGLProgram behind the scenes.
+    const id = getIdForOptionsHash(optionsHash);
     const privateDerivedShadersProp = `_derivedShaders${id}`;
     const privateBeforeCompileProp = `_onBeforeCompile${id}`;
     let distanceMaterialTpl, depthMaterialTpl;
@@ -829,7 +832,7 @@
     // Merge uniforms, defines, and extensions
     material.uniforms = assign(three.UniformsUtils.clone(baseMaterial.uniforms || {}), options.uniforms);
     material.defines = assign({}, baseMaterial.defines, options.defines);
-    material.defines.TROIKA_DERIVED_MATERIAL = id; //force a program change from the base material
+    material.defines[`TROIKA_DERIVED_MATERIAL_${id}`] = ''; //force a program change from the base material
     material.extensions = assign({}, baseMaterial.extensions, options.extensions);
 
     cached[optionsHash] = material;
@@ -958,20 +961,27 @@ void main() {
     return key === 'uniforms' ? undefined : typeof value === 'function' ? value.toString() : value
   }
 
+  let _idCtr = 0;
+  const optionsHashesToIds = new Map();
+  function getIdForOptionsHash(optionsHash) {
+    let id = optionsHashesToIds.get(optionsHash);
+    if (id == null) {
+      optionsHashesToIds.set(optionsHash, (id = ++_idCtr));
+    }
+    return id
+  }
+
   const defaultBaseMaterial = new three.MeshStandardMaterial({color: 0xffffff, side: three.DoubleSide});
 
   /**
    * Initializes and returns a function to generate an SDF texture for a given glyph.
    * @param {function} createGlyphSegmentsQuadtree - factory for a GlyphSegmentsQuadtree implementation.
-   * @param {number} config.sdfTextureSize - the length of one side of the resulting texture image.
-   *                 Larger images encode more details. Should be a power of 2.
    * @param {number} config.sdfDistancePercent - see docs for SDF_DISTANCE_PERCENT in TextBuilder.js
    *
    * @return {function(Object): {renderingBounds: [minX, minY, maxX, maxY], textureData: Uint8Array}}
    */
   function createSDFGenerator(createGlyphSegmentsQuadtree, config) {
     const {
-      sdfTextureSize,
       sdfDistancePercent
     } = config;
 
@@ -1005,12 +1015,14 @@ void main() {
     /**
      * Generate an SDF texture segment for a single glyph.
      * @param {object} glyphObj
+     * @param {number} sdfSize - the length of one side of the SDF image.
+     *        Larger images encode more details. Must be a power of 2.
      * @return {{textureData: Uint8Array, renderingBounds: *[]}}
      */
-    function generateSDF(glyphObj) {
+    function generateSDF(glyphObj, sdfSize) {
       //console.time('glyphSDF')
 
-      const textureData = new Uint8Array(sdfTextureSize * sdfTextureSize);
+      const textureData = new Uint8Array(sdfSize * sdfSize);
 
       // Determine mapping between glyph grid coords and sdf grid coords
       const glyphW = glyphObj.xMax - glyphObj.xMin;
@@ -1020,8 +1032,8 @@ void main() {
       const fontUnitsMaxDist = Math.max(glyphW, glyphH) * sdfDistancePercent;
 
       // Use that, extending to the texture edges, to find conversion ratios between texture units and font units
-      const fontUnitsPerXTexel = (glyphW + fontUnitsMaxDist * 2) / sdfTextureSize;
-      const fontUnitsPerYTexel = (glyphH + fontUnitsMaxDist * 2) / sdfTextureSize;
+      const fontUnitsPerXTexel = (glyphW + fontUnitsMaxDist * 2) / sdfSize;
+      const fontUnitsPerYTexel = (glyphH + fontUnitsMaxDist * 2) / sdfSize;
 
       const textureMinFontX = glyphObj.xMin - fontUnitsMaxDist - fontUnitsPerXTexel;
       const textureMinFontY = glyphObj.yMin - fontUnitsMaxDist - fontUnitsPerYTexel;
@@ -1029,11 +1041,11 @@ void main() {
       const textureMaxFontY = glyphObj.yMax + fontUnitsMaxDist + fontUnitsPerYTexel;
 
       function textureXToFontX(x) {
-        return textureMinFontX + (textureMaxFontX - textureMinFontX) * x / sdfTextureSize
+        return textureMinFontX + (textureMaxFontX - textureMinFontX) * x / sdfSize
       }
 
       function textureYToFontY(y) {
-        return textureMinFontY + (textureMaxFontY - textureMinFontY) * y / sdfTextureSize
+        return textureMinFontY + (textureMaxFontY - textureMinFontY) * y / sdfSize
       }
 
       if (glyphObj.pathCommandCount) { //whitespace chars will have no commands, so we can skip all this
@@ -1094,8 +1106,8 @@ void main() {
 
         // For each target SDF texel, find the distance from its center to its nearest line segment,
         // map that distance to an alpha value, and write that alpha to the texel
-        for (let sdfX = 0; sdfX < sdfTextureSize; sdfX++) {
-          for (let sdfY = 0; sdfY < sdfTextureSize; sdfY++) {
+        for (let sdfX = 0; sdfX < sdfSize; sdfX++) {
+          for (let sdfY = 0; sdfY < sdfSize; sdfY++) {
             const signedDist = lineSegmentsIndex.findNearestSignedDistance(
               textureXToFontX(sdfX + 0.5),
               textureYToFontY(sdfY + 0.5),
@@ -1104,7 +1116,7 @@ void main() {
             //if (!isFinite(signedDist)) throw 'infinite distance!'
             let alpha = isFinite(signedDist) ? Math.round(255 * (1 + signedDist / fontUnitsMaxDist) * 0.5) : signedDist;
             alpha = Math.max(0, Math.min(255, alpha)); //clamp
-            textureData[sdfY * sdfTextureSize + sdfX] = alpha;
+            textureData[sdfY * sdfSize + sdfX] = alpha;
           }
         }
       }
@@ -1174,10 +1186,10 @@ void main() {
 
     /**
      * @private
-     * Holds the loaded data for all fonts
+     * Holds data about font glyphs and how they relate to SDF atlases
      *
      * {
-     *   fontUrl: {
+     *   'fontUrl@sdfSize': {
      *     fontObj: {}, //result of the fontParser
      *     glyphs: {
      *       [glyphIndex]: {
@@ -1190,6 +1202,11 @@ void main() {
      *     glyphCount: 123
      *   }
      * }
+     */
+    const fontAtlases = Object.create(null);
+
+    /**
+     * Holds parsed font objects by url
      */
     const fonts = Object.create(null);
 
@@ -1241,23 +1258,20 @@ void main() {
      */
     function loadFont(fontUrl, callback) {
       if (!fontUrl) fontUrl = defaultFontUrl;
-      let atlas = fonts[fontUrl];
-      if (atlas) {
+      let font = fonts[fontUrl];
+      if (font) {
         // if currently loading font, add to callbacks, otherwise execute immediately
-        if (atlas.onload) {
-          atlas.onload.push(callback);
+        if (font.pending) {
+          font.pending.push(callback);
         } else {
-          callback();
+          callback(font);
         }
       } else {
-        const loadingAtlas = fonts[fontUrl] = {onload: [callback]};
+        fonts[fontUrl] = {pending: [callback]};
         doLoadFont(fontUrl, fontObj => {
-          atlas = fonts[fontUrl] = {
-            fontObj: fontObj,
-            glyphs: {},
-            glyphCount: 0
-          };
-          loadingAtlas.onload.forEach(cb => cb());
+          let callbacks = fonts[fontUrl].pending;
+          fonts[fontUrl] = fontObj;
+          callbacks.forEach(cb => cb(fontObj));
         });
       }
     }
@@ -1267,11 +1281,22 @@ void main() {
      * Get the atlas data for a given font url, loading it from the network and initializing
      * its atlas data objects if necessary.
      */
-    function getSdfAtlas(fontUrl, callback) {
+    function getSdfAtlas(fontUrl, sdfGlyphSize, callback) {
       if (!fontUrl) fontUrl = defaultFontUrl;
-      loadFont(fontUrl, () => {
-        callback(fonts[fontUrl]);
-      });
+      let atlasKey = `${fontUrl}@${sdfGlyphSize}`;
+      let atlas = fontAtlases[atlasKey];
+      if (atlas) {
+        callback(atlas);
+      } else {
+        loadFont(fontUrl, fontObj => {
+          atlas = fontAtlases[atlasKey] || (fontAtlases[atlasKey] = {
+            fontObj: fontObj,
+            glyphs: {},
+            glyphCount: 0
+          });
+          callback(atlas);
+        });
+      }
     }
 
 
@@ -1284,11 +1309,13 @@ void main() {
       {
         text='',
         font=defaultFontUrl,
+        sdfGlyphSize=64,
         fontSize=1,
         letterSpacing=0,
         lineHeight='normal',
         maxWidth=INF,
         textAlign='left',
+        textIndent=0,
         whiteSpace='normal',
         overflowWrap='normal',
         anchorX = 0,
@@ -1314,8 +1341,9 @@ void main() {
       letterSpacing = +letterSpacing;
       maxWidth = +maxWidth;
       lineHeight = lineHeight || 'normal';
+      textIndent = +textIndent;
 
-      getSdfAtlas(font, atlas => {
+      getSdfAtlas(font, sdfGlyphSize, atlas => {
         const fontObj = atlas.fontObj;
         const hasMaxWidth = isFinite(maxWidth);
         let newGlyphs = null;
@@ -1350,7 +1378,7 @@ void main() {
         const caretBottomOffset = (ascender + descender) / 2 * fontSizeMult - caretHeight / 2;
 
         // Distribute glyphs into lines based on wrapping
-        let lineXOffset = 0;
+        let lineXOffset = textIndent;
         let currentLine = new TextLine();
         const lines = [currentLine];
         fontObj.forEachGlyph(text, fontSize, letterSpacing, (glyphObj, glyphX, charIndex) => {
@@ -1413,7 +1441,7 @@ void main() {
           if (char === '\n') {
             currentLine = new TextLine();
             lines.push(currentLine);
-            lineXOffset = -(glyphX + glyphWidth + (letterSpacing * fontSize));
+            lineXOffset = -(glyphX + glyphWidth + (letterSpacing * fontSize)) + textIndent;
           }
         });
 
@@ -1564,7 +1592,7 @@ void main() {
                   let glyphAtlasInfo = atlas.glyphs[glyphObj.index];
                   if (!glyphAtlasInfo) {
                     const sdfStart = now();
-                    const glyphSDFData = sdfGenerator(glyphObj);
+                    const glyphSDFData = sdfGenerator(glyphObj, sdfGlyphSize);
                     timings.sdf[text.charAt(glyphInfo.charIndex)] = now() - sdfStart;
 
                     // Assign this glyph the next available atlas index
@@ -5265,7 +5293,7 @@ void main() {
    * @typedef {object} TroikaTextRenderInfo - Format of the result from `getTextRenderInfo`.
    * @property {object} parameters - The normalized input arguments to the render call.
    * @property {DataTexture} sdfTexture - The SDF atlas texture.
-   * @property {number} sdfGlyphSize - See `configureTextBuilder#config.sdfGlyphSize`
+   * @property {number} sdfGlyphSize - The size of each glyph's SDF.
    * @property {number} sdfMinDistancePercent - See `SDF_DISTANCE_PERCENT`
    * @property {Float32Array} glyphBounds - List of [minX, minY, maxX, maxY] quad bounds for each glyph.
    * @property {Float32Array} glyphAtlasIndices - List holding each glyph's index in the SDF atlas.
@@ -5309,6 +5337,8 @@ void main() {
     // Normalize text to a string
     args.text = '' + args.text;
 
+    args.sdfGlyphSize = args.sdfGlyphSize || CONFIG.sdfGlyphSize;
+
     // Normalize colors
     if (args.colorRanges != null) {
       let colors = {};
@@ -5327,10 +5357,12 @@ void main() {
     Object.freeze(args);
 
     // Init the atlas for this font if needed
-    const {sdfGlyphSize, textureWidth} = CONFIG;
-    let atlas = atlases[args.font];
+    const {textureWidth} = CONFIG;
+    const {sdfGlyphSize} = args;
+    let atlasKey = `${args.font}@${sdfGlyphSize}`;
+    let atlas = atlases[atlasKey];
     if (!atlas) {
-      atlas = atlases[args.font] = {
+      atlas = atlases[atlasKey] = {
         sdfTexture: new three.DataTexture(
           new Uint8Array(sdfGlyphSize * textureWidth),
           textureWidth,
@@ -5436,7 +5468,6 @@ void main() {
       const sdfGenerator = createSDFGenerator(
         createGlyphSegmentsQuadtree,
         {
-          sdfTextureSize: config.sdfGlyphSize,
           sdfDistancePercent
         }
       );
@@ -5474,7 +5505,14 @@ void main() {
     }
   });
 
-  const templateGeometry = new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0);
+  const templateGeometries = {};
+  function getTemplateGeometry(detail) {
+    let geom = templateGeometries[detail];
+    if (!geom) {
+      geom = templateGeometries[detail] = new three.PlaneBufferGeometry(1, 1, detail, detail).translate(0.5, 0.5, 0);
+    }
+    return geom
+  }
   const tempVec3 = new three.Vector3();
 
   const glyphBoundsAttrName = 'aTroikaGlyphBounds';
@@ -5517,8 +5555,7 @@ void main() {
     constructor() {
       super();
 
-      // Base per-instance attributes
-      this.copy(templateGeometry);
+      this.detail = 1;
 
       // Preallocate zero-radius bounding sphere
       this.boundingSphere = new three.Sphere();
@@ -5526,6 +5563,23 @@ void main() {
 
     computeBoundingSphere () {
       // No-op; we'll sync the boundingSphere proactively in `updateGlyphs`.
+    }
+
+    set detail(detail) {
+      if (detail !== this._detail) {
+        this._detail = detail;
+        if (typeof detail !== 'number' || detail < 1) {
+          detail = 1;
+        }
+        let tpl = getTemplateGeometry(detail)
+        ;['position', 'normal', 'uv'].forEach(attr => {
+          this.attributes[attr] = tpl.attributes[attr];
+        });
+        this.setIndex(tpl.getIndex());
+      }
+    }
+    get detail() {
+      return this._detail
     }
 
     /**
@@ -5606,6 +5660,14 @@ void main() {
         attr.needsUpdate = true;
       } else {
         geom.setAttribute(attrName, new three.InstancedBufferAttribute(newArray, itemSize));
+        // If the new attribute has a different size, we also have to (as of r117) manually clear the
+        // internal cached max instance count. See https://github.com/mrdoob/three.js/issues/19706
+        // It's unclear if this is a threejs bug or a truly unsupported scenario; discussion in
+        // that ticket is ambiguous as to whether replacing a BufferAttribute with one of a
+        // different size is supported, but https://github.com/mrdoob/three.js/pull/17418 strongly
+        // implies it should be supported. It's possible we need to
+        delete geom._maxInstanceCount; //for r117+, could be fragile
+        geom.dispose(); //for r118+, more robust feeling, but more heavy-handed than I'd like
       }
     } else if (attr) {
       geom.deleteAttribute(attrName);
@@ -5658,7 +5720,6 @@ uv = vec2(
 
 position = uTroikaOrient * position;
 normal = uTroikaOrient * normal;
-vTroikaGlyphColor = uTroikaUseGlyphColors ? aTroikaGlyphColor / 255.0 : diffuse;
 `;
 
   // language=GLSL
@@ -5745,7 +5806,10 @@ if (troikaAlphaMult == 0.0) {
             .replace(/\bdiffuse\b/g, 'vTroikaGlyphColor');
           // Make sure the vertex shader declares the uniform so we can grab it as a fallback
           if (!uDiffuseRE.test(vertexShader)) {
-            vertexShader = vertexShader.replace(voidMainRegExp, 'uniform vec3 diffuse;\n$&');
+            vertexShader = vertexShader.replace(
+              voidMainRegExp,
+              'uniform vec3 diffuse;\n$&\nvTroikaGlyphColor = uTroikaUseGlyphColors ? aTroikaGlyphColor / 255.0 : diffuse;\n'
+            );
           }
         }
         return { vertexShader, fragmentShader }
@@ -5755,14 +5819,18 @@ if (troikaAlphaMult == 0.0) {
     // Force transparency - TODO is this reasonable?
     textMaterial.transparent = true;
 
-    // WebGLShadowMap reverses the side of the shadow material by default, which fails
-    // for planes, so here we force the `shadowSide` to always match the main side.
-    Object.defineProperty(textMaterial, 'shadowSide', {
-      get() {
-        return this.side
-      },
-      set() {
-        //no-op
+    Object.defineProperties(textMaterial, {
+      isTroikaTextMaterial: {value: true},
+
+      // WebGLShadowMap reverses the side of the shadow material by default, which fails
+      // for planes, so here we force the `shadowSide` to always match the main side.
+      shadowSide: {
+        get() {
+          return this.side
+        },
+        set() {
+          //no-op
+        }
       }
     });
 
@@ -5778,6 +5846,7 @@ if (troikaAlphaMult == 0.0) {
   const tempMat4 = new three.Matrix4();
   const tempVec3a = new three.Vector3();
   const tempVec3b = new three.Vector3();
+  const tempArray = [];
   const origin = new three.Vector3();
   const defaultOrient = '+x+y';
 
@@ -5789,16 +5858,42 @@ if (troikaAlphaMult == 0.0) {
   const syncStartEvent = {type: 'syncstart'};
   const syncCompleteEvent = {type: 'synccomplete'};
 
+  const SYNCABLE_PROPS = [
+    'font',
+    'fontSize',
+    'letterSpacing',
+    'lineHeight',
+    'maxWidth',
+    'overflowWrap',
+    'text',
+    'textAlign',
+    'textIndent',
+    'whiteSpace',
+    'anchorX',
+    'anchorY',
+    'colorRanges',
+    'sdfGlyphSize'
+  ];
+
+  const COPYABLE_PROPS = SYNCABLE_PROPS.concat(
+    'material',
+    'color',
+    'depthOffset',
+    'clipRect',
+    'orientation',
+    'glyphGeometryDetail'
+  );
+
 
 
   /**
-   * @class TextMesh
+   * @class Text
    *
    * A ThreeJS Mesh that renders a string of text on a plane in 3D space using signed distance
    * fields (SDF).
    */
-  class TextMesh extends three.Mesh {
-    constructor(material) {
+  class Text extends three.Mesh {
+    constructor() {
       const geometry = new GlyphsGeometry();
       super(geometry, null);
 
@@ -5889,6 +5984,12 @@ if (troikaAlphaMult == 0.0) {
       this.textAlign = 'left';
 
       /**
+       * @member {number} textIndent
+       * Indentation for the first character of a line; see CSS `text-indent`.
+       */
+      this.textIndent = 0;
+
+      /**
        * @member {string} whiteSpace
        * Defines whether text should wrap when a line reaches the `maxWidth`. Can
        * be either `'normal'` (the default), to allow wrapping according to the `overflowWrap` property,
@@ -5957,6 +6058,24 @@ if (troikaAlphaMult == 0.0) {
        */
       this.orientation = defaultOrient;
 
+      /**
+       * @member {number} glyphGeometryDetail
+       * Controls number of vertical/horizontal segments that make up each glyph's rectangular
+       * plane. Defaults to 1. This can be increased to provide more geometrical detail for custom
+       * vertex shader effects, for example.
+       */
+      this.glyphGeometryDetail = 1;
+
+      /**
+       * @member {number|null} sdfGlyphSize
+       * The size of each glyph's SDF (signed distance field) used for rendering. This must be a
+       * power-of-two number. Defaults to 64 which is generally a good balance of size and quality
+       * for most fonts. Larger sizes can improve the quality of glyph rendering by increasing
+       * the sharpness of corners and preventing loss of very thin lines, at the expense of
+       * increased memory footprint and longer SDF generation time.
+       */
+      this.sdfGlyphSize = null;
+
       this.debugSDF = false;
     }
 
@@ -5985,12 +6104,14 @@ if (troikaAlphaMult == 0.0) {
             lineHeight: this.lineHeight || 'normal',
             maxWidth: this.maxWidth,
             textAlign: this.textAlign,
+            textIndent: this.textIndent,
             whiteSpace: this.whiteSpace,
             overflowWrap: this.overflowWrap,
             anchorX: this.anchorX,
             anchorY: this.anchorY,
             colorRanges: this.colorRanges,
-            includeCaretPositions: true //TODO parameterize
+            includeCaretPositions: true, //TODO parameterize
+            sdfGlyphSize: this.sdfGlyphSize
           }, textRenderInfo => {
             this._isSyncing = false;
 
@@ -6064,9 +6185,6 @@ if (troikaAlphaMult == 0.0) {
       let derivedMaterial = this._derivedMaterial;
       const baseMaterial = this._baseMaterial || defaultMaterial;
       if (!derivedMaterial || derivedMaterial.baseMaterial !== baseMaterial) {
-        if (derivedMaterial) {
-          derivedMaterial.dispose();
-        }
         derivedMaterial = this._derivedMaterial = createTextDerivedMaterial(baseMaterial);
         // dispose the derived material when its base material is disposed:
         baseMaterial.addEventListener('dispose', function onDispose() {
@@ -6077,7 +6195,19 @@ if (troikaAlphaMult == 0.0) {
       return derivedMaterial
     }
     set material(baseMaterial) {
-      this._baseMaterial = baseMaterial;
+      if (baseMaterial && baseMaterial.isTroikaTextMaterial) { //prevent double-derivation
+        this._derivedMaterial = baseMaterial;
+        this._baseMaterial = baseMaterial.baseMaterial;
+      } else {
+        this._baseMaterial = baseMaterial;
+      }
+    }
+
+    get glyphGeometryDetail() {
+      return this.geometry.detail
+    }
+    set glyphGeometryDetail(detail) {
+      this.geometry.detail = detail;
     }
 
     // Create and update material for shadows upon request:
@@ -6118,7 +6248,7 @@ if (troikaAlphaMult == 0.0) {
       material.polygonOffset = !!this.depthOffset;
       material.polygonOffsetFactor = material.polygonOffsetUnits = this.depthOffset || 0;
 
-      // shortcut for setting material color via facade prop:
+      // shortcut for setting material color via `color` prop on the mesh:
       const color = this.color;
       if (color != null && material.color && material.color.isColor && color !== material._troikaColor) {
         material.color.set(material._troikaColor = color);
@@ -6160,31 +6290,33 @@ if (troikaAlphaMult == 0.0) {
             0, 0, 0, 1
           )
         );
-        raycastMesh.raycast(raycaster, intersects);
+        tempArray.length = 0;
+        raycastMesh.raycast(raycaster, tempArray);
+        for (let i = 0; i < tempArray.length; i++) {
+          tempArray[i].object = this;
+          intersects.push(tempArray[i]);
+        }
       }
     }
 
+    copy(source) {
+      super.copy(source);
+      COPYABLE_PROPS.forEach(prop => {
+        this[prop] = source[prop];
+      });
+      return this
+    }
+
+    clone() {
+      return new this.constructor().copy(this)
+    }
   }
 
 
   // Create setters for properties that affect text layout:
-  const SYNCABLE_PROPS = [
-    'font',
-    'fontSize',
-    'letterSpacing',
-    'lineHeight',
-    'maxWidth',
-    'overflowWrap',
-    'text',
-    'textAlign',
-    'whiteSpace',
-    'anchorX',
-    'anchorY',
-    'colorRanges'
-  ];
   SYNCABLE_PROPS.forEach(prop => {
     const privateKey = '_private_' + prop;
-    Object.defineProperty(TextMesh.prototype, prop, {
+    Object.defineProperty(Text.prototype, prop, {
       get() {
         return this[privateKey]
       },
@@ -6200,7 +6332,7 @@ if (troikaAlphaMult == 0.0) {
 
   // Deprecation handler for `anchor` array:
   let deprMsgShown = false;
-  Object.defineProperty(TextMesh.prototype, 'anchor', {
+  Object.defineProperty(Text.prototype, 'anchor', {
     get() {
       return this._deprecated_anchor
     },
@@ -6279,8 +6411,8 @@ if (troikaAlphaMult == 0.0) {
       }
       this.troikaTextEntity = textEntity;
 
-      // Create TextMesh and add it to the entity as the 'mesh' object
-      var textMesh = this.troikaTextMesh = new TextMesh();
+      // Create Text mesh and add it to the entity as the 'mesh' object
+      var textMesh = this.troikaTextMesh = new Text();
       textEntity.setObject3D('mesh', textMesh);
     },
 
