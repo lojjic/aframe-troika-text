@@ -1,7 +1,5 @@
 import aframe from 'aframe'
-
-// Use the standalone TextMesh build file to avoid a large tree of Troika framework dependencies
-import {TextMesh} from 'troika-3d-text/dist/textmesh-standalone.esm.js'
+import { Text } from 'troika-three-text'
 
 
 export var COMPONENT_NAME = 'troika-text'
@@ -64,8 +62,8 @@ aframe.registerComponent(COMPONENT_NAME, {
     }
     this.troikaTextEntity = textEntity
 
-    // Create TextMesh and add it to the entity as the 'mesh' object
-    var textMesh = this.troikaTextMesh = new TextMesh()
+    // Create Text mesh and add it to the entity as the 'mesh' object
+    var textMesh = this.troikaTextMesh = new Text()
     textEntity.setObject3D('mesh', textMesh)
   },
 

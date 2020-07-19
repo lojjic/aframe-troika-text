@@ -9,7 +9,7 @@
     "build": "rollup -c rollup.config.js"
   },
   "dependencies": {
-    "troika-3d-text": "^0.28.0"
+    "troika-three-text": "^0.30.1"
   },
   "peerDependencies": {
     "aframe": "^1.0.4"
