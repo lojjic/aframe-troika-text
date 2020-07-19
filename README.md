@@ -3,7 +3,7 @@
 [![Version](http://img.shields.io/npm/v/aframe-troika-text.svg?style=flat-square)](https://npmjs.org/package/aframe-troika-text)
 [![License](http://img.shields.io/npm/l/aframe-troika-text.svg?style=flat-square)](https://npmjs.org/package/aframe-troika-text)
 
-This package provides an [A-Frame](https://aframe.io) component and primitive for rendering three-dimensional text using [Troika's text renderer](https://github.com/protectwise/troika/tree/master/packages/troika-3d-text).
+This package provides an [A-Frame](https://aframe.io) component and primitive for rendering three-dimensional text using [Troika's text renderer](https://github.com/protectwise/troika/tree/master/packages/troika-three-text).
 
 It has similar performance and quality to A-Frame's built-in SDF `text` component, but brings some additional advantages:
 
