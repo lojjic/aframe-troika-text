@@ -37,7 +37,8 @@ aframe.registerComponent(COMPONENT_NAME, {
     maxWidth: {type: 'number', default: Infinity},
     overflowWrap: {type: 'string', default: 'normal', oneOf: ['normal', 'break-word']},
     value: {type: 'string'},
-    whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']}
+    whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']},
+    depthOffset: {type: 'number', default: 0}
 
     // attrs that can be configured via troika-text-material:
     // opacity: {type: 'number', default: 1.0},
