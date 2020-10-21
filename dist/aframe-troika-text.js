@@ -1,7 +1,31 @@
-(function (aframe, three) {
+(function (THREE, aframe) {
   'use strict';
 
-  aframe = aframe && Object.prototype.hasOwnProperty.call(aframe, 'default') ? aframe['default'] : aframe;
+  function _interopDefaultLegacy (e) { return e && typeof e === 'object' && 'default' in e ? e : { 'default': e }; }
+
+  function _interopNamespace(e) {
+    if (e && e.__esModule) { return e; } else {
+      var n = Object.create(null);
+      if (e) {
+        Object.keys(e).forEach(function (k) {
+          if (k !== 'default') {
+            var d = Object.getOwnPropertyDescriptor(e, k);
+            Object.defineProperty(n, k, d.get ? d : {
+              enumerable: true,
+              get: function () {
+                return e[k];
+              }
+            });
+          }
+        });
+      }
+      n['default'] = e;
+      return Object.freeze(n);
+    }
+  }
+
+  var THREE__namespace = /*#__PURE__*/_interopNamespace(THREE);
+  var aframe__default = /*#__PURE__*/_interopDefaultLegacy(aframe);
 
   /**
    * Lightweight thenable implementation that is entirely self-contained within a single
@@ -22,24 +46,24 @@
    * implementation I've found. And also, exercises like this are challenging and fun.)
    */
   function BespokeThenable() {
-    let state = 0; // 0=pending, 1=fulfilled, -1=rejected
-    let queue = [];
-    let value;
-    let scheduled = 0;
-    let completeCalled = 0;
+    var state = 0; // 0=pending, 1=fulfilled, -1=rejected
+    var queue = [];
+    var value;
+    var scheduled = 0;
+    var completeCalled = 0;
 
     function then(onResolve, onReject) {
-      const nextThenable = BespokeThenable();
+      var nextThenable = BespokeThenable();
 
       function handleNext() {
-        const cb = state > 0 ? onResolve : onReject;
+        var cb = state > 0 ? onResolve : onReject;
         if (isFn(cb)) {
           try {
-            const result = cb(value);
+            var result = cb(value);
             if (result === nextThenable) {
               recursiveError();
             }
-            const resultThen = getThenableThen(result);
+            var resultThen = getThenableThen(result);
             if (resultThen) {
               resultThen.call(result, nextThenable.resolve, nextThenable.reject);
             } else {
@@ -60,13 +84,13 @@
       return nextThenable
     }
 
-    const resolve = oneTime(val => {
+    var resolve = oneTime(function (val) {
       if (!completeCalled) {
         complete(1, val);
       }
     });
 
-    const reject = oneTime(reason => {
+    var reject = oneTime(function (reason) {
       if (!completeCalled) {
         complete(-1, reason);
       }
@@ -74,17 +98,17 @@
 
     function complete(st, val) {
       completeCalled++;
-      let ignoreThrow = 0;
+      var ignoreThrow = 0;
       try {
         if (val === thenableObj) {
           recursiveError();
         }
-        const valThen = st > 0 && getThenableThen(val);
+        var valThen = st > 0 && getThenableThen(val);
         if (valThen) {
-          valThen.call(val, oneTime(v => {
+          valThen.call(val, oneTime(function (v) {
             ignoreThrow++;
             complete(1, v);
-          }), oneTime(v => {
+          }), oneTime(function (v) {
             ignoreThrow++;
             complete(-1, v);
           }));
@@ -108,7 +132,7 @@
     }
 
     function flushQueue() {
-      const q = queue;
+      var q = queue;
       scheduled = 0;
       queue = [];
       q.forEach(callIt);
@@ -119,13 +143,16 @@
     }
 
     function getThenableThen(val) {
-      const valThen = val && (isFn(val) || typeof val === 'object') && val.then;
+      var valThen = val && (isFn(val) || typeof val === 'object') && val.then;
       return isFn(valThen) && valThen
     }
 
     function oneTime(fn) {
-      let called = 0;
-      return function(...args) {
+      var called = 0;
+      return function() {
+        var args = [], len = arguments.length;
+        while ( len-- ) args[ len ] = arguments[ len ];
+
         if (!called++) {
           fn.apply(this, args);
         }
@@ -136,12 +163,12 @@
       throw new TypeError('Chaining cycle detected')
     }
 
-    const isFn = v => typeof v === 'function';
+    var isFn = function (v) { return typeof v === 'function'; };
 
-    const thenableObj = {
-      then,
-      resolve,
-      reject
+    var thenableObj = {
+      then: then,
+      resolve: resolve,
+      reject: reject
     };
     return thenableObj
   }
@@ -153,15 +180,15 @@
    * @constructor
    */
   function NativePromiseThenable() {
-    let resolve, reject;
-    const promise = new Promise((res, rej) => {
+    var resolve, reject;
+    var promise = new Promise(function (res, rej) {
       resolve = res;
       reject = rej;
     });
     return {
       then: promise.then.bind(promise),
-      resolve,
-      reject
+      resolve: resolve,
+      reject: reject
     }
   }
 
@@ -169,16 +196,16 @@
    * Promise.all() impl:
    */
   BespokeThenable.all = NativePromiseThenable.all = function(items) {
-    let resultCount = 0;
-    let results = [];
-    let out = DefaultThenable();
+    var resultCount = 0;
+    var results = [];
+    var out = DefaultThenable();
     if (items.length === 0) {
       out.resolve([]);
     } else {
-      items.forEach((item, i) => {
-        let itemThenable = DefaultThenable();
+      items.forEach(function (item, i) {
+        var itemThenable = DefaultThenable();
         itemThenable.resolve(item);
-        itemThenable.then(res => {
+        itemThenable.then(function (res) {
           resultCount++;
           results[i] = res;
           if (resultCount === items.length) {
@@ -194,26 +221,32 @@
   /**
    * Choose the best Thenable implementation and export it as the default.
    */
-  const DefaultThenable = typeof Promise === 'function' ? NativePromiseThenable : BespokeThenable;
+  var DefaultThenable = typeof Promise === 'function' ? NativePromiseThenable : BespokeThenable;
 
   /**
    * Main content for the worker that handles the loading and execution of
    * modules within it.
    */
   function workerBootstrap() {
-    const modules = Object.create(null);
+    var modules = Object.create(null);
 
     // Handle messages for registering a module
-    function registerModule({id, name, dependencies=[], init=function(){}, getTransferables=null}, callback) {
+    function registerModule(ref, callback) {
+      var id = ref.id;
+      var name = ref.name;
+      var dependencies = ref.dependencies; if ( dependencies === void 0 ) dependencies = [];
+      var init = ref.init; if ( init === void 0 ) init = function(){};
+      var getTransferables = ref.getTransferables; if ( getTransferables === void 0 ) getTransferables = null;
+
       // Only register once
-      if (modules[id]) return
+      if (modules[id]) { return }
 
       try {
         // If any dependencies are modules, ensure they're registered and grab their value
-        dependencies = dependencies.map(dep => {
+        dependencies = dependencies.map(function (dep) {
           if (dep && dep.isWorkerModule) {
-            registerModule(dep, depResult => {
-              if (depResult instanceof Error) throw depResult
+            registerModule(dep, function (depResult) {
+              if (depResult instanceof Error) { throw depResult }
             });
             dep = modules[dep.id].value;
           }
@@ -221,22 +254,22 @@
         });
 
         // Rehydrate functions
-        init = rehydrate(`<${name}>.init`, init);
+        init = rehydrate(("<" + name + ">.init"), init);
         if (getTransferables) {
-          getTransferables = rehydrate(`<${name}>.getTransferables`, getTransferables);
+          getTransferables = rehydrate(("<" + name + ">.getTransferables"), getTransferables);
         }
 
         // Initialize the module and store its value
-        let value = null;
+        var value = null;
         if (typeof init === 'function') {
-          value = init(...dependencies);
+          value = init.apply(void 0, dependencies);
         } else {
           console.error('worker module init function failed to rehydrate');
         }
         modules[id] = {
-          id,
-          value,
-          getTransferables
+          id: id,
+          value: value,
+          getTransferables: getTransferables
         };
         callback(value);
       } catch(err) {
@@ -248,14 +281,18 @@
     }
 
     // Handle messages for calling a registered module's result function
-    function callModule({id, args}, callback) {
+    function callModule(ref, callback) {
+      var ref$1;
+
+      var id = ref.id;
+      var args = ref.args;
       if (!modules[id] || typeof modules[id].value !== 'function') {
-        callback(new Error(`Worker module ${id}: not found or its 'init' did not return a function`));
+        callback(new Error(("Worker module " + id + ": not found or its 'init' did not return a function")));
       }
       try {
-        const result = modules[id].value(...args);
+        var result = (ref$1 = modules[id]).value.apply(ref$1, args);
         if (result && typeof result.then === 'function') {
-          result.then(handleResult, rej => callback(rej instanceof Error ? rej : new Error('' + rej)));
+          result.then(handleResult, function (rej) { return callback(rej instanceof Error ? rej : new Error('' + rej)); });
         } else {
           handleResult(result);
         }
@@ -264,7 +301,7 @@
       }
       function handleResult(result) {
         try {
-          let tx = modules[id].getTransferables && modules[id].getTransferables(result);
+          var tx = modules[id].getTransferables && modules[id].getTransferables(result);
           if (!tx || !Array.isArray(tx) || !tx.length) {
             tx = undefined; //postMessage is very picky about not passing null or empty transferables
           }
@@ -277,11 +314,11 @@
     }
 
     function rehydrate(name, str) {
-      let result = void 0;
-      self.troikaDefine = r => result = r;
-      let url = URL.createObjectURL(
+      var result = void 0;
+      self.troikaDefine = function (r) { return result = r; };
+      var url = URL.createObjectURL(
         new Blob(
-          [`/** ${name.replace(/\*/g, '')} **/\n\ntroikaDefine(\n${str}\n)`],
+          [("/** " + (name.replace(/\*/g, '')) + " **/\n\ntroikaDefine(\n" + str + "\n)")],
           {type: 'application/javascript'}
         )
       );
@@ -296,21 +333,24 @@
     }
 
     // Handler for all messages within the worker
-    self.addEventListener('message', e => {
-      const {messageId, action, data} = e.data;
+    self.addEventListener('message', function (e) {
+      var ref = e.data;
+      var messageId = ref.messageId;
+      var action = ref.action;
+      var data = ref.data;
       try {
         // Module registration
         if (action === 'registerModule') {
-          registerModule(data, result => {
+          registerModule(data, function (result) {
             if (result instanceof Error) {
               postMessage({
-                messageId,
+                messageId: messageId,
                 success: false,
                 error: result.message
               });
             } else {
               postMessage({
-                messageId,
+                messageId: messageId,
                 success: true,
                 result: {isCallable: typeof result === 'function'}
               });
@@ -319,25 +359,25 @@
         }
         // Invocation
         if (action === 'callModule') {
-          callModule(data, (result, transferables) => {
+          callModule(data, function (result, transferables) {
             if (result instanceof Error) {
               postMessage({
-                messageId,
+                messageId: messageId,
                 success: false,
                 error: result.message
               });
             } else {
               postMessage({
-                messageId,
+                messageId: messageId,
                 success: true,
-                result
+                result: result
               }, transferables || undefined);
             }
           });
         }
       } catch(err) {
         postMessage({
-          messageId,
+          messageId: messageId,
           success: false,
           error: err.stack
         });
@@ -351,10 +391,13 @@
    * are disallowed due to e.g. CSP security restrictions.
    */
   function defineMainThreadModule(options) {
-    let moduleFunc = function(...args) {
-      return moduleFunc._getInitResult().then(initResult => {
+    var moduleFunc = function() {
+      var args = [], len = arguments.length;
+      while ( len-- ) args[ len ] = arguments[ len ];
+
+      return moduleFunc._getInitResult().then(function (initResult) {
         if (typeof initResult === 'function') {
-          return initResult(...args)
+          return initResult.apply(void 0, args)
         } else {
           throw new Error('Worker module function was called but `init` did not return a callable function')
         }
@@ -362,28 +405,28 @@
     };
     moduleFunc._getInitResult = function() {
       // We can ignore getTransferables in main thread. TODO workerId?
-      let {dependencies, init} = options;
+      var dependencies = options.dependencies;
+      var init = options.init;
 
       // Resolve dependencies
-      dependencies = Array.isArray(dependencies) ? dependencies.map(dep =>
-        dep && dep._getInitResult ? dep._getInitResult() : dep
+      dependencies = Array.isArray(dependencies) ? dependencies.map(function (dep) { return dep && dep._getInitResult ? dep._getInitResult() : dep; }
       ) : [];
 
       // Invoke init with the resolved dependencies
-      let initThenable = DefaultThenable.all(dependencies).then(deps => {
+      var initThenable = DefaultThenable.all(dependencies).then(function (deps) {
         return init.apply(null, deps)
       });
 
       // Cache the resolved promise for subsequent calls
-      moduleFunc._getInitResult = () => initThenable;
+      moduleFunc._getInitResult = function () { return initThenable; };
 
       return initThenable
     };
     return moduleFunc
   }
 
-  let supportsWorkers = () => {
-    let supported = false;
+  var supportsWorkers = function () {
+    var supported = false;
 
     // Only attempt worker initialization in browsers; elsewhere it would just be
     // noise e.g. loading into a Node environment for SSR.
@@ -391,29 +434,34 @@
       try {
         // TODO additional checks for things like importScripts within the worker?
         //  Would need to be an async check.
-        let worker = new Worker(
-          URL.createObjectURL(
-            new Blob([''], { type: 'application/javascript' })
-          )
+        var worker = new Worker(
+          URL.createObjectURL(new Blob([''], { type: 'application/javascript' }))
         );
         worker.terminate();
         supported = true;
       } catch (err) {
-        console.log(`Troika createWorkerModule: web workers not allowed; falling back to main thread execution. Cause: [${err.message}]`);
+        if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') ; else {
+          console.log(
+            ("Troika createWorkerModule: web workers not allowed; falling back to main thread execution. Cause: [" + (err.message) + "]")
+          );
+        }
       }
     }
 
     // Cached result
-    supportsWorkers = () => supported;
+    supportsWorkers = function () { return supported; };
     return supported
   };
 
-  let _workerModuleId = 0;
-  let _messageId = 0;
-  let _allowInitAsString = false;
-  const workers = Object.create(null);
-  const openRequests = Object.create(null);
-  openRequests._count = 0;
+  var _workerModuleId = 0;
+  var _messageId = 0;
+  var _allowInitAsString = false;
+  var workers = Object.create(null);
+  var openRequests = /*#__PURE__*/(function () {
+    var obj = Object.create(null);
+    obj._count = 0;
+    return obj
+  })();
 
 
   /**
@@ -452,7 +500,10 @@
     if ((!options || typeof options.init !== 'function') && !_allowInitAsString) {
       throw new Error('requires `options.init` function')
     }
-    let {dependencies, init, getTransferables, workerId} = options;
+    var dependencies = options.dependencies;
+    var init = options.init;
+    var getTransferables = options.getTransferables;
+    var workerId = options.workerId;
 
     if (!supportsWorkers()) {
       return defineMainThreadModule(options)
@@ -461,18 +512,18 @@
     if (workerId == null) {
       workerId = '#default';
     }
-    const id = `workerModule${++_workerModuleId}`;
-    const name = options.name || id;
-    let registrationThenable = null;
+    var id = "workerModule" + (++_workerModuleId);
+    var name = options.name || id;
+    var registrationThenable = null;
 
-    dependencies = dependencies && dependencies.map(dep => {
+    dependencies = dependencies && dependencies.map(function (dep) {
       // Wrap raw functions as worker modules with no dependencies
       if (typeof dep === 'function' && !dep.workerModuleData) {
         _allowInitAsString = true;
         dep = defineWorkerModule({
-          workerId,
-          name: `<${name}> function dependency: ${dep.name}`,
-          init: `function(){return (\n${stringifyFunction(dep)}\n)}`
+          workerId: workerId,
+          name: ("<" + name + "> function dependency: " + (dep.name)),
+          init: ("function(){return (\n" + (stringifyFunction(dep)) + "\n)}")
         });
         _allowInitAsString = false;
       }
@@ -483,16 +534,21 @@
       return dep
     });
 
-    function moduleFunc(...args) {
+    function moduleFunc() {
+      var args = [], len = arguments.length;
+      while ( len-- ) args[ len ] = arguments[ len ];
+
       // Register this module if needed
       if (!registrationThenable) {
         registrationThenable = callWorker(workerId,'registerModule', moduleFunc.workerModuleData);
       }
 
       // Invoke the module, returning a thenable
-      return registrationThenable.then(({isCallable}) => {
+      return registrationThenable.then(function (ref) {
+        var isCallable = ref.isCallable;
+
         if (isCallable) {
-          return callWorker(workerId,'callModule', {id, args})
+          return callWorker(workerId,'callModule', {id: id, args: args})
         } else {
           throw new Error('Worker module function was called but `init` did not return a callable function')
         }
@@ -500,9 +556,9 @@
     }
     moduleFunc.workerModuleData = {
       isWorkerModule: true,
-      id,
-      name,
-      dependencies,
+      id: id,
+      name: name,
+      dependencies: dependencies,
       init: stringifyFunction(init),
       getTransferables: getTransferables && stringifyFunction(getTransferables)
     };
@@ -514,7 +570,7 @@
    * @param fn
    */
   function stringifyFunction(fn) {
-    let str = fn.toString();
+    var str = fn.toString();
     // If it was defined in object method/property format, it needs to be modified
     if (!/^function/.test(str) && /^\w+\s*\(/.test(str)) {
       str = 'function ' + str;
@@ -524,26 +580,26 @@
 
 
   function getWorker(workerId) {
-    let worker = workers[workerId];
+    var worker = workers[workerId];
     if (!worker) {
       // Bootstrap the worker's content
-      const bootstrap = stringifyFunction(workerBootstrap);
+      var bootstrap = stringifyFunction(workerBootstrap);
 
       // Create the worker from the bootstrap function content
       worker = workers[workerId] = new Worker(
         URL.createObjectURL(
           new Blob(
-            [`/** Worker Module Bootstrap: ${workerId.replace(/\*/g, '')} **/\n\n;(${bootstrap})()`],
+            [("/** Worker Module Bootstrap: " + (workerId.replace(/\*/g, '')) + " **/\n\n;(" + bootstrap + ")()")],
             {type: 'application/javascript'}
           )
         )
       );
 
       // Single handler for response messages from the worker
-      worker.onmessage = e => {
-        const response = e.data;
-        const msgId = response.messageId;
-        const callback = openRequests[msgId];
+      worker.onmessage = function (e) {
+        var response = e.data;
+        var msgId = response.messageId;
+        var callback = openRequests[msgId];
         if (!callback) {
           throw new Error('WorkerModule response with empty or unknown messageId')
         }
@@ -557,13 +613,13 @@
 
   // Issue a call to the worker with a callback to handle the response
   function callWorker(workerId, action, data) {
-    const thenable = DefaultThenable();
-    const messageId = ++_messageId;
-    openRequests[messageId] = response => {
+    var thenable = DefaultThenable();
+    var messageId = ++_messageId;
+    openRequests[messageId] = function (response) {
       if (response.success) {
         thenable.resolve(response.result);
       } else {
-        thenable.reject(new Error(`Error in worker ${action} call: ${response.error}`));
+        thenable.reject(new Error(("Error in worker " + action + " call: " + (response.error))));
       }
     };
     openRequests._count++;
@@ -571,9 +627,9 @@
       console.warn('Large number of open WorkerModule requests, some may not be returning');
     }
     getWorker(workerId).postMessage({
-      messageId,
-      action,
-      data
+      messageId: messageId,
+      action: action,
+      data: data
     });
     return thenable
   }
@@ -583,7 +639,7 @@
    * module needs Thenable as a dependency, it's better to pass this module rather than
    * the raw function in its `dependencies` array so it only gets registered once.
    */
-  var ThenableWorkerModule = defineWorkerModule({
+  var ThenableWorkerModule = /*#__PURE__*/defineWorkerModule({
     name: 'Thenable',
     dependencies: [DefaultThenable],
     init: function(Thenable) {
@@ -607,7 +663,7 @@
   function expandShaderIncludes( source ) {
     const pattern = /^[ \t]*#include +<([\w\d./]+)>/gm;
     function replace(match, include) {
-      let chunk = three.ShaderChunk[include];
+      let chunk = THREE.ShaderChunk[include];
       return chunk ? expandShaderIncludes(chunk) : match
     }
     return source.replace( pattern, replace )
@@ -631,8 +687,12 @@
 
 
   const epoch = Date.now();
-  const CACHE = new WeakMap(); //threejs requires WeakMap internally so should be safe to assume support
+  const CONSTRUCTOR_CACHE = new WeakMap();
+  const SHADER_UPGRADE_CACHE = new Map();
 
+  // Material ids must be integers, but we can't access the increment from Three's `Material` module,
+  // so let's choose a sufficiently large starting value that should theoretically never collide.
+  let materialInstanceId = 1e10;
 
   /**
    * A utility for creating a custom shader material derived from another material's
@@ -676,6 +736,12 @@
    *        for performing custom rewrites of the full shader code. Useful if you need to do something
    *        special that's not covered by the other builtin options. This function will be executed before
    *        any other transforms are applied.
+   * @param {boolean} options.chained - Set to `true` to prototype-chain the derived material to the base
+   *        material, rather than the default behavior of copying it. This allows the derived material to
+   *        automatically pick up changes made to the base material and its properties. This can be useful
+   *        where the derived material is hidden from the user as an implementation detail, allowing them
+   *        to work with the original material like normal. But it can result in unexpected behavior if not
+   *        handled carefully.
    *
    * @return {THREE.Material}
    *
@@ -689,46 +755,40 @@
    * scenarios, e.g. skipping antialiasing or expensive shader logic.
    */
   function createDerivedMaterial(baseMaterial, options) {
-    // First check the cache to see if we've already derived from this baseMaterial using
-    // this unique set of options, and if so just return a clone instead of a new subclass
-    // which is faster and allows their shader program to be shared when rendering.
-    const optionsHash = getOptionsHash(options);
-    let cached = CACHE.get(baseMaterial);
-    if (!cached) {
-      cached = Object.create(null);
-      CACHE.set(baseMaterial, cached);
+    // Generate a key that is unique to the content of these `options`. We'll use this
+    // throughout for caching and for generating the upgraded shader code. This increases
+    // the likelihood that the resulting shaders will line up across multiple calls so
+    // their GL programs can be shared and cached.
+    const optionsKey = getKeyForOptions(options);
+
+    // First check to see if we've already derived from this baseMaterial using this
+    // unique set of options, and if so reuse the constructor to avoid some allocations.
+    let ctorsByDerivation = CONSTRUCTOR_CACHE.get(baseMaterial);
+    if (!ctorsByDerivation) {
+      CONSTRUCTOR_CACHE.set(baseMaterial, (ctorsByDerivation = Object.create(null)));
     }
-    if (cached[optionsHash]) {
-      return cached[optionsHash].clone()
+    if (ctorsByDerivation[optionsKey]) {
+      return new ctorsByDerivation[optionsKey]()
     }
 
-    // Even if baseMaterial is changing, use a consistent id in shader rewrites based on the
-    // optionsHash. This makes it more likely that deriving from base materials of the same
-    // type/class, e.g. multiple instances of MeshStandardMaterial, will produce identical
-    // rewritten shader code so they can share a single WebGLProgram behind the scenes.
-    const id = getIdForOptionsHash(optionsHash);
-    const privateDerivedShadersProp = `_derivedShaders${id}`;
-    const privateBeforeCompileProp = `_onBeforeCompile${id}`;
-    let distanceMaterialTpl, depthMaterialTpl;
+    const privateBeforeCompileProp = `_onBeforeCompile${optionsKey}`;
 
     // Private onBeforeCompile handler that injects the modified shaders and uniforms when
     // the renderer switches to this material's program
-    function onBeforeCompile(shaderInfo) {
+    const onBeforeCompile = function (shaderInfo) {
       baseMaterial.onBeforeCompile.call(this, shaderInfo);
 
-      // Upgrade the shaders, caching the result
-      const {vertex, fragment} = this[privateDerivedShadersProp] || (this[privateDerivedShadersProp] = {vertex: {}, fragment: {}});
-      if (vertex.source !== shaderInfo.vertexShader || fragment.source !== shaderInfo.fragmentShader) {
-        const upgraded = upgradeShaders(shaderInfo, options, id);
-        vertex.source = shaderInfo.vertexShader;
-        vertex.result = upgraded.vertexShader;
-        fragment.source = shaderInfo.fragmentShader;
-        fragment.result = upgraded.fragmentShader;
+      // Upgrade the shaders, caching the result by incoming source code
+      const cacheKey = optionsKey + '|||' + shaderInfo.vertexShader + '|||' + shaderInfo.fragmentShader;
+      let upgradedShaders = SHADER_UPGRADE_CACHE[cacheKey];
+      if (!upgradedShaders) {
+        const upgraded = upgradeShaders(shaderInfo, options, optionsKey);
+        upgradedShaders = SHADER_UPGRADE_CACHE[cacheKey] = upgraded;
       }
 
       // Inject upgraded shaders and uniforms into the program
-      shaderInfo.vertexShader = vertex.result;
-      shaderInfo.fragmentShader = fragment.result;
+      shaderInfo.vertexShader = upgradedShaders.vertexShader;
+      shaderInfo.fragmentShader = upgradedShaders.fragmentShader;
       assign(shaderInfo.uniforms, this.uniforms);
 
       // Inject auto-updating time uniform if requested
@@ -742,16 +802,44 @@
       if (this[privateBeforeCompileProp]) {
         this[privateBeforeCompileProp](shaderInfo);
       }
-    }
+    };
 
-    function DerivedMaterial() {
-      baseMaterial.constructor.apply(this, arguments);
-      this._listeners = undefined; //don't inherit EventDispatcher listeners
-    }
-    DerivedMaterial.prototype = Object.create(baseMaterial, {
+    const DerivedMaterial = function DerivedMaterial() {
+      return derive(options.chained ? baseMaterial : baseMaterial.clone())
+    };
+
+    const derive = function(base) {
+      // Prototype chain to the base material
+      const derived = Object.create(base, descriptor);
+
+      // Store the baseMaterial for reference; this is always the original even when cloning
+      Object.defineProperty(derived, 'baseMaterial', { value: baseMaterial });
+
+      // Needs its own ids
+      Object.defineProperty(derived, 'id', { value: materialInstanceId++ });
+      derived.uuid = THREE.MathUtils.generateUUID();
+
+      // Merge uniforms, defines, and extensions
+      derived.uniforms = assign({}, base.uniforms, options.uniforms);
+      derived.defines = assign({}, base.defines, options.defines);
+      derived.defines[`TROIKA_DERIVED_MATERIAL_${optionsKey}`] = ''; //force a program change from the base material
+      derived.extensions = assign({}, base.extensions, options.extensions);
+
+      // Don't inherit EventDispatcher listeners
+      derived._listeners = undefined;
+
+      return derived
+    };
+
+    const descriptor = {
       constructor: {value: DerivedMaterial},
       isDerivedMaterial: {value: true},
-      baseMaterial: {value: baseMaterial},
+
+      customProgramCacheKey: {
+        value: function () {
+          return optionsKey
+        }
+      },
 
       onBeforeCompile: {
         get() {
@@ -763,14 +851,25 @@
       },
 
       copy: {
+        writable: true,
+        configurable: true,
         value: function (source) {
           baseMaterial.copy.call(this, source);
           if (!baseMaterial.isShaderMaterial && !baseMaterial.isDerivedMaterial) {
-            this.extensions = assign({}, source.extensions);
-            this.defines = assign({}, source.defines);
-            this.uniforms = three.UniformsUtils.clone(source.uniforms);
+            assign(this.extensions, source.extensions);
+            assign(this.defines, source.defines);
+            assign(this.uniforms, THREE.UniformsUtils.clone(source.uniforms));
           }
           return this
+        }
+      },
+
+      clone: {
+        writable: true,
+        configurable: true,
+        value: function () {
+          const newBase = new baseMaterial.constructor();
+          return derive(newBase).copy(this)
         }
       },
 
@@ -778,69 +877,66 @@
        * Utility to get a MeshDepthMaterial that will honor this derived material's vertex
        * transformations and discarded fragments.
        */
-      getDepthMaterial: {value: function() {
-        let depthMaterial = this._depthMaterial;
-        if (!depthMaterial) {
-          if (!depthMaterialTpl) {
-            depthMaterialTpl = createDerivedMaterial(
+      getDepthMaterial: {
+        writable: true,
+        configurable: true,
+        value: function() {
+          let depthMaterial = this._depthMaterial;
+          if (!depthMaterial) {
+            depthMaterial = this._depthMaterial = createDerivedMaterial(
               baseMaterial.isDerivedMaterial
                 ? baseMaterial.getDepthMaterial()
-                : new three.MeshDepthMaterial({depthPacking: three.RGBADepthPacking}),
+                : new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }),
               options
             );
-            depthMaterialTpl.defines.IS_DEPTH_MATERIAL = '';
+            depthMaterial.defines.IS_DEPTH_MATERIAL = '';
+            depthMaterial.uniforms = this.uniforms; //automatically recieve same uniform values
           }
-          depthMaterial = this._depthMaterial = depthMaterialTpl.clone();
-          depthMaterial.uniforms = this.uniforms; //automatically recieve same uniform values
+          return depthMaterial
         }
-        return depthMaterial
-      }},
+      },
 
       /**
        * Utility to get a MeshDistanceMaterial that will honor this derived material's vertex
        * transformations and discarded fragments.
        */
-      getDistanceMaterial: {value: function() {
-        let distanceMaterial = this._distanceMaterial;
-        if (!distanceMaterial) {
-          if (!distanceMaterialTpl) {
-            distanceMaterialTpl = createDerivedMaterial(
+      getDistanceMaterial: {
+        writable: true,
+        configurable: true,
+        value: function() {
+          let distanceMaterial = this._distanceMaterial;
+          if (!distanceMaterial) {
+            distanceMaterial = this._distanceMaterial = createDerivedMaterial(
               baseMaterial.isDerivedMaterial
                 ? baseMaterial.getDistanceMaterial()
-                : new three.MeshDistanceMaterial(),
+                : new THREE.MeshDistanceMaterial(),
               options
             );
-            distanceMaterialTpl.defines.IS_DISTANCE_MATERIAL = '';
+            distanceMaterial.defines.IS_DISTANCE_MATERIAL = '';
+            distanceMaterial.uniforms = this.uniforms; //automatically recieve same uniform values
           }
-          distanceMaterial = this._distanceMaterial = distanceMaterialTpl.clone();
-          distanceMaterial.uniforms = this.uniforms; //automatically recieve same uniform values
+          return distanceMaterial
         }
-        return distanceMaterial
-      }},
+      },
 
-      dispose: {value() {
-        const {_depthMaterial, _distanceMaterial} = this;
-        if (_depthMaterial) _depthMaterial.dispose();
-        if (_distanceMaterial) _distanceMaterial.dispose();
-        baseMaterial.dispose.call(this);
-      }}
-    });
+      dispose: {
+        writable: true,
+        configurable: true,
+        value() {
+          const {_depthMaterial, _distanceMaterial} = this;
+          if (_depthMaterial) _depthMaterial.dispose();
+          if (_distanceMaterial) _distanceMaterial.dispose();
+          baseMaterial.dispose.call(this);
+        }
+      }
+    };
 
-    const material = new DerivedMaterial();
-    material.copy(baseMaterial);
-
-    // Merge uniforms, defines, and extensions
-    material.uniforms = assign(three.UniformsUtils.clone(baseMaterial.uniforms || {}), options.uniforms);
-    material.defines = assign({}, baseMaterial.defines, options.defines);
-    material.defines[`TROIKA_DERIVED_MATERIAL_${id}`] = ''; //force a program change from the base material
-    material.extensions = assign({}, baseMaterial.extensions, options.extensions);
-
-    cached[optionsHash] = material;
-    return material.clone() //return a clone so changes made to it don't affect the cached object
+    ctorsByDerivation[optionsKey] = DerivedMaterial;
+    return new DerivedMaterial()
   }
 
 
-  function upgradeShaders({vertexShader, fragmentShader}, options, id) {
+  function upgradeShaders({vertexShader, fragmentShader}, options, key) {
     let {
       vertexDefs,
       vertexMainIntro,
@@ -908,28 +1004,28 @@
     // Inject a function for the vertexTransform and rename all usages of position/normal/uv
     if (vertexTransform) {
       vertexDefs = `${vertexDefs}
-vec3 troika_position_${id};
-vec3 troika_normal_${id};
-vec2 troika_uv_${id};
-void troikaVertexTransform${id}(inout vec3 position, inout vec3 normal, inout vec2 uv) {
+vec3 troika_position_${key};
+vec3 troika_normal_${key};
+vec2 troika_uv_${key};
+void troikaVertexTransform${key}(inout vec3 position, inout vec3 normal, inout vec2 uv) {
   ${vertexTransform}
 }
 `;
       vertexMainIntro = `
-troika_position_${id} = vec3(position);
-troika_normal_${id} = vec3(normal);
-troika_uv_${id} = vec2(uv);
-troikaVertexTransform${id}(troika_position_${id}, troika_normal_${id}, troika_uv_${id});
+troika_position_${key} = vec3(position);
+troika_normal_${key} = vec3(normal);
+troika_uv_${key} = vec2(uv);
+troikaVertexTransform${key}(troika_position_${key}, troika_normal_${key}, troika_uv_${key});
 ${vertexMainIntro}
 `;
       vertexShader = vertexShader.replace(/\b(position|normal|uv)\b/g, (match, match1, index, fullStr) => {
-        return /\battribute\s+vec[23]\s+$/.test(fullStr.substr(0, index)) ? match1 : `troika_${match1}_${id}`
+        return /\battribute\s+vec[23]\s+$/.test(fullStr.substr(0, index)) ? match1 : `troika_${match1}_${key}`
       });
     }
 
     // Inject defs and intro/outro snippets
-    vertexShader = injectIntoShaderCode(vertexShader, id, vertexDefs, vertexMainIntro, vertexMainOutro);
-    fragmentShader = injectIntoShaderCode(fragmentShader, id, fragmentDefs, fragmentMainIntro, fragmentMainOutro);
+    vertexShader = injectIntoShaderCode(vertexShader, key, vertexDefs, vertexMainIntro, vertexMainOutro);
+    fragmentShader = injectIntoShaderCode(fragmentShader, key, fragmentDefs, fragmentMainIntro, fragmentMainOutro);
 
     return {
       vertexShader,
@@ -953,9 +1049,6 @@ void main() {
     return shaderCode
   }
 
-  function getOptionsHash(options) {
-    return JSON.stringify(options, optionsJsonReplacer)
-  }
 
   function optionsJsonReplacer(key, value) {
     return key === 'uniforms' ? undefined : typeof value === 'function' ? value.toString() : value
@@ -963,7 +1056,8 @@ void main() {
 
   let _idCtr = 0;
   const optionsHashesToIds = new Map();
-  function getIdForOptionsHash(optionsHash) {
+  function getKeyForOptions(options) {
+    const optionsHash = JSON.stringify(options, optionsJsonReplacer);
     let id = optionsHashesToIds.get(optionsHash);
     if (id == null) {
       optionsHashesToIds.set(optionsHash, (id = ++_idCtr));
@@ -971,19 +1065,16 @@ void main() {
     return id
   }
 
-  const defaultBaseMaterial = new three.MeshStandardMaterial({color: 0xffffff, side: three.DoubleSide});
-
   /**
    * Initializes and returns a function to generate an SDF texture for a given glyph.
-   * @param {function} createGlyphSegmentsQuadtree - factory for a GlyphSegmentsQuadtree implementation.
-   * @param {number} config.sdfDistancePercent - see docs for SDF_DISTANCE_PERCENT in TextBuilder.js
+   * @param {function} createGlyphSegmentsIndex - factory for a GlyphSegmentsIndex implementation.
+   * @param {number} config.sdfExponent
+   * @param {number} config.sdfMargin
    *
    * @return {function(Object): {renderingBounds: [minX, minY, maxX, maxY], textureData: Uint8Array}}
    */
-  function createSDFGenerator(createGlyphSegmentsQuadtree, config) {
-    const {
-      sdfDistancePercent
-    } = config;
+  function createSDFGenerator(createGlyphSegmentsIndex, config) {
+    const { sdfExponent, sdfMargin } = config;
 
     /**
      * How many straight line segments to use when approximating a glyph's quadratic/cubic bezier curves.
@@ -1028,29 +1119,33 @@ void main() {
       const glyphW = glyphObj.xMax - glyphObj.xMin;
       const glyphH = glyphObj.yMax - glyphObj.yMin;
 
-      // Choose a maximum distance radius in font units, based on the glyph's max dimensions
-      const fontUnitsMaxDist = Math.max(glyphW, glyphH) * sdfDistancePercent;
+      // Choose a maximum search distance radius in font units, based on the glyph's max dimensions
+      const fontUnitsMaxSearchDist = Math.max(glyphW, glyphH);
 
-      // Use that, extending to the texture edges, to find conversion ratios between texture units and font units
-      const fontUnitsPerXTexel = (glyphW + fontUnitsMaxDist * 2) / sdfSize;
-      const fontUnitsPerYTexel = (glyphH + fontUnitsMaxDist * 2) / sdfSize;
+      // Margin - add an extra 0.5 over the configured value because the outer 0.5 doesn't contain
+      // useful interpolated values and will be ignored anyway.
+      const fontUnitsMargin = Math.max(glyphW, glyphH) / sdfSize * (sdfMargin * sdfSize + 0.5);
 
-      const textureMinFontX = glyphObj.xMin - fontUnitsMaxDist - fontUnitsPerXTexel;
-      const textureMinFontY = glyphObj.yMin - fontUnitsMaxDist - fontUnitsPerYTexel;
-      const textureMaxFontX = glyphObj.xMax + fontUnitsMaxDist + fontUnitsPerXTexel;
-      const textureMaxFontY = glyphObj.yMax + fontUnitsMaxDist + fontUnitsPerYTexel;
+      // Metrics of the texture/quad in font units
+      const textureMinFontX = glyphObj.xMin - fontUnitsMargin;
+      const textureMinFontY = glyphObj.yMin - fontUnitsMargin;
+      const textureMaxFontX = glyphObj.xMax + fontUnitsMargin;
+      const textureMaxFontY = glyphObj.yMax + fontUnitsMargin;
+      const fontUnitsTextureWidth = textureMaxFontX - textureMinFontX;
+      const fontUnitsTextureHeight = textureMaxFontY - textureMinFontY;
+      const fontUnitsTextureMaxDim = Math.max(fontUnitsTextureWidth, fontUnitsTextureHeight);
 
       function textureXToFontX(x) {
-        return textureMinFontX + (textureMaxFontX - textureMinFontX) * x / sdfSize
+        return textureMinFontX + fontUnitsTextureWidth * x / sdfSize
       }
 
       function textureYToFontY(y) {
-        return textureMinFontY + (textureMaxFontY - textureMinFontY) * y / sdfSize
+        return textureMinFontY + fontUnitsTextureHeight * y / sdfSize
       }
 
       if (glyphObj.pathCommandCount) { //whitespace chars will have no commands, so we can skip all this
         // Decompose all paths into straight line segments and add them to a quadtree
-        const lineSegmentsIndex = createGlyphSegmentsQuadtree(glyphObj);
+        const lineSegmentsIndex = createGlyphSegmentsIndex(glyphObj);
         let firstX, firstY, prevX, prevY;
         glyphObj.forEachPathCommand((type, x0, y0, x1, y1, x2, y2) => {
           switch (type) {
@@ -1111,11 +1206,18 @@ void main() {
             const signedDist = lineSegmentsIndex.findNearestSignedDistance(
               textureXToFontX(sdfX + 0.5),
               textureYToFontY(sdfY + 0.5),
-              fontUnitsMaxDist
+              fontUnitsMaxSearchDist
             );
-            //if (!isFinite(signedDist)) throw 'infinite distance!'
-            let alpha = isFinite(signedDist) ? Math.round(255 * (1 + signedDist / fontUnitsMaxDist) * 0.5) : signedDist;
-            alpha = Math.max(0, Math.min(255, alpha)); //clamp
+
+            // Use an exponential scale to ensure the texels very near the glyph path have adequate
+            // precision, while allowing the distance field to cover the entire texture, given that
+            // there are only 8 bits available. Formula visualized: https://www.desmos.com/calculator/uiaq5aqiam
+            let alpha = Math.pow((1 - Math.abs(signedDist) / fontUnitsTextureMaxDim), sdfExponent) / 2;
+            if (signedDist < 0) {
+              alpha = 1 - alpha;
+            }
+
+            alpha = Math.max(0, Math.min(255, Math.round(alpha * 255))); //clamp
             textureData[sdfY * sdfSize + sdfX] = alpha;
           }
         }
@@ -1180,7 +1282,7 @@ void main() {
   function createFontProcessor(fontParser, sdfGenerator, config) {
 
     const {
-      defaultFontUrl
+      defaultFontURL
     } = config;
 
 
@@ -1219,9 +1321,9 @@ void main() {
     function doLoadFont(url, callback) {
       function tryLoad() {
         const onError = err => {
-          console.error(`Failure loading font ${url}${url === defaultFontUrl ? '' : '; trying fallback'}`, err);
-          if (url !== defaultFontUrl) {
-            url = defaultFontUrl;
+          console.error(`Failure loading font ${url}${url === defaultFontURL ? '' : '; trying fallback'}`, err);
+          if (url !== defaultFontURL) {
+            url = defaultFontURL;
             tryLoad();
           }
         };
@@ -1257,7 +1359,7 @@ void main() {
      * loaded, the callback will be called synchronously.
      */
     function loadFont(fontUrl, callback) {
-      if (!fontUrl) fontUrl = defaultFontUrl;
+      if (!fontUrl) fontUrl = defaultFontURL;
       let font = fonts[fontUrl];
       if (font) {
         // if currently loading font, add to callbacks, otherwise execute immediately
@@ -1282,7 +1384,7 @@ void main() {
      * its atlas data objects if necessary.
      */
     function getSdfAtlas(fontUrl, sdfGlyphSize, callback) {
-      if (!fontUrl) fontUrl = defaultFontUrl;
+      if (!fontUrl) fontUrl = defaultFontURL;
       let atlasKey = `${fontUrl}@${sdfGlyphSize}`;
       let atlas = fontAtlases[atlasKey];
       if (atlas) {
@@ -1308,7 +1410,7 @@ void main() {
     function process(
       {
         text='',
-        font=defaultFontUrl,
+        font=defaultFontURL,
         sdfGlyphSize=64,
         fontSize=1,
         letterSpacing=0,
@@ -1351,7 +1453,7 @@ void main() {
         let glyphAtlasIndices = null;
         let glyphColors = null;
         let caretPositions = null;
-        let totalBounds = null;
+        let visibleBounds = null;
         let chunkedBounds = null;
         let maxLineWidth = 0;
         let renderableGlyphCount = 0;
@@ -1373,7 +1475,7 @@ void main() {
         // Determine line height and leading adjustments
         lineHeight = lineHeight * fontSize;
         const halfLeading = (lineHeight - (ascender - descender) * fontSizeMult) / 2;
-        const topBaseline = -(fontSize + halfLeading);
+        const topBaseline = -(ascender * fontSizeMult + halfLeading);
         const caretHeight = Math.min(lineHeight, (ascender - descender) * fontSizeMult);
         const caretBottomOffset = (ascender + descender) / 2 * fontSizeMult - caretHeight / 2;
 
@@ -1459,43 +1561,43 @@ void main() {
           }
         });
 
-        if (!metricsOnly) {
-          // Find overall position adjustments for anchoring
-          let anchorXOffset = 0;
-          let anchorYOffset = 0;
-          if (anchorX) {
-            if (typeof anchorX === 'number') {
-              anchorXOffset = -anchorX;
-            }
-            else if (typeof anchorX === 'string') {
-              anchorXOffset = -maxLineWidth * (
-                anchorX === 'left' ? 0 :
-                anchorX === 'center' ? 0.5 :
-                anchorX === 'right' ? 1 :
-                parsePercent(anchorX)
-              );
-            }
+        // Find overall position adjustments for anchoring
+        let anchorXOffset = 0;
+        let anchorYOffset = 0;
+        if (anchorX) {
+          if (typeof anchorX === 'number') {
+            anchorXOffset = -anchorX;
           }
-          if (anchorY) {
-            if (typeof anchorY === 'number') {
-              anchorYOffset = -anchorY;
-            }
-            else if (typeof anchorY === 'string') {
-              let height = lines.length * lineHeight;
-              anchorYOffset = anchorY === 'top' ? 0 :
-                anchorY === 'top-baseline' ? -topBaseline :
-                anchorY === 'middle' ? height / 2 :
-                anchorY === 'bottom' ? height :
-                anchorY === 'bottom-baseline' ? height - halfLeading + descender * fontSizeMult :
-                parsePercent(anchorY) * height;
-            }
+          else if (typeof anchorX === 'string') {
+            anchorXOffset = -maxLineWidth * (
+              anchorX === 'left' ? 0 :
+              anchorX === 'center' ? 0.5 :
+              anchorX === 'right' ? 1 :
+              parsePercent(anchorX)
+            );
           }
+        }
+        if (anchorY) {
+          if (typeof anchorY === 'number') {
+            anchorYOffset = -anchorY;
+          }
+          else if (typeof anchorY === 'string') {
+            let height = lines.length * lineHeight;
+            anchorYOffset = anchorY === 'top' ? 0 :
+              anchorY === 'top-baseline' ? -topBaseline :
+              anchorY === 'middle' ? height / 2 :
+              anchorY === 'bottom' ? height :
+              anchorY === 'bottom-baseline' ? height - halfLeading + descender * fontSizeMult :
+              parsePercent(anchorY) * height;
+          }
+        }
 
+        if (!metricsOnly) {
           // Process each line, applying alignment offsets, adding each glyph to the atlas, and
           // collecting all renderable glyphs into a single collection.
           glyphBounds = new Float32Array(renderableGlyphCount * 4);
           glyphAtlasIndices = new Float32Array(renderableGlyphCount);
-          totalBounds = [INF, INF, -INF, -INF];
+          visibleBounds = [INF, INF, -INF, -INF];
           chunkedBounds = [];
           let lineYOffset = topBaseline;
           if (includeCaretPositions) {
@@ -1610,19 +1712,25 @@ void main() {
                     };
                   }
 
-                  // Determine final glyph bounds and add them to the glyphBounds array
+                  // Determine final glyph quad bounds and add them to the glyphBounds array
                   const bounds = glyphAtlasInfo.renderingBounds;
-                  const start = idx * 4;
-                  const x0 = glyphBounds[start] = glyphInfo.x + bounds[0] * fontSizeMult + anchorXOffset;
-                  const y0 = glyphBounds[start + 1] = lineYOffset + bounds[1] * fontSizeMult + anchorYOffset;
-                  const x1 = glyphBounds[start + 2] = glyphInfo.x + bounds[2] * fontSizeMult + anchorXOffset;
-                  const y1 = glyphBounds[start + 3] = lineYOffset + bounds[3] * fontSizeMult + anchorYOffset;
+                  const startIdx = idx * 4;
+                  const xStart = glyphInfo.x + anchorXOffset;
+                  const yStart = lineYOffset + anchorYOffset;
+                  glyphBounds[startIdx] = xStart + bounds[0] * fontSizeMult;
+                  glyphBounds[startIdx + 1] = yStart + bounds[1] * fontSizeMult;
+                  glyphBounds[startIdx + 2] = xStart + bounds[2] * fontSizeMult;
+                  glyphBounds[startIdx + 3] = yStart + bounds[3] * fontSizeMult;
 
-                  // Track total bounds
-                  if (x0 < totalBounds[0]) totalBounds[0] = x0;
-                  if (y0 < totalBounds[1]) totalBounds[1] = y0;
-                  if (x1 > totalBounds[2]) totalBounds[2] = x1;
-                  if (y1 > totalBounds[3]) totalBounds[3] = y1;
+                  // Track total visible bounds
+                  const visX0 = xStart + glyphObj.xMin * fontSizeMult;
+                  const visY0 = yStart + glyphObj.yMin * fontSizeMult;
+                  const visX1 = xStart + glyphObj.xMax * fontSizeMult;
+                  const visY1 = yStart + glyphObj.yMax * fontSizeMult;
+                  if (visX0 < visibleBounds[0]) visibleBounds[0] = visX0;
+                  if (visY0 < visibleBounds[1]) visibleBounds[1] = visY0;
+                  if (visX1 > visibleBounds[2]) visibleBounds[2] = visX1;
+                  if (visY1 > visibleBounds[3]) visibleBounds[3] = visY1;
 
                   // Track bounding rects for each chunk of N glyphs
                   if (idx % chunkedBoundsSize === 0) {
@@ -1630,10 +1738,11 @@ void main() {
                     chunkedBounds.push(chunk);
                   }
                   chunk.end++;
-                  if (x0 < chunk.rect[0]) chunk.rect[0] = x0;
-                  if (y0 < chunk.rect[1]) chunk.rect[1] = y0;
-                  if (x1 > chunk.rect[2]) chunk.rect[2] = x1;
-                  if (y1 > chunk.rect[3]) chunk.rect[3] = y1;
+                  const chunkRect = chunk.rect;
+                  if (visX0 < chunkRect[0]) chunkRect[0] = visX0;
+                  if (visY0 < chunkRect[1]) chunkRect[1] = visY0;
+                  if (visX1 > chunkRect[2]) chunkRect[2] = visX1;
+                  if (visY1 > chunkRect[3]) chunkRect[3] = visY1;
 
                   // Add to atlas indices array
                   glyphAtlasIndices[idx] = glyphAtlasInfo.atlasIndex;
@@ -1672,8 +1781,13 @@ void main() {
           descender: descender * fontSizeMult, //font descender
           lineHeight, //computed line height
           topBaseline, //y coordinate of the top line's baseline
-          totalBounds, //total rect including all glyphBounds; will be slightly larger than glyph edges due to SDF padding
-          totalBlockSize: [maxLineWidth, lines.length * lineHeight], //width and height of the text block; accurate for layout measurement
+          blockBounds: [ //bounds for the whole block of text, including vertical padding for lineHeight
+            anchorXOffset,
+            anchorYOffset - lines.length * lineHeight,
+            anchorXOffset + maxLineWidth,
+            anchorYOffset
+          ],
+          visibleBounds, //total bounds of visible text paths, may be larger or smaller than totalBounds
           newGlyphSDFs: newGlyphs, //if this request included any new SDFs for the atlas, they'll be included here
           timings
         });
@@ -1689,9 +1803,10 @@ void main() {
      */
     function measure(args, callback) {
       process(args, (result) => {
+        const [x0, y0, x1, y1] = result.blockBounds;
         callback({
-          width: result.totalBlockSize[0],
-          height: result.totalBlockSize[1]
+          width: x1 - x0,
+          height: y1 - y0
         });
       }, {metricsOnly: true});
     }
@@ -1749,179 +1864,88 @@ void main() {
   }
 
   /**
-   * Basic quadtree impl for performing fast spatial searches of a glyph's line segments.
+   * Index for performing fast spatial searches of a glyph's line segments.
+   * @return {{addLineSegment:function, findNearestSignedDistance:function}}
    */
-  function createGlyphSegmentsQuadtree(glyphObj) {
-    // Pick a good initial power-of-two bounding box that will hold all possible segments
-    const {xMin, yMin, xMax, yMax} = glyphObj;
-    const dx = xMax - xMin;
-    const dy = yMax - yMin;
-    const cx = Math.round(xMin + dx / 2);
-    const cy = Math.round(yMin + dy / 2);
-    const r = Math.pow(2, Math.floor(Math.log(Math.max(dx, dy)) * Math.LOG2E));
-    const INF = Infinity;
+  function createGlyphSegmentsIndex() {
+    let needsSort = false;
+    const segments = [];
 
-    const root = {
-      0: null,
-      1: null,
-      2: null,
-      3: null,
-      data: null,
-      cx: cx,
-      cy: cy,
-      r: r,
-      minX: INF,
-      minY: INF,
-      maxX: -INF,
-      maxY: -INF
-    };
+    function sortSegments() {
+      if (needsSort) {
+        // sort by maxX, this will let us short-circuit some loops below
+        segments.sort(function(a, b) {
+          return a.maxX - b.maxX
+        });
+        needsSort = false;
+      }
+    }
 
     /**
-     * Add a line segment to the quadtree.
+     * Add a line segment to the index.
      * @param x0
      * @param y0
      * @param x1
      * @param y1
      */
     function addLineSegment(x0, y0, x1, y1) {
-      const cx = (x0 + x1) / 2;
-      const cy = (y0 + y1) / 2;
       const segment = {
-        x0, y0, x1, y1, cx, cy,
+        x0, y0, x1, y1,
         minX: Math.min(x0, x1),
         minY: Math.min(y0, y1),
         maxX: Math.max(x0, x1),
-        maxY: Math.max(y0, y1),
-        next: null
+        maxY: Math.max(y0, y1)
       };
-      insertSegment(segment, root);
-    }
-
-    function insertSegment(segment, node) {
-      // update node min/max stats
-      const {minX, minY, maxX, maxY, cx, cy} = segment;
-      if (minX < node.minX) node.minX = minX;
-      if (minY < node.minY) node.minY = minY;
-      if (maxX > node.maxX) node.maxX = maxX;
-      if (maxY > node.maxY) node.maxY = maxY;
-
-      // leaf
-      let leafSegment = node.data;
-      if (leafSegment) {
-        // coincident; push as linked list
-        if (leafSegment.cx === cx && leafSegment.cy === cy) {
-          while (leafSegment.next) leafSegment = leafSegment.next;
-          leafSegment.next = segment;
-        }
-        // non-coincident; split leaf to branch
-        else {
-          node.data = null;
-          insertSegment(leafSegment, node);
-          insertSegment(segment, node);
-        }
-      }
-      // branch
-      else {
-        // find target sub-index for the segment's centerpoint
-        const subIndex = (cy < node.cy ? 0 : 2) + (cx < node.cx ? 0 : 1);
-
-        // subnode already at index: recurse
-        if (node[subIndex]) {
-          insertSegment(segment, node[subIndex]);
-        }
-        // create new leaf
-        else {
-          node[subIndex] = {
-            0: null,
-            1: null,
-            2: null,
-            3: null,
-            data: segment,
-            cx: node.cx + node.r / 2 * (subIndex % 2 ? 1 : -1),
-            cy: node.cy + node.r / 2 * (subIndex < 2 ? -1 : 1),
-            r: node.r / 2,
-            minX: minX,
-            minY: minY,
-            maxX: maxX,
-            maxY: maxY
-          };
-        }
-      }
-    }
-
-    function walkTree(callback) {
-      walkBranch(root, callback);
-    }
-
-    function walkBranch(root, callback) {
-      if (callback(root) !== false && !root.data) {
-        for (let i = 0; i < 4; i++) {
-          if (root[i] !== null) {
-            walkBranch(root[i], callback);
-          }
-        }
-      }
+      segments.push(segment);
+      needsSort = true;
     }
 
     /**
-     * For a given x/y, search the quadtree for the closest line segment and return
-     * its signed distance.
+     * For a given x/y, search the index for the closest line segment and return
+     * its signed distance. Negative = inside, positive = outside, zero = on edge
      * @param x
      * @param y
-     * @param maxSearchRadius
      * @returns {number}
      */
-    function findNearestSignedDistance(x, y, maxSearchRadius) {
-      let closestDist = maxSearchRadius;
-      let closestDistSq = closestDist * closestDist;
+    function findNearestSignedDistance(x, y) {
+      sortSegments();
+      let closestDistSq = Infinity;
+      let closestDist = Infinity;
 
-      walkTree(function visit(node) {
-        // Ignore nodes that can't possibly have segments closer than what we've already found. We base
-        // this on a simple rect bounds check; radial would be more accurate but much slower.
-        if (
-          x - closestDist > node.maxX || x + closestDist < node.minX ||
-          y - closestDist > node.maxY || y + closestDist < node.minY
-        ) {
-          return false
-        }
-
-        // Leaf - check each segment's actual distance
-        for (let segment = node.data; segment; segment = segment.next) {
-          const distSq = absSquareDistanceToLineSegment(x, y, segment.x0, segment.y0, segment.x1, segment.y1);
+      for (let i = segments.length; i--;) {
+        const seg = segments[i];
+        if (seg.maxX + closestDist <= x) break //sorting by maxX means no more can be closer, so we can short-circuit
+        if (x + closestDist > seg.minX && y - closestDist < seg.maxY && y + closestDist > seg.minY) {
+          const distSq = absSquareDistanceToLineSegment(x, y, seg.x0, seg.y0, seg.x1, seg.y1);
           if (distSq < closestDistSq) {
             closestDistSq = distSq;
-            closestDist = Math.sqrt(distSq);
+            closestDist = Math.sqrt(closestDistSq);
           }
         }
-      });
+      }
 
-      // Flip to negative distance if outside the poly
-      if (!isPointInPoly(x, y)) {
+      // Flip to negative distance if inside the poly
+      if (isPointInPoly(x, y)) {
         closestDist = -closestDist;
       }
       return closestDist
     }
 
     // Determine whether the given point lies inside or outside the glyph. Uses a simple
-    // ray casting algorithm using a ray pointing east from the point, optimized by using
-    // the quadtree search to test as few lines as possible.
+    // ray casting algorithm using a ray pointing east from the point.
     function isPointInPoly(x, y) {
+      sortSegments();
       let inside = false;
-      walkTree(node => {
-        // Ignore nodes whose bounds can't possibly cross our east-pointing ray
-        if (node.maxX < x || node.minY > y || node.maxY < y) {
-          return false
-        }
-
-        // Leaf - test each segment for whether it crosses our east-pointing ray
-        for (let segment = node.data; segment; segment = segment.next) {
-          const {x0, y0, x1, y1} = segment;
-          const intersects = ((y0 > y) !== (y1 > y)) && (x < (x1 - x0) * (y - y0) / (y1 - y0) + x0);
+      for (let i = segments.length; i--;) {
+        const seg = segments[i];
+        if (seg.maxX <= x) break //sorting by maxX means no more can cross, so we can short-circuit
+        if (seg.minY < y && seg.maxY > y) {
+          const intersects = ((seg.y0 > y) !== (seg.y1 > y)) && (x < (seg.x1 - seg.x0) * (y - seg.y0) / (seg.y1 - seg.y0) + seg.x0);
           if (intersects) {
             inside = !inside;
           }
         }
-      });
+      }
       return inside
     }
 
@@ -5246,7 +5270,7 @@ void main() {
   }
 
 
-  const workerModule = defineWorkerModule({
+  const workerModule = /*#__PURE__*/defineWorkerModule({
     name: 'Typr Font Parser',
     dependencies: [typrFactory, woff2otfFactory, parserFactory],
     init(typrFactory, woff2otfFactory, parserFactory) {
@@ -5262,21 +5286,11 @@ void main() {
   const CONFIG = {
     defaultFontURL: 'https://fonts.gstatic.com/s/roboto/v18/KFOmCnqEu92Fr1Mu4mxM.woff', //Roboto Regular
     sdfGlyphSize: 64,
+    sdfMargin: 1 / 16,
+    sdfExponent: 9,
     textureWidth: 2048
   };
-  const tempColor = new three.Color();
-
-
-  /**
-   * The radial distance from glyph edges over which the SDF alpha will be calculated; if the alpha
-   * at distance:0 is 0.5, then the alpha at this distance will be zero. This is defined as a percentage
-   * of each glyph's maximum dimension in font space units so that it maps to the same minimum number of
-   * SDF texels regardless of the glyph's size. A larger value provides greater alpha gradient resolution
-   * and improves readability/antialiasing quality at small display sizes, but also decreases the number
-   * of texels available for encoding path details.
-   */
-  const SDF_DISTANCE_PERCENT = 1 / 8;
-
+  const tempColor = /*#__PURE__*/new THREE.Color();
 
   /**
    * Repository for all font SDF atlas textures
@@ -5293,8 +5307,8 @@ void main() {
    * @typedef {object} TroikaTextRenderInfo - Format of the result from `getTextRenderInfo`.
    * @property {object} parameters - The normalized input arguments to the render call.
    * @property {DataTexture} sdfTexture - The SDF atlas texture.
-   * @property {number} sdfGlyphSize - The size of each glyph's SDF.
-   * @property {number} sdfMinDistancePercent - See `SDF_DISTANCE_PERCENT`
+   * @property {number} sdfGlyphSize - The size of each glyph's SDF; see `configureTextBuilder`.
+   * @property {number} sdfExponent - The exponent used in encoding the SDF's values; see `configureTextBuilder`.
    * @property {Float32Array} glyphBounds - List of [minX, minY, maxX, maxY] quad bounds for each glyph.
    * @property {Float32Array} glyphAtlasIndices - List holding each glyph's index in the SDF atlas.
    * @property {Uint8Array} [glyphColors] - List holding each glyph's [r, g, b] color, if `colorRanges` was supplied.
@@ -5305,10 +5319,12 @@ void main() {
    * @property {number} descender - The font's descender metric.
    * @property {number} lineHeight - The final computed lineHeight measurement.
    * @property {number} topBaseline - The y position of the top line's baseline.
-   * @property {Array<number>} totalBounds - The total [minX, minY, maxX, maxY] rect including all glyph
-   *           quad bounds; this will be slightly larger than the actual glyph path edges due to SDF padding.
-   * @property {Array<number>} totalBlockSize - The [width, height] of the text block; this does not include
-   *           extra SDF padding so it is accurate to use for measurement.
+   * @property {Array<number>} blockBounds - The total [minX, minY, maxX, maxY] rect of the whole text block;
+   *           this can include extra vertical space beyond the visible glyphs due to lineHeight, and is
+   *           equivalent to the dimensions of a block-level text element in CSS.
+   * @property {Array<number>} visibleBounds -
+   * @property {Array<number>} totalBounds - DEPRECATED; use blockBounds instead.
+   * @property {Array<number>} totalBlockSize - DEPRECATED; use blockBounds instead
    * @property {Array<number>} chunkedBounds - List of bounding rects for each consecutive set of N glyphs,
    *           in the format `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`.
    * @property {object} timings - Timing info for various parts of the rendering logic including SDF
@@ -5357,23 +5373,23 @@ void main() {
     Object.freeze(args);
 
     // Init the atlas for this font if needed
-    const {textureWidth} = CONFIG;
+    const {textureWidth, sdfExponent} = CONFIG;
     const {sdfGlyphSize} = args;
     let atlasKey = `${args.font}@${sdfGlyphSize}`;
     let atlas = atlases[atlasKey];
     if (!atlas) {
       atlas = atlases[atlasKey] = {
-        sdfTexture: new three.DataTexture(
+        sdfTexture: new THREE.DataTexture(
           new Uint8Array(sdfGlyphSize * textureWidth),
           textureWidth,
           sdfGlyphSize,
-          three.LuminanceFormat,
+          THREE.LuminanceFormat,
           undefined,
           undefined,
           undefined,
           undefined,
-          three.LinearFilter,
-          three.LinearFilter
+          THREE.LinearFilter,
+          THREE.LinearFilter
         )
       };
       atlas.sdfTexture.font = args.font;
@@ -5396,13 +5412,13 @@ void main() {
 
           // Insert the new glyph's data into the full texture image at the correct offsets
           const cols = texImg.width / sdfGlyphSize;
+          const baseStartIndex = texImg.width * sdfGlyphSize * Math.floor(atlasIndex / cols) //full rows
+            + (atlasIndex % cols) * sdfGlyphSize; //partial row
           for (let y = 0; y < sdfGlyphSize; y++) {
             const srcStartIndex = y * sdfGlyphSize;
-            const tgtStartIndex = texImg.width * sdfGlyphSize * Math.floor(atlasIndex / cols) //full rows
-              + (atlasIndex % cols) * sdfGlyphSize //partial row
-              + (y * texImg.width); //row within glyph
+            const rowStartIndex = baseStartIndex + (y * texImg.width);
             for (let x = 0; x < sdfGlyphSize; x++) {
-              texImg.data[tgtStartIndex + x] = textureData[srcStartIndex + x];
+              texImg.data[rowStartIndex + x] = textureData[srcStartIndex + x];
             }
           }
         });
@@ -5414,7 +5430,7 @@ void main() {
         parameters: args,
         sdfTexture: atlas.sdfTexture,
         sdfGlyphSize,
-        sdfMinDistancePercent: SDF_DISTANCE_PERCENT,
+        sdfExponent,
         glyphBounds: result.glyphBounds,
         glyphAtlasIndices: result.glyphAtlasIndices,
         glyphColors: result.glyphColors,
@@ -5425,9 +5441,18 @@ void main() {
         descender: result.descender,
         lineHeight: result.lineHeight,
         topBaseline: result.topBaseline,
-        totalBounds: result.totalBounds,
-        totalBlockSize: result.totalBlockSize,
-        timings: result.timings
+        blockBounds: result.blockBounds,
+        visibleBounds: result.visibleBounds,
+        timings: result.timings,
+        get totalBounds() {
+          console.log('totalBounds deprecated, use blockBounds instead');
+          return result.blockBounds
+        },
+        get totalBlockSize() {
+          console.log('totalBlockSize deprecated, use blockBounds instead');
+          const [x0, y0, x1, y1] = result.blockBounds;
+          return [x1 - x0, y1 - y0]
+        }
       }));
     });
   }
@@ -5454,30 +5479,23 @@ void main() {
   }
 
 
-  const fontProcessorWorkerModule = defineWorkerModule({
+  const fontProcessorWorkerModule = /*#__PURE__*/defineWorkerModule({
     name: 'FontProcessor',
     dependencies: [
       CONFIG,
-      SDF_DISTANCE_PERCENT,
       workerModule,
-      createGlyphSegmentsQuadtree,
+      createGlyphSegmentsIndex,
       createSDFGenerator,
       createFontProcessor
     ],
-    init(config, sdfDistancePercent, fontParser, createGlyphSegmentsQuadtree, createSDFGenerator, createFontProcessor) {
-      const sdfGenerator = createSDFGenerator(
-        createGlyphSegmentsQuadtree,
-        {
-          sdfDistancePercent
-        }
-      );
-      return createFontProcessor(fontParser, sdfGenerator, {
-        defaultFontUrl: config.defaultFontURL
-      })
+    init(config, fontParser, createGlyphSegmentsIndex, createSDFGenerator, createFontProcessor) {
+      const {sdfExponent, sdfMargin, defaultFontURL} = config;
+      const sdfGenerator = createSDFGenerator(createGlyphSegmentsIndex, { sdfExponent, sdfMargin });
+      return createFontProcessor(fontParser, sdfGenerator, { defaultFontURL })
     }
   });
 
-  const processInWorker = defineWorkerModule({
+  const processInWorker = /*#__PURE__*/defineWorkerModule({
     name: 'TextBuilder',
     dependencies: [fontProcessorWorkerModule, ThenableWorkerModule],
     init(fontProcessor, Thenable) {
@@ -5505,179 +5523,199 @@ void main() {
     }
   });
 
-  const templateGeometries = {};
-  function getTemplateGeometry(detail) {
-    let geom = templateGeometries[detail];
-    if (!geom) {
-      geom = templateGeometries[detail] = new three.PlaneBufferGeometry(1, 1, detail, detail).translate(0.5, 0.5, 0);
-    }
-    return geom
-  }
-  const tempVec3 = new three.Vector3();
+  const GlyphsGeometry = /*#__PURE__*/(() => {
 
-  const glyphBoundsAttrName = 'aTroikaGlyphBounds';
-  const glyphIndexAttrName = 'aTroikaGlyphIndex';
-  const glyphColorAttrName = 'aTroikaGlyphColor';
-
-
-
-  /**
-  @class GlyphsGeometry
-
-  A specialized Geometry for rendering a set of text glyphs. Uses InstancedBufferGeometry to
-  render the glyphs using GPU instancing of a single quad, rather than constructing a whole
-  geometry with vertices, for much smaller attribute arraybuffers according to this math:
-
-    Where N = number of glyphs...
-
-    Instanced:
-    - position: 4 * 3
-    - index: 2 * 3
-    - normal: 4 * 3
-    - uv: 4 * 2
-    - glyph x/y bounds: N * 4
-    - glyph indices: N * 1
-    = 5N + 38
-
-    Non-instanced:
-    - position: N * 4 * 3
-    - index: N * 2 * 3
-    - normal: N * 4 * 3
-    - uv: N * 4 * 2
-    - glyph indices: N * 1
-    = 39N
-
-  A downside of this is the rare-but-possible lack of the instanced arrays extension,
-  which we could potentially work around with a fallback non-instanced implementation.
-
-  */
-  class GlyphsGeometry extends three.InstancedBufferGeometry {
-    constructor() {
-      super();
-
-      this.detail = 1;
-
-      // Preallocate zero-radius bounding sphere
-      this.boundingSphere = new three.Sphere();
-    }
-
-    computeBoundingSphere () {
-      // No-op; we'll sync the boundingSphere proactively in `updateGlyphs`.
-    }
-
-    set detail(detail) {
-      if (detail !== this._detail) {
-        this._detail = detail;
-        if (typeof detail !== 'number' || detail < 1) {
-          detail = 1;
-        }
-        let tpl = getTemplateGeometry(detail)
-        ;['position', 'normal', 'uv'].forEach(attr => {
-          this.attributes[attr] = tpl.attributes[attr];
-        });
-        this.setIndex(tpl.getIndex());
+    const templateGeometries = {};
+    function getTemplateGeometry(detail) {
+      let geom = templateGeometries[detail];
+      if (!geom) {
+        geom = templateGeometries[detail] = new THREE.PlaneBufferGeometry(1, 1, detail, detail).translate(0.5, 0.5, 0);
       }
+      return geom
     }
-    get detail() {
-      return this._detail
-    }
+    const tempVec3 = new THREE.Vector3();
+
+    const glyphBoundsAttrName = 'aTroikaGlyphBounds';
+    const glyphIndexAttrName = 'aTroikaGlyphIndex';
+    const glyphColorAttrName = 'aTroikaGlyphColor';
 
     /**
-     * Update the geometry for a new set of glyphs.
-     * @param {Float32Array} glyphBounds - An array holding the planar bounds for all glyphs
-     *        to be rendered, 4 entries for each glyph: x1,x2,y1,y1
-     * @param {Float32Array} glyphAtlasIndices - An array holding the index of each glyph within
-     *        the SDF atlas texture.
-     * @param {Array} totalBounds - An array holding the [minX, minY, maxX, maxY] across all glyphs
-     * @param {Array} [chunkedBounds] - An array of objects describing bounds for each chunk of N
-     *        consecutive glyphs: `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`. This can be
-     *        used with `applyClipRect` to choose an optimized `instanceCount`.
-     * @param {Uint8Array} [glyphColors] - An array holding r,g,b values for each glyph.
-     */
-    updateGlyphs(glyphBounds, glyphAtlasIndices, totalBounds, chunkedBounds, glyphColors) {
-      // Update the instance attributes
-      updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
-      updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
-      updateBufferAttr(this, glyphColorAttrName, glyphColors, 3);
-      this._chunkedBounds = chunkedBounds;
-      setInstanceCount(this, glyphAtlasIndices.length);
+    @class GlyphsGeometry
 
-      // Update the boundingSphere based on the total bounds
-      const sphere = this.boundingSphere;
-      sphere.center.set(
-        (totalBounds[0] + totalBounds[2]) / 2,
-        (totalBounds[1] + totalBounds[3]) / 2,
-        0
-      );
-      sphere.radius = sphere.center.distanceTo(tempVec3.set(totalBounds[0], totalBounds[1], 0));
-    }
+    A specialized Geometry for rendering a set of text glyphs. Uses InstancedBufferGeometry to
+    render the glyphs using GPU instancing of a single quad, rather than constructing a whole
+    geometry with vertices, for much smaller attribute arraybuffers according to this math:
 
-    /**
-     * Given a clipping rect, and the chunkedBounds from the last updateGlyphs call, choose the lowest
-     * `instanceCount` that will show all glyphs within the clipped view. This is an optimization
-     * for long blocks of text that are clipped, to skip vertex shader evaluation for glyphs that would
-     * be clipped anyway.
-     *
-     * Note that since `drawElementsInstanced[ANGLE]` only accepts an instance count and not a starting
-     * offset, this optimization becomes less effective as the clipRect moves closer to the end of the
-     * text block. We could fix that by switching from instancing to a full geometry with a drawRange,
-     * but at the expense of much larger attribute buffers (see classdoc above.)
-     *
-     * @param {Vector4} clipRect
-     */
-    applyClipRect(clipRect) {
-      let count = this.getAttribute(glyphIndexAttrName).count;
-      let chunks = this._chunkedBounds;
-      if (chunks) {
-        for (let i = chunks.length; i--;) {
-          count = chunks[i].end;
-          let rect = chunks[i].rect;
-          // note: both rects are l-b-r-t
-          if (rect[1] < clipRect.w && rect[3] > clipRect.y && rect[0] < clipRect.z && rect[2] > clipRect.x) {
-            break
+      Where N = number of glyphs...
+
+      Instanced:
+      - position: 4 * 3
+      - index: 2 * 3
+      - normal: 4 * 3
+      - uv: 4 * 2
+      - glyph x/y bounds: N * 4
+      - glyph indices: N * 1
+      = 5N + 38
+
+      Non-instanced:
+      - position: N * 4 * 3
+      - index: N * 2 * 3
+      - normal: N * 4 * 3
+      - uv: N * 4 * 2
+      - glyph indices: N * 1
+      = 39N
+
+    A downside of this is the rare-but-possible lack of the instanced arrays extension,
+    which we could potentially work around with a fallback non-instanced implementation.
+
+    */
+    class GlyphsGeometry extends THREE.InstancedBufferGeometry {
+      constructor() {
+        super();
+
+        this.detail = 1;
+
+        // Define groups for rendering text outline as a separate pass; these will only
+        // be used when the `material` getter returns an array, i.e. outlineWidth > 0.
+        this.groups = [
+          {start: 0, count: Infinity, materialIndex: 0},
+          {start: 0, count: Infinity, materialIndex: 1}
+        ];
+
+        // Preallocate zero-radius bounding sphere
+        this.boundingSphere = new THREE.Sphere();
+        this.boundingBox = new THREE.Box3();
+      }
+
+      computeBoundingSphere () {
+        // No-op; we'll sync the boundingSphere proactively in `updateGlyphs`.
+      }
+
+      computeBoundingBox() {
+        // No-op; we'll sync the boundingBox proactively in `updateGlyphs`.
+      }
+
+      set detail(detail) {
+        if (detail !== this._detail) {
+          this._detail = detail;
+          if (typeof detail !== 'number' || detail < 1) {
+            detail = 1;
+          }
+          let tpl = getTemplateGeometry(detail)
+          ;['position', 'normal', 'uv'].forEach(attr => {
+            this.attributes[attr] = tpl.attributes[attr].clone();
+          });
+          this.setIndex(tpl.getIndex().clone());
+        }
+      }
+      get detail() {
+        return this._detail
+      }
+
+      /**
+       * Update the geometry for a new set of glyphs.
+       * @param {Float32Array} glyphBounds - An array holding the planar bounds for all glyphs
+       *        to be rendered, 4 entries for each glyph: x1,x2,y1,y1
+       * @param {Float32Array} glyphAtlasIndices - An array holding the index of each glyph within
+       *        the SDF atlas texture.
+       * @param {Array} blockBounds - An array holding the [minX, minY, maxX, maxY] across all glyphs
+       * @param {Array} [chunkedBounds] - An array of objects describing bounds for each chunk of N
+       *        consecutive glyphs: `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`. This can be
+       *        used with `applyClipRect` to choose an optimized `instanceCount`.
+       * @param {Uint8Array} [glyphColors] - An array holding r,g,b values for each glyph.
+       */
+      updateGlyphs(glyphBounds, glyphAtlasIndices, blockBounds, chunkedBounds, glyphColors) {
+        // Update the instance attributes
+        updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
+        updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
+        updateBufferAttr(this, glyphColorAttrName, glyphColors, 3);
+        this._chunkedBounds = chunkedBounds;
+        setInstanceCount(this, glyphAtlasIndices.length);
+
+        // Update the boundingSphere based on the total bounds
+        const sphere = this.boundingSphere;
+        sphere.center.set(
+          (blockBounds[0] + blockBounds[2]) / 2,
+          (blockBounds[1] + blockBounds[3]) / 2,
+          0
+        );
+        sphere.radius = sphere.center.distanceTo(tempVec3.set(blockBounds[0], blockBounds[1], 0));
+
+        // Update the boundingBox based on the total bounds
+        const box = this.boundingBox;
+        box.min.set(blockBounds[0], blockBounds[1], 0);
+        box.max.set(blockBounds[2], blockBounds[3], 0);
+      }
+
+      /**
+       * Given a clipping rect, and the chunkedBounds from the last updateGlyphs call, choose the lowest
+       * `instanceCount` that will show all glyphs within the clipped view. This is an optimization
+       * for long blocks of text that are clipped, to skip vertex shader evaluation for glyphs that would
+       * be clipped anyway.
+       *
+       * Note that since `drawElementsInstanced[ANGLE]` only accepts an instance count and not a starting
+       * offset, this optimization becomes less effective as the clipRect moves closer to the end of the
+       * text block. We could fix that by switching from instancing to a full geometry with a drawRange,
+       * but at the expense of much larger attribute buffers (see classdoc above.)
+       *
+       * @param {Vector4} clipRect
+       */
+      applyClipRect(clipRect) {
+        let count = this.getAttribute(glyphIndexAttrName).count;
+        let chunks = this._chunkedBounds;
+        if (chunks) {
+          for (let i = chunks.length; i--;) {
+            count = chunks[i].end;
+            let rect = chunks[i].rect;
+            // note: both rects are l-b-r-t
+            if (rect[1] < clipRect.w && rect[3] > clipRect.y && rect[0] < clipRect.z && rect[2] > clipRect.x) {
+              break
+            }
           }
         }
+        setInstanceCount(this, count);
       }
-      setInstanceCount(this, count);
     }
-  }
 
-  // Compat for pre r109:
-  if (!GlyphsGeometry.prototype.setAttribute) {
-    GlyphsGeometry.prototype.setAttribute = function(name, attribute) {
-      this.attributes[ name ] = attribute;
-      return this
-    };
-  }
+    // Compat for pre r109:
+    if (!GlyphsGeometry.prototype.setAttribute) {
+      GlyphsGeometry.prototype.setAttribute = function(name, attribute) {
+        this.attributes[ name ] = attribute;
+        return this
+      };
+    }
 
 
-  function updateBufferAttr(geom, attrName, newArray, itemSize) {
-    const attr = geom.getAttribute(attrName);
-    if (newArray) {
-      // If length isn't changing, just update the attribute's array data
-      if (attr && attr.array.length === newArray.length) {
-        attr.array.set(newArray);
-        attr.needsUpdate = true;
-      } else {
-        geom.setAttribute(attrName, new three.InstancedBufferAttribute(newArray, itemSize));
-        // If the new attribute has a different size, we also have to (as of r117) manually clear the
-        // internal cached max instance count. See https://github.com/mrdoob/three.js/issues/19706
-        // It's unclear if this is a threejs bug or a truly unsupported scenario; discussion in
-        // that ticket is ambiguous as to whether replacing a BufferAttribute with one of a
-        // different size is supported, but https://github.com/mrdoob/three.js/pull/17418 strongly
-        // implies it should be supported. It's possible we need to
-        delete geom._maxInstanceCount; //for r117+, could be fragile
-        geom.dispose(); //for r118+, more robust feeling, but more heavy-handed than I'd like
+    function updateBufferAttr(geom, attrName, newArray, itemSize) {
+      const attr = geom.getAttribute(attrName);
+      if (newArray) {
+        // If length isn't changing, just update the attribute's array data
+        if (attr && attr.array.length === newArray.length) {
+          attr.array.set(newArray);
+          attr.needsUpdate = true;
+        } else {
+          geom.setAttribute(attrName, new THREE.InstancedBufferAttribute(newArray, itemSize));
+          // If the new attribute has a different size, we also have to (as of r117) manually clear the
+          // internal cached max instance count. See https://github.com/mrdoob/three.js/issues/19706
+          // It's unclear if this is a threejs bug or a truly unsupported scenario; discussion in
+          // that ticket is ambiguous as to whether replacing a BufferAttribute with one of a
+          // different size is supported, but https://github.com/mrdoob/three.js/pull/17418 strongly
+          // implies it should be supported. It's possible we need to
+          delete geom._maxInstanceCount; //for r117+, could be fragile
+          geom.dispose(); //for r118+, more robust feeling, but more heavy-handed than I'd like
+        }
+      } else if (attr) {
+        geom.deleteAttribute(attrName);
       }
-    } else if (attr) {
-      geom.deleteAttribute(attrName);
     }
-  }
 
-  // Handle maxInstancedCount -> instanceCount rename that happened in three r117
-  function setInstanceCount(geom, count) {
-    geom[geom.hasOwnProperty('instanceCount') ? 'instanceCount' : 'maxInstancedCount'] = count;
-  }
+    // Handle maxInstancedCount -> instanceCount rename that happened in three r117
+    function setInstanceCount(geom, count) {
+      geom[geom.hasOwnProperty('instanceCount') ? 'instanceCount' : 'maxInstancedCount'] = count;
+    }
+
+    return GlyphsGeometry
+  })();
 
   // language=GLSL
   const VERTEX_DEFS = `
@@ -5687,77 +5725,131 @@ uniform vec4 uTroikaTotalBounds;
 uniform vec4 uTroikaClipRect;
 uniform mat3 uTroikaOrient;
 uniform bool uTroikaUseGlyphColors;
+uniform float uTroikaDistanceOffset;
 attribute vec4 aTroikaGlyphBounds;
 attribute float aTroikaGlyphIndex;
 attribute vec3 aTroikaGlyphColor;
-varying vec2 vTroikaSDFTextureUV;
 varying vec2 vTroikaGlyphUV;
+varying vec4 vTroikaTextureUVBounds;
 varying vec3 vTroikaGlyphColor;
+varying vec2 vTroikaGlyphDimensions;
 `;
 
   // language=GLSL prefix="void main() {" suffix="}"
   const VERTEX_TRANSFORM = `
 vec4 bounds = aTroikaGlyphBounds;
+vec4 outlineBounds = vec4(bounds.xy - uTroikaDistanceOffset, bounds.zw + uTroikaDistanceOffset);
 vec4 clippedBounds = vec4(
-  clamp(bounds.xy, uTroikaClipRect.xy, uTroikaClipRect.zw),
-  clamp(bounds.zw, uTroikaClipRect.xy, uTroikaClipRect.zw)
+  clamp(outlineBounds.xy, uTroikaClipRect.xy, uTroikaClipRect.zw),
+  clamp(outlineBounds.zw, uTroikaClipRect.xy, uTroikaClipRect.zw)
 );
 vec2 clippedXY = (mix(clippedBounds.xy, clippedBounds.zw, position.xy) - bounds.xy) / (bounds.zw - bounds.xy);
-vTroikaGlyphUV = clippedXY.xy;
-
-float cols = uTroikaSDFTextureSize.x / uTroikaSDFGlyphSize;
-vTroikaSDFTextureUV = vec2(
-  mod(aTroikaGlyphIndex, cols) + clippedXY.x,
-  floor(aTroikaGlyphIndex / cols) + clippedXY.y
-) * uTroikaSDFGlyphSize / uTroikaSDFTextureSize;
 
 position.xy = mix(bounds.xy, bounds.zw, clippedXY);
 
-uv = vec2(
-  (position.x - uTroikaTotalBounds.x) / (uTroikaTotalBounds.z - uTroikaTotalBounds.x),
-  (position.y - uTroikaTotalBounds.y) / (uTroikaTotalBounds.w - uTroikaTotalBounds.y)
-);
+uv = (position.xy - uTroikaTotalBounds.xy) / (uTroikaTotalBounds.zw - uTroikaTotalBounds.xy);
 
 position = uTroikaOrient * position;
 normal = uTroikaOrient * normal;
+
+vTroikaGlyphUV = clippedXY.xy;
+vTroikaGlyphDimensions = vec2(bounds[2] - bounds[0], bounds[3] - bounds[1]);
+
+${''/* NOTE: it seems important to calculate the glyph's bounding texture UVs here in the
+  vertex shader, rather than in the fragment shader, as the latter gives strange artifacts
+  on some glyphs (those in the leftmost texture column) on some systems. The exact reason
+  isn't understood but doing this here, then mix()-ing in the fragment shader, seems to work. */}
+float txCols = uTroikaSDFTextureSize.x / uTroikaSDFGlyphSize;
+vec2 txUvPerGlyph = uTroikaSDFGlyphSize / uTroikaSDFTextureSize;
+vec2 txStartUV = txUvPerGlyph * vec2(
+  mod(aTroikaGlyphIndex, txCols),
+  floor(aTroikaGlyphIndex / txCols)
+);
+vTroikaTextureUVBounds = vec4(txStartUV, vec2(txStartUV) + txUvPerGlyph);
 `;
 
   // language=GLSL
   const FRAGMENT_DEFS = `
 uniform sampler2D uTroikaSDFTexture;
-uniform float uTroikaSDFMinDistancePct;
+uniform vec2 uTroikaSDFTextureSize;
+uniform float uTroikaSDFGlyphSize;
+uniform float uTroikaSDFExponent;
+uniform float uTroikaDistanceOffset;
 uniform bool uTroikaSDFDebug;
-varying vec2 vTroikaSDFTextureUV;
 varying vec2 vTroikaGlyphUV;
+varying vec4 vTroikaTextureUVBounds;
+varying vec2 vTroikaGlyphDimensions;
 
-float troikaGetTextAlpha() {
-  float troikaSDFValue = texture2D(uTroikaSDFTexture, vTroikaSDFTextureUV).r;
+float troikaSdfValueToSignedDistance(float alpha) {
+  // Inverse of encoding in SDFGenerator.js
+  ${''/* TODO - there's some slight inaccuracy here when dealing with interpolated alpha values; those
+    are linearly interpolated where the encoding is exponential. Look into improving this by rounding
+    to nearest 2 whole texels, decoding those exponential values, and linearly interpolating the result.
+  */}
+  float maxDimension = max(vTroikaGlyphDimensions.x, vTroikaGlyphDimensions.y);
+  float absDist = (1.0 - pow(2.0 * (alpha > 0.5 ? 1.0 - alpha : alpha), 1.0 / uTroikaSDFExponent)) * maxDimension;
+  float signedDist = absDist * (alpha > 0.5 ? -1.0 : 1.0);
+  return signedDist;
+}
+
+float troikaGlyphUvToSdfValue(vec2 glyphUV) {
+  vec2 textureUV = mix(vTroikaTextureUVBounds.xy, vTroikaTextureUVBounds.zw, glyphUV);
+  return texture2D(uTroikaSDFTexture, textureUV).r;
+}
+
+float troikaGlyphUvToDistance(vec2 uv) {
+  return troikaSdfValueToSignedDistance(troikaGlyphUvToSdfValue(uv));
+}
+
+float troikaGetTextAlpha(float distanceOffset) {
+  vec2 clampedGlyphUV = clamp(vTroikaGlyphUV, 0.5 / uTroikaSDFGlyphSize, 1.0 - 0.5 / uTroikaSDFGlyphSize);
+  float distance = troikaGlyphUvToDistance(clampedGlyphUV);
+    
+  // Extrapolate distance when outside bounds:
+  distance += clampedGlyphUV == vTroikaGlyphUV ? 0.0 : 
+    length((vTroikaGlyphUV - clampedGlyphUV) * vTroikaGlyphDimensions);
+
+  ${''/* 
+  // TODO more refined extrapolated distance by adjusting for angle of gradient at edge...
+  // This has potential but currently gives very jagged extensions, maybe due to precision issues?
+  float uvStep = 1.0 / uTroikaSDFGlyphSize;
+  vec2 neighbor1UV = clampedGlyphUV + (
+    vTroikaGlyphUV.x != clampedGlyphUV.x ? vec2(0.0, uvStep * sign(0.5 - vTroikaGlyphUV.y)) :
+    vTroikaGlyphUV.y != clampedGlyphUV.y ? vec2(uvStep * sign(0.5 - vTroikaGlyphUV.x), 0.0) :
+    vec2(0.0)
+  );
+  vec2 neighbor2UV = clampedGlyphUV + (
+    vTroikaGlyphUV.x != clampedGlyphUV.x ? vec2(0.0, uvStep * -sign(0.5 - vTroikaGlyphUV.y)) :
+    vTroikaGlyphUV.y != clampedGlyphUV.y ? vec2(uvStep * -sign(0.5 - vTroikaGlyphUV.x), 0.0) :
+    vec2(0.0)
+  );
+  float neighbor1Distance = troikaGlyphUvToDistance(neighbor1UV);
+  float neighbor2Distance = troikaGlyphUvToDistance(neighbor2UV);
+  float distToUnclamped = length((vTroikaGlyphUV - clampedGlyphUV) * vTroikaGlyphDimensions);
+  float distToNeighbor = length((clampedGlyphUV - neighbor1UV) * vTroikaGlyphDimensions);
+  float gradientAngle1 = min(asin(abs(neighbor1Distance - distance) / distToNeighbor), PI / 2.0);
+  float gradientAngle2 = min(asin(abs(neighbor2Distance - distance) / distToNeighbor), PI / 2.0);
+  distance += (cos(gradientAngle1) + cos(gradientAngle2)) / 2.0 * distToUnclamped;
+  */}
   
   #if defined(IS_DEPTH_MATERIAL) || defined(IS_DISTANCE_MATERIAL)
-  float alpha = step(0.5, troikaSDFValue);
+  float alpha = step(-distanceOffset, -distance);
   #else
   ${''/*
     When the standard derivatives extension is available, we choose an antialiasing alpha threshold based
     on the potential change in the SDF's alpha from this fragment to its neighbor. This strategy maximizes 
-    readability and edge crispness at all sizes and screen resolutions. Interestingly, this also means that 
-    below a minimum size we're effectively displaying the SDF texture unmodified.
+    readability and edge crispness at all sizes and screen resolutions.
   */}
   #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300
-  float aaDist = min(
-    0.5,
-    0.5 * min(
-      fwidth(vTroikaGlyphUV.x),
-      fwidth(vTroikaGlyphUV.y)
-    )
-  ) / uTroikaSDFMinDistancePct;
+  float aaDist = length(fwidth(vTroikaGlyphUV * vTroikaGlyphDimensions)) * 0.5;
   #else
-  float aaDist = 0.01;
+  float aaDist = vTroikaGlyphDimensions.x / 64.0;
   #endif
   
-  float alpha = uTroikaSDFDebug ? troikaSDFValue : smoothstep(
-    0.5 - aaDist,
-    0.5 + aaDist,
-    troikaSDFValue
+  float alpha = smoothstep(
+    distanceOffset + aaDist,
+    distanceOffset - aaDist,
+    distance
   );
   #endif
   
@@ -5767,11 +5859,16 @@ float troikaGetTextAlpha() {
 
   // language=GLSL prefix="void main() {" suffix="}"
   const FRAGMENT_TRANSFORM = `
-float troikaAlphaMult = troikaGetTextAlpha();
-if (troikaAlphaMult == 0.0) {
+float alpha = uTroikaSDFDebug ?
+  troikaGlyphUvToSdfValue(vTroikaGlyphUV) :
+  troikaGetTextAlpha(uTroikaDistanceOffset);
+
+#if !defined(IS_DEPTH_MATERIAL) && !defined(IS_DISTANCE_MATERIAL)
+gl_FragColor.a *= alpha;
+#endif
+  
+if (alpha == 0.0) {
   discard;
-} else {
-  gl_FragColor.a *= troikaAlphaMult;
 }
 `;
 
@@ -5781,15 +5878,19 @@ if (troikaAlphaMult == 0.0) {
    */
   function createTextDerivedMaterial(baseMaterial) {
     const textMaterial = createDerivedMaterial(baseMaterial, {
-      extensions: {derivatives: true},
+      chained: true,
+      extensions: {
+        derivatives: true
+      },
       uniforms: {
         uTroikaSDFTexture: {value: null},
-        uTroikaSDFTextureSize: {value: new three.Vector2()},
+        uTroikaSDFTextureSize: {value: new THREE.Vector2()},
         uTroikaSDFGlyphSize: {value: 0},
-        uTroikaSDFMinDistancePct: {value: 0},
-        uTroikaTotalBounds: {value: new three.Vector4(0,0,0,0)},
-        uTroikaClipRect: {value: new three.Vector4(0,0,0,0)},
-        uTroikaOrient: {value: new three.Matrix3()},
+        uTroikaSDFExponent: {value: 0},
+        uTroikaTotalBounds: {value: new THREE.Vector4(0,0,0,0)},
+        uTroikaClipRect: {value: new THREE.Vector4(0,0,0,0)},
+        uTroikaDistanceOffset: {value: 0},
+        uTroikaOrient: {value: new THREE.Matrix3()},
         uTroikaUseGlyphColors: {value: true},
         uTroikaSDFDebug: {value: false}
       },
@@ -5837,526 +5938,596 @@ if (troikaAlphaMult == 0.0) {
     return textMaterial
   }
 
-  const defaultMaterial = new three.MeshBasicMaterial({
-    color: 0xffffff,
-    side: three.DoubleSide,
-    transparent: true
-  });
+  const Text = /*#__PURE__*/(() => {
 
-  const tempMat4 = new three.Matrix4();
-  const tempVec3a = new three.Vector3();
-  const tempVec3b = new three.Vector3();
-  const tempArray = [];
-  const origin = new three.Vector3();
-  const defaultOrient = '+x+y';
+    const defaultMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+      transparent: true
+    });
 
-  const raycastMesh = new three.Mesh(
-    new three.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0),
-    defaultMaterial
-  );
+    const tempMat4 = new THREE.Matrix4();
+    const tempVec3a = new THREE.Vector3();
+    const tempVec3b = new THREE.Vector3();
+    const tempArray = [];
+    const origin = new THREE.Vector3();
+    const defaultOrient = '+x+y';
 
-  const syncStartEvent = {type: 'syncstart'};
-  const syncCompleteEvent = {type: 'synccomplete'};
-
-  const SYNCABLE_PROPS = [
-    'font',
-    'fontSize',
-    'letterSpacing',
-    'lineHeight',
-    'maxWidth',
-    'overflowWrap',
-    'text',
-    'textAlign',
-    'textIndent',
-    'whiteSpace',
-    'anchorX',
-    'anchorY',
-    'colorRanges',
-    'sdfGlyphSize'
-  ];
-
-  const COPYABLE_PROPS = SYNCABLE_PROPS.concat(
-    'material',
-    'color',
-    'depthOffset',
-    'clipRect',
-    'orientation',
-    'glyphGeometryDetail'
-  );
-
-
-
-  /**
-   * @class Text
-   *
-   * A ThreeJS Mesh that renders a string of text on a plane in 3D space using signed distance
-   * fields (SDF).
-   */
-  class Text extends three.Mesh {
-    constructor() {
-      const geometry = new GlyphsGeometry();
-      super(geometry, null);
-
-      // === Text layout properties: === //
-
-      /**
-       * @member {string} text
-       * The string of text to be rendered.
-       */
-      this.text = '';
-
-      /**
-       * @deprecated Use `anchorX` and `anchorY` instead
-       * @member {Array<number>} anchor
-       * Defines where in the text block should correspond to the mesh's local position, as a set
-       * of horizontal and vertical percentages from 0 to 1. A value of `[0, 0]` (the default)
-       * anchors at the top-left, `[1, 1]` at the bottom-right, and `[0.5, 0.5]` centers the
-       * block at the mesh's position.
-       */
-      //this.anchor = null
-
-      /**
-       * @member {number|string} anchorX
-       * Defines the horizontal position in the text block that should line up with the local origin.
-       * Can be specified as a numeric x position in local units, a string percentage of the total
-       * text block width e.g. `'25%'`, or one of the following keyword strings: 'left', 'center',
-       * or 'right'.
-       */
-      this.anchorX = 0;
-
-      /**
-       * @member {number|string} anchorX
-       * Defines the vertical position in the text block that should line up with the local origin.
-       * Can be specified as a numeric y position in local units (note: down is negative y), a string
-       * percentage of the total text block height e.g. `'25%'`, or one of the following keyword strings:
-       * 'top', 'top-baseline', 'middle', 'bottom-baseline', or 'bottom'.
-       */
-      this.anchorY = 0;
-
-      /**
-       * @member {string} font
-       * URL of a custom font to be used. Font files can be any of the formats supported by
-       * OpenType (see https://github.com/opentypejs/opentype.js).
-       * Defaults to the Roboto font loaded from Google Fonts.
-       */
-      this.font = null; //will use default from TextBuilder
-
-      /**
-       * @member {number} fontSize
-       * The size at which to render the font in local units; corresponds to the em-box height
-       * of the chosen `font`.
-       */
-      this.fontSize = 0.1;
-
-      /**
-       * @member {number} letterSpacing
-       * Sets a uniform adjustment to spacing between letters after kerning is applied. Positive
-       * numbers increase spacing and negative numbers decrease it.
-       */
-      this.letterSpacing = 0;
-
-      /**
-       * @member {number|string} lineHeight
-       * Sets the height of each line of text, as a multiple of the `fontSize`. Defaults to 'normal'
-       * which chooses a reasonable height based on the chosen font's ascender/descender metrics.
-       */
-      this.lineHeight = 'normal';
-
-      /**
-       * @member {number} maxWidth
-       * The maximum width of the text block, above which text may start wrapping according to the
-       * `whiteSpace` and `overflowWrap` properties.
-       */
-      this.maxWidth = Infinity;
-
-      /**
-       * @member {string} overflowWrap
-       * Defines how text wraps if the `whiteSpace` property is `normal`. Can be either `'normal'`
-       * to break at whitespace characters, or `'break-word'` to allow breaking within words.
-       * Defaults to `'normal'`.
-       */
-      this.overflowWrap = 'normal';
-
-      /**
-       * @member {string} textAlign
-       * The horizontal alignment of each line of text within the overall text bounding box.
-       */
-      this.textAlign = 'left';
-
-      /**
-       * @member {number} textIndent
-       * Indentation for the first character of a line; see CSS `text-indent`.
-       */
-      this.textIndent = 0;
-
-      /**
-       * @member {string} whiteSpace
-       * Defines whether text should wrap when a line reaches the `maxWidth`. Can
-       * be either `'normal'` (the default), to allow wrapping according to the `overflowWrap` property,
-       * or `'nowrap'` to prevent wrapping. Note that `'normal'` here honors newline characters to
-       * manually break lines, making it behave more like `'pre-wrap'` does in CSS.
-       */
-      this.whiteSpace = 'normal';
-
-
-      // === Presentation properties: === //
-
-      /**
-       * @member {THREE.Material} material
-       * Defines a _base_ material to be used when rendering the text. This material will be
-       * automatically replaced with a material derived from it, that adds shader code to
-       * decrease the alpha for each fragment (pixel) outside the text glyphs, with antialiasing.
-       * By default it will derive from a simple white MeshBasicMaterial, but you can use any
-       * of the other mesh materials to gain other features like lighting, texture maps, etc.
-       *
-       * Also see the `color` shortcut property.
-       */
-      this.material = null;
-
-      /**
-       * @member {string|number|THREE.Color} color
-       * This is a shortcut for setting the `color` of the text's material. You can use this
-       * if you don't want to specify a whole custom `material`.
-       */
-      this.color = null;
-
-      /**
-       * @member {object|null} colorRanges
-       * WARNING: This API is experimental and may change.
-       * This allows more fine-grained control of colors for individual or ranges of characters,
-       * taking precedence over the material's `color`. Its format is an Object whose keys each
-       * define a starting character index for a range, and whose values are the color for each
-       * range. The color value can be a numeric hex color value, a `THREE.Color` object, or
-       * any of the strings accepted by `THREE.Color`.
-       */
-      this.colorRanges = null;
-
-      /**
-       * @member {number} depthOffset
-       * This is a shortcut for setting the material's `polygonOffset` and related properties,
-       * which can be useful in preventing z-fighting when this text is laid on top of another
-       * plane in the scene. Positive numbers are further from the camera, negatives closer.
-       */
-      this.depthOffset = 0;
-
-      /**
-       * @member {Array<number>} clipRect
-       * If specified, defines a `[minX, minY, maxX, maxY]` of a rectangle outside of which all
-       * pixels will be discarded. This can be used for example to clip overflowing text when
-       * `whiteSpace='nowrap'`.
-       */
-      this.clipRect = null;
-
-      /**
-       * @member {string} orientation
-       * Defines the axis plane on which the text should be laid out when the mesh has no extra
-       * rotation transform. It is specified as a string with two axes: the horizontal axis with
-       * positive pointing right, and the vertical axis with positive pointing up. By default this
-       * is '+x+y', meaning the text sits on the xy plane with the text's top toward positive y
-       * and facing positive z. A value of '+x-z' would place it on the xz plane with the text's
-       * top toward negative z and facing positive y.
-       */
-      this.orientation = defaultOrient;
-
-      /**
-       * @member {number} glyphGeometryDetail
-       * Controls number of vertical/horizontal segments that make up each glyph's rectangular
-       * plane. Defaults to 1. This can be increased to provide more geometrical detail for custom
-       * vertex shader effects, for example.
-       */
-      this.glyphGeometryDetail = 1;
-
-      /**
-       * @member {number|null} sdfGlyphSize
-       * The size of each glyph's SDF (signed distance field) used for rendering. This must be a
-       * power-of-two number. Defaults to 64 which is generally a good balance of size and quality
-       * for most fonts. Larger sizes can improve the quality of glyph rendering by increasing
-       * the sharpness of corners and preventing loss of very thin lines, at the expense of
-       * increased memory footprint and longer SDF generation time.
-       */
-      this.sdfGlyphSize = null;
-
-      this.debugSDF = false;
+    function first(o) {
+      return Array.isArray(o) ? o[0] : o
     }
 
+    const raycastMesh = new THREE.Mesh(
+      new THREE.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0),
+      defaultMaterial
+    );
+
+    const syncStartEvent = {type: 'syncstart'};
+    const syncCompleteEvent = {type: 'synccomplete'};
+
+    const SYNCABLE_PROPS = [
+      'font',
+      'fontSize',
+      'letterSpacing',
+      'lineHeight',
+      'maxWidth',
+      'overflowWrap',
+      'text',
+      'textAlign',
+      'textIndent',
+      'whiteSpace',
+      'anchorX',
+      'anchorY',
+      'colorRanges',
+      'sdfGlyphSize'
+    ];
+
+    const COPYABLE_PROPS = SYNCABLE_PROPS.concat(
+      'material',
+      'color',
+      'depthOffset',
+      'clipRect',
+      'orientation',
+      'glyphGeometryDetail'
+    );
+
+
+
     /**
-     * Updates the text rendering according to the current text-related configuration properties.
-     * This is an async process, so you can pass in a callback function to be executed when it
-     * finishes.
-     * @param {function} [callback]
+     * @class Text
+     *
+     * A ThreeJS Mesh that renders a string of text on a plane in 3D space using signed distance
+     * fields (SDF).
      */
-    sync(callback) {
-      if (this._needsSync) {
-        this._needsSync = false;
+    class Text extends THREE.Mesh {
+      constructor() {
+        const geometry = new GlyphsGeometry();
+        super(geometry, null);
 
-        // If there's another sync still in progress, queue
-        if (this._isSyncing) {
-          (this._queuedSyncs || (this._queuedSyncs = [])).push(callback);
-        } else {
-          this._isSyncing = true;
-          this.dispatchEvent(syncStartEvent);
+        // === Text layout properties: === //
 
-          getTextRenderInfo({
-            text: this.text,
-            font: this.font,
-            fontSize: this.fontSize || 0.1,
-            letterSpacing: this.letterSpacing || 0,
-            lineHeight: this.lineHeight || 'normal',
-            maxWidth: this.maxWidth,
-            textAlign: this.textAlign,
-            textIndent: this.textIndent,
-            whiteSpace: this.whiteSpace,
-            overflowWrap: this.overflowWrap,
-            anchorX: this.anchorX,
-            anchorY: this.anchorY,
-            colorRanges: this.colorRanges,
-            includeCaretPositions: true, //TODO parameterize
-            sdfGlyphSize: this.sdfGlyphSize
-          }, textRenderInfo => {
-            this._isSyncing = false;
+        /**
+         * @member {string} text
+         * The string of text to be rendered.
+         */
+        this.text = '';
 
-            // Save result for later use in onBeforeRender
-            this._textRenderInfo = textRenderInfo;
+        /**
+         * @deprecated Use `anchorX` and `anchorY` instead
+         * @member {Array<number>} anchor
+         * Defines where in the text block should correspond to the mesh's local position, as a set
+         * of horizontal and vertical percentages from 0 to 1. A value of `[0, 0]` (the default)
+         * anchors at the top-left, `[1, 1]` at the bottom-right, and `[0.5, 0.5]` centers the
+         * block at the mesh's position.
+         */
+        //this.anchor = null
 
-            // Update the geometry attributes
-            this.geometry.updateGlyphs(
-              textRenderInfo.glyphBounds,
-              textRenderInfo.glyphAtlasIndices,
-              textRenderInfo.totalBounds,
-              textRenderInfo.chunkedBounds,
-              textRenderInfo.glyphColors
-            );
+        /**
+         * @member {number|string} anchorX
+         * Defines the horizontal position in the text block that should line up with the local origin.
+         * Can be specified as a numeric x position in local units, a string percentage of the total
+         * text block width e.g. `'25%'`, or one of the following keyword strings: 'left', 'center',
+         * or 'right'.
+         */
+        this.anchorX = 0;
 
-            // If we had extra sync requests queued up, kick it off
-            const queued = this._queuedSyncs;
-            if (queued) {
-              this._queuedSyncs = null;
-              this._needsSync = true;
-              this.sync(() => {
-                queued.forEach(fn => fn && fn());
-              });
-            }
+        /**
+         * @member {number|string} anchorX
+         * Defines the vertical position in the text block that should line up with the local origin.
+         * Can be specified as a numeric y position in local units (note: down is negative y), a string
+         * percentage of the total text block height e.g. `'25%'`, or one of the following keyword strings:
+         * 'top', 'top-baseline', 'middle', 'bottom-baseline', or 'bottom'.
+         */
+        this.anchorY = 0;
 
-            this.dispatchEvent(syncCompleteEvent);
-            if (callback) {
-              callback();
-            }
+        /**
+         * @member {string} font
+         * URL of a custom font to be used. Font files can be any of the formats supported by
+         * OpenType (see https://github.com/opentypejs/opentype.js).
+         * Defaults to the Roboto font loaded from Google Fonts.
+         */
+        this.font = null; //will use default from TextBuilder
+
+        /**
+         * @member {number} fontSize
+         * The size at which to render the font in local units; corresponds to the em-box height
+         * of the chosen `font`.
+         */
+        this.fontSize = 0.1;
+
+        /**
+         * @member {number} letterSpacing
+         * Sets a uniform adjustment to spacing between letters after kerning is applied. Positive
+         * numbers increase spacing and negative numbers decrease it.
+         */
+        this.letterSpacing = 0;
+
+        /**
+         * @member {number|string} lineHeight
+         * Sets the height of each line of text, as a multiple of the `fontSize`. Defaults to 'normal'
+         * which chooses a reasonable height based on the chosen font's ascender/descender metrics.
+         */
+        this.lineHeight = 'normal';
+
+        /**
+         * @member {number} maxWidth
+         * The maximum width of the text block, above which text may start wrapping according to the
+         * `whiteSpace` and `overflowWrap` properties.
+         */
+        this.maxWidth = Infinity;
+
+        /**
+         * @member {string} overflowWrap
+         * Defines how text wraps if the `whiteSpace` property is `normal`. Can be either `'normal'`
+         * to break at whitespace characters, or `'break-word'` to allow breaking within words.
+         * Defaults to `'normal'`.
+         */
+        this.overflowWrap = 'normal';
+
+        /**
+         * @member {string} textAlign
+         * The horizontal alignment of each line of text within the overall text bounding box.
+         */
+        this.textAlign = 'left';
+
+        /**
+         * @member {number} textIndent
+         * Indentation for the first character of a line; see CSS `text-indent`.
+         */
+        this.textIndent = 0;
+
+        /**
+         * @member {string} whiteSpace
+         * Defines whether text should wrap when a line reaches the `maxWidth`. Can
+         * be either `'normal'` (the default), to allow wrapping according to the `overflowWrap` property,
+         * or `'nowrap'` to prevent wrapping. Note that `'normal'` here honors newline characters to
+         * manually break lines, making it behave more like `'pre-wrap'` does in CSS.
+         */
+        this.whiteSpace = 'normal';
+
+
+        // === Presentation properties: === //
+
+        /**
+         * @member {THREE.Material} material
+         * Defines a _base_ material to be used when rendering the text. This material will be
+         * automatically replaced with a material derived from it, that adds shader code to
+         * decrease the alpha for each fragment (pixel) outside the text glyphs, with antialiasing.
+         * By default it will derive from a simple white MeshBasicMaterial, but you can use any
+         * of the other mesh materials to gain other features like lighting, texture maps, etc.
+         *
+         * Also see the `color` shortcut property.
+         */
+        this.material = null;
+
+        /**
+         * @member {string|number|THREE.Color} color
+         * This is a shortcut for setting the `color` of the text's material. You can use this
+         * if you don't want to specify a whole custom `material`. Also, if you do use a custom
+         * `material`, this color will only be used for this particuar Text instance, even if
+         * that same material instance is shared across multiple Text objects.
+         */
+        this.color = null;
+
+        /**
+         * @member {object|null} colorRanges
+         * WARNING: This API is experimental and may change.
+         * This allows more fine-grained control of colors for individual or ranges of characters,
+         * taking precedence over the material's `color`. Its format is an Object whose keys each
+         * define a starting character index for a range, and whose values are the color for each
+         * range. The color value can be a numeric hex color value, a `THREE.Color` object, or
+         * any of the strings accepted by `THREE.Color`.
+         */
+        this.colorRanges = null;
+
+        /**
+         * @member {number|string} outlineWidth
+         * WARNING: This API is experimental and may change.
+         * The width of an outline drawn around each text glyph using the `outlineColor`. Can be
+         * specified as either an absolute number in local units, or as a percentage string e.g.
+         * `"12%"` which is treated as a percentage of the `fontSize`. Defaults to `0`.
+         */
+        this.outlineWidth = 0;
+
+        /**
+         * @member {string|number|THREE.Color} outlineColor
+         * WARNING: This API is experimental and may change.
+         * The color of the text outline, if `outlineWidth` is greater than zero. Defaults to black.
+         */
+        this.outlineColor = 0;
+
+        /**
+         * @member {number} depthOffset
+         * This is a shortcut for setting the material's `polygonOffset` and related properties,
+         * which can be useful in preventing z-fighting when this text is laid on top of another
+         * plane in the scene. Positive numbers are further from the camera, negatives closer.
+         */
+        this.depthOffset = 0;
+
+        /**
+         * @member {Array<number>} clipRect
+         * If specified, defines a `[minX, minY, maxX, maxY]` of a rectangle outside of which all
+         * pixels will be discarded. This can be used for example to clip overflowing text when
+         * `whiteSpace='nowrap'`.
+         */
+        this.clipRect = null;
+
+        /**
+         * @member {string} orientation
+         * Defines the axis plane on which the text should be laid out when the mesh has no extra
+         * rotation transform. It is specified as a string with two axes: the horizontal axis with
+         * positive pointing right, and the vertical axis with positive pointing up. By default this
+         * is '+x+y', meaning the text sits on the xy plane with the text's top toward positive y
+         * and facing positive z. A value of '+x-z' would place it on the xz plane with the text's
+         * top toward negative z and facing positive y.
+         */
+        this.orientation = defaultOrient;
+
+        /**
+         * @member {number} glyphGeometryDetail
+         * Controls number of vertical/horizontal segments that make up each glyph's rectangular
+         * plane. Defaults to 1. This can be increased to provide more geometrical detail for custom
+         * vertex shader effects, for example.
+         */
+        this.glyphGeometryDetail = 1;
+
+        /**
+         * @member {number|null} sdfGlyphSize
+         * The size of each glyph's SDF (signed distance field) used for rendering. This must be a
+         * power-of-two number. Defaults to 64 which is generally a good balance of size and quality
+         * for most fonts. Larger sizes can improve the quality of glyph rendering by increasing
+         * the sharpness of corners and preventing loss of very thin lines, at the expense of
+         * increased memory footprint and longer SDF generation time.
+         */
+        this.sdfGlyphSize = null;
+
+        this.debugSDF = false;
+      }
+
+      /**
+       * Updates the text rendering according to the current text-related configuration properties.
+       * This is an async process, so you can pass in a callback function to be executed when it
+       * finishes.
+       * @param {function} [callback]
+       */
+      sync(callback) {
+        if (this._needsSync) {
+          this._needsSync = false;
+
+          // If there's another sync still in progress, queue
+          if (this._isSyncing) {
+            (this._queuedSyncs || (this._queuedSyncs = [])).push(callback);
+          } else {
+            this._isSyncing = true;
+            this.dispatchEvent(syncStartEvent);
+
+            getTextRenderInfo({
+              text: this.text,
+              font: this.font,
+              fontSize: this.fontSize || 0.1,
+              letterSpacing: this.letterSpacing || 0,
+              lineHeight: this.lineHeight || 'normal',
+              maxWidth: this.maxWidth,
+              textAlign: this.textAlign,
+              textIndent: this.textIndent,
+              whiteSpace: this.whiteSpace,
+              overflowWrap: this.overflowWrap,
+              anchorX: this.anchorX,
+              anchorY: this.anchorY,
+              colorRanges: this.colorRanges,
+              includeCaretPositions: true, //TODO parameterize
+              sdfGlyphSize: this.sdfGlyphSize
+            }, textRenderInfo => {
+              this._isSyncing = false;
+
+              // Save result for later use in onBeforeRender
+              this._textRenderInfo = textRenderInfo;
+
+              // Update the geometry attributes
+              this.geometry.updateGlyphs(
+                textRenderInfo.glyphBounds,
+                textRenderInfo.glyphAtlasIndices,
+                textRenderInfo.blockBounds,
+                textRenderInfo.chunkedBounds,
+                textRenderInfo.glyphColors
+              );
+
+              // If we had extra sync requests queued up, kick it off
+              const queued = this._queuedSyncs;
+              if (queued) {
+                this._queuedSyncs = null;
+                this._needsSync = true;
+                this.sync(() => {
+                  queued.forEach(fn => fn && fn());
+                });
+              }
+
+              this.dispatchEvent(syncCompleteEvent);
+              if (callback) {
+                callback();
+              }
+            });
+          }
+        }
+      }
+
+      /**
+       * Initiate a sync if needed - note it won't complete until next frame at the
+       * earliest so if possible it's a good idea to call sync() manually as soon as
+       * all the properties have been set.
+       * @override
+       */
+      onBeforeRender(renderer, scene, camera, geometry, material, group) {
+        this.sync();
+
+        // This may not always be a text material, e.g. if there's a scene.overrideMaterial present
+        if (material.isTroikaTextMaterial) {
+          this._prepareForRender(material);
+        }
+      }
+
+      /**
+       * Shortcut to dispose the geometry specific to this instance.
+       * Note: we don't also dispose the derived material here because if anything else is
+       * sharing the same base material it will result in a pause next frame as the program
+       * is recompiled. Instead users can dispose the base material manually, like normal,
+       * and we'll also dispose the derived material at that time.
+       */
+      dispose() {
+        this.geometry.dispose();
+      }
+
+      /**
+       * @property {TroikaTextRenderInfo|null} textRenderInfo
+       * @readonly
+       * The current processed rendering data for this TextMesh, returned by the TextBuilder after
+       * a `sync()` call. This will be `null` initially, and may be stale for a short period until
+       * the asynchrous `sync()` process completes.
+       */
+      get textRenderInfo() {
+        return this._textRenderInfo || null
+      }
+
+      // Handler for automatically wrapping the base material with our upgrades. We do the wrapping
+      // lazily on _read_ rather than write to avoid unnecessary wrapping on transient values.
+      get material() {
+        let derivedMaterial = this._derivedMaterial;
+        const baseMaterial = this._baseMaterial || this._defaultMaterial || (this._defaultMaterial = defaultMaterial.clone());
+        if (!derivedMaterial || derivedMaterial.baseMaterial !== baseMaterial) {
+          derivedMaterial = this._derivedMaterial = createTextDerivedMaterial(baseMaterial);
+          // dispose the derived material when its base material is disposed:
+          baseMaterial.addEventListener('dispose', function onDispose() {
+            baseMaterial.removeEventListener('dispose', onDispose);
+            derivedMaterial.dispose();
           });
         }
+        // If text outline is present, render it as a preliminary draw using Three's multi-material
+        // feature (see GlyphsGeometry which sets up `groups` for this purpose) Doing it with multi
+        // materials ensures the layers are always rendered consecutively in a consistent order.
+        // Each layer will trigger onBeforeRender with the appropriate material.
+        if (this.outlineWidth) {
+          let outlineMaterial = derivedMaterial._outlineMtl;
+          if (!outlineMaterial) {
+            outlineMaterial = derivedMaterial._outlineMtl = Object.create(derivedMaterial, {
+              id: {value: derivedMaterial.id + 0.1}
+            });
+            outlineMaterial.isTextOutlineMaterial = true;
+            outlineMaterial.depthWrite = false;
+            outlineMaterial.map = null; //???
+          }
+          derivedMaterial = [
+            outlineMaterial,
+            derivedMaterial
+          ];
+        }
+        return derivedMaterial
       }
-    }
-
-    /**
-     * Initiate a sync if needed - note it won't complete until next frame at the
-     * earliest so if possible it's a good idea to call sync() manually as soon as
-     * all the properties have been set.
-     * @override
-     */
-    onBeforeRender() {
-      this.sync();
-      this._prepareForRender();
-    }
-
-    /**
-     * Shortcut to dispose the geometry specific to this instance.
-     * Note: we don't also dispose the derived material here because if anything else is
-     * sharing the same base material it will result in a pause next frame as the program
-     * is recompiled. Instead users can dispose the base material manually, like normal,
-     * and we'll also dispose the derived material at that time.
-     */
-    dispose() {
-      this.geometry.dispose();
-    }
-
-    /**
-     * @property {TroikaTextRenderInfo|null} textRenderInfo
-     * @readonly
-     * The current processed rendering data for this TextMesh, returned by the TextBuilder after
-     * a `sync()` call. This will be `null` initially, and may be stale for a short period until
-     * the asynchrous `sync()` process completes.
-     */
-    get textRenderInfo() {
-      return this._textRenderInfo || null
-    }
-
-    // Handler for automatically wrapping the base material with our upgrades. We do the wrapping
-    // lazily on _read_ rather than write to avoid unnecessary wrapping on transient values.
-    get material() {
-      let derivedMaterial = this._derivedMaterial;
-      const baseMaterial = this._baseMaterial || defaultMaterial;
-      if (!derivedMaterial || derivedMaterial.baseMaterial !== baseMaterial) {
-        derivedMaterial = this._derivedMaterial = createTextDerivedMaterial(baseMaterial);
-        // dispose the derived material when its base material is disposed:
-        baseMaterial.addEventListener('dispose', function onDispose() {
-          baseMaterial.removeEventListener('dispose', onDispose);
-          derivedMaterial.dispose();
-        });
-      }
-      return derivedMaterial
-    }
-    set material(baseMaterial) {
-      if (baseMaterial && baseMaterial.isTroikaTextMaterial) { //prevent double-derivation
-        this._derivedMaterial = baseMaterial;
-        this._baseMaterial = baseMaterial.baseMaterial;
-      } else {
-        this._baseMaterial = baseMaterial;
-      }
-    }
-
-    get glyphGeometryDetail() {
-      return this.geometry.detail
-    }
-    set glyphGeometryDetail(detail) {
-      this.geometry.detail = detail;
-    }
-
-    // Create and update material for shadows upon request:
-    get customDepthMaterial() {
-      return this.material.getDepthMaterial()
-    }
-    get customDistanceMaterial() {
-      return this.material.getDistanceMaterial()
-    }
-
-    _prepareForRender() {
-      const material = this._derivedMaterial;
-      const uniforms = material.uniforms;
-      const textInfo = this.textRenderInfo;
-      if (textInfo) {
-        const {sdfTexture, totalBounds} = textInfo;
-        uniforms.uTroikaSDFTexture.value = sdfTexture;
-        uniforms.uTroikaSDFTextureSize.value.set(sdfTexture.image.width, sdfTexture.image.height);
-        uniforms.uTroikaSDFGlyphSize.value = textInfo.sdfGlyphSize;
-        uniforms.uTroikaSDFMinDistancePct.value = textInfo.sdfMinDistancePercent;
-        uniforms.uTroikaTotalBounds.value.fromArray(totalBounds);
-        uniforms.uTroikaUseGlyphColors.value = !!textInfo.glyphColors;
-
-        let clipRect = this.clipRect;
-        if (!(clipRect && Array.isArray(clipRect) && clipRect.length === 4)) {
-          uniforms.uTroikaClipRect.value.fromArray(totalBounds);
+      set material(baseMaterial) {
+        if (baseMaterial && baseMaterial.isTroikaTextMaterial) { //prevent double-derivation
+          this._derivedMaterial = baseMaterial;
+          this._baseMaterial = baseMaterial.baseMaterial;
         } else {
-          uniforms.uTroikaClipRect.value.set(
-            Math.max(totalBounds[0], clipRect[0]),
-            Math.max(totalBounds[1], clipRect[1]),
-            Math.min(totalBounds[2], clipRect[2]),
-            Math.min(totalBounds[3], clipRect[3])
+          this._baseMaterial = baseMaterial;
+        }
+      }
+
+      get glyphGeometryDetail() {
+        return this.geometry.detail
+      }
+      set glyphGeometryDetail(detail) {
+        this.geometry.detail = detail;
+      }
+
+      // Create and update material for shadows upon request:
+      get customDepthMaterial() {
+        return first(this.material).getDepthMaterial()
+      }
+      get customDistanceMaterial() {
+        return first(this.material).getDistanceMaterial()
+      }
+
+      _prepareForRender(material) {
+        const isOutline = material.isTextOutlineMaterial;
+        const uniforms = material.uniforms;
+        const textInfo = this.textRenderInfo;
+        if (textInfo) {
+          const {sdfTexture, blockBounds} = textInfo;
+          uniforms.uTroikaSDFTexture.value = sdfTexture;
+          uniforms.uTroikaSDFTextureSize.value.set(sdfTexture.image.width, sdfTexture.image.height);
+          uniforms.uTroikaSDFGlyphSize.value = textInfo.sdfGlyphSize;
+          uniforms.uTroikaSDFExponent.value = textInfo.sdfExponent;
+          uniforms.uTroikaTotalBounds.value.fromArray(blockBounds);
+          uniforms.uTroikaUseGlyphColors.value = !!textInfo.glyphColors;
+
+          let distanceOffset = 0;
+          if (isOutline) {
+            let {outlineWidth} = this;
+            if (typeof outlineWidth === 'string') {
+              let match = outlineWidth.match(/^([\d.]+)%$/);
+              let pct = match ? parseFloat(match[1]) : NaN;
+              outlineWidth = (isNaN(pct) ? 0 : pct / 100) * this.fontSize;
+            }
+            distanceOffset = outlineWidth;
+          }
+          uniforms.uTroikaDistanceOffset.value = distanceOffset;
+
+          let clipRect = this.clipRect;
+          if (clipRect && Array.isArray(clipRect) && clipRect.length === 4) {
+            uniforms.uTroikaClipRect.value.fromArray(clipRect);
+          } else {
+            // no clipping - choose a finite rect that shouldn't ever be reached by overflowing glyphs or outlines
+            const pad = (this.fontSize || 0.1) * 100;
+            uniforms.uTroikaClipRect.value.set(
+              blockBounds[0] - pad,
+              blockBounds[1] - pad,
+              blockBounds[2] + pad,
+              blockBounds[3] + pad
+            );
+          }
+          this.geometry.applyClipRect(uniforms.uTroikaClipRect.value);
+        }
+        uniforms.uTroikaSDFDebug.value = !!this.debugSDF;
+        material.polygonOffset = !!this.depthOffset;
+        material.polygonOffsetFactor = material.polygonOffsetUnits = this.depthOffset || 0;
+
+        // Shortcut for setting material color via `color` prop on the mesh; this is
+        // applied only to the derived material to avoid mutating a shared base material.
+        const color = isOutline ? (this.outlineColor || 0) : this.color;
+        if (color == null) {
+          delete material.color; //inherit from base
+        } else {
+          const colorObj = material.hasOwnProperty('color') ? material.color : (material.color = new THREE.Color());
+          if (color !== colorObj._input || typeof color === 'object') {
+            colorObj.set(colorObj._input = color);
+          }
+        }
+
+        // base orientation
+        let orient = this.orientation || defaultOrient;
+        if (orient !== material._orientation) {
+          let rotMat = uniforms.uTroikaOrient.value;
+          orient = orient.replace(/[^-+xyz]/g, '');
+          let match = orient !== defaultOrient && orient.match(/^([-+])([xyz])([-+])([xyz])$/);
+          if (match) {
+            let [, hSign, hAxis, vSign, vAxis] = match;
+            tempVec3a.set(0, 0, 0)[hAxis] = hSign === '-' ? 1 : -1;
+            tempVec3b.set(0, 0, 0)[vAxis] = vSign === '-' ? -1 : 1;
+            tempMat4.lookAt(origin, tempVec3a.cross(tempVec3b), tempVec3b);
+            rotMat.setFromMatrix4(tempMat4);
+          } else {
+            rotMat.identity();
+          }
+          material._orientation = orient;
+        }
+      }
+
+      /**
+       * @override Custom raycasting to test against the whole text block's max rectangular bounds
+       * TODO is there any reason to make this more granular, like within individual line or glyph rects?
+       */
+      raycast(raycaster, intersects) {
+        const textInfo = this.textRenderInfo;
+        if (textInfo) {
+          const bounds = textInfo.blockBounds;
+          raycastMesh.matrixWorld.multiplyMatrices(
+            this.matrixWorld,
+            tempMat4.set(
+              bounds[2] - bounds[0], 0, 0, bounds[0],
+              0, bounds[3] - bounds[1], 0, bounds[1],
+              0, 0, 1, 0,
+              0, 0, 0, 1
+            )
           );
+          tempArray.length = 0;
+          raycastMesh.raycast(raycaster, tempArray);
+          for (let i = 0; i < tempArray.length; i++) {
+            tempArray[i].object = this;
+            intersects.push(tempArray[i]);
+          }
         }
-        this.geometry.applyClipRect(uniforms.uTroikaClipRect.value);
-      }
-      uniforms.uTroikaSDFDebug.value = !!this.debugSDF;
-      material.polygonOffset = !!this.depthOffset;
-      material.polygonOffsetFactor = material.polygonOffsetUnits = this.depthOffset || 0;
-
-      // shortcut for setting material color via `color` prop on the mesh:
-      const color = this.color;
-      if (color != null && material.color && material.color.isColor && color !== material._troikaColor) {
-        material.color.set(material._troikaColor = color);
       }
 
-      // base orientation
-      let orient = this.orientation || defaultOrient;
-      if (orient !== material._orientation) {
-        let rotMat = uniforms.uTroikaOrient.value;
-        orient = orient.replace(/[^-+xyz]/g, '');
-        let match = orient !== defaultOrient && orient.match(/^([-+])([xyz])([-+])([xyz])$/);
-        if (match) {
-          let [, hSign, hAxis, vSign, vAxis] = match;
-          tempVec3a.set(0, 0, 0)[hAxis] = hSign === '-' ? 1 : -1;
-          tempVec3b.set(0, 0, 0)[vAxis] = vSign === '-' ? -1 : 1;
-          tempMat4.lookAt(origin, tempVec3a.cross(tempVec3b), tempVec3b);
-          rotMat.setFromMatrix4(tempMat4);
-        } else {
-          rotMat.identity();
-        }
-        material._orientation = orient;
+      copy(source) {
+        super.copy(source);
+        COPYABLE_PROPS.forEach(prop => {
+          this[prop] = source[prop];
+        });
+        return this
+      }
+
+      clone() {
+        return new this.constructor().copy(this)
       }
     }
 
-    /**
-     * @override Custom raycasting to test against the whole text block's max rectangular bounds
-     * TODO is there any reason to make this more granular, like within individual line or glyph rects?
-     */
-    raycast(raycaster, intersects) {
-      const textInfo = this.textRenderInfo;
-      if (textInfo) {
-        const bounds = textInfo.totalBounds;
-        raycastMesh.matrixWorld.multiplyMatrices(
-          this.matrixWorld,
-          tempMat4.set(
-            bounds[2] - bounds[0], 0, 0, bounds[0],
-            0, bounds[3] - bounds[1], 0, bounds[1],
-            0, 0, 1, 0,
-            0, 0, 0, 1
-          )
-        );
-        tempArray.length = 0;
-        raycastMesh.raycast(raycaster, tempArray);
-        for (let i = 0; i < tempArray.length; i++) {
-          tempArray[i].object = this;
-          intersects.push(tempArray[i]);
-        }
-      }
-    }
 
-    copy(source) {
-      super.copy(source);
-      COPYABLE_PROPS.forEach(prop => {
-        this[prop] = source[prop];
+    // Create setters for properties that affect text layout:
+    SYNCABLE_PROPS.forEach(prop => {
+      const privateKey = '_private_' + prop;
+      Object.defineProperty(Text.prototype, prop, {
+        get() {
+          return this[privateKey]
+        },
+        set(value) {
+          if (value !== this[privateKey]) {
+            this[privateKey] = value;
+            this._needsSync = true;
+          }
+        }
       });
-      return this
-    }
-
-    clone() {
-      return new this.constructor().copy(this)
-    }
-  }
+    });
 
 
-  // Create setters for properties that affect text layout:
-  SYNCABLE_PROPS.forEach(prop => {
-    const privateKey = '_private_' + prop;
-    Object.defineProperty(Text.prototype, prop, {
+    // Deprecation handler for `anchor` array:
+    let deprMsgShown = false;
+    Object.defineProperty(Text.prototype, 'anchor', {
       get() {
-        return this[privateKey]
+        return this._deprecated_anchor
       },
-      set(value) {
-        if (value !== this[privateKey]) {
-          this[privateKey] = value;
-          this._needsSync = true;
+      set(val) {
+        this._deprecated_anchor = val;
+        if (!deprMsgShown) {
+          console.warn('TextMesh: `anchor` has been deprecated; use `anchorX` and `anchorY` instead.');
+          deprMsgShown = true;
+        }
+        if (Array.isArray(val)) {
+          this.anchorX = `${(+val[0] || 0) * 100}%`;
+          this.anchorY = `${(+val[1] || 0) * 100}%`;
+        } else {
+          this.anchorX = this.anchorY = 0;
         }
       }
     });
-  });
 
-
-  // Deprecation handler for `anchor` array:
-  let deprMsgShown = false;
-  Object.defineProperty(Text.prototype, 'anchor', {
-    get() {
-      return this._deprecated_anchor
-    },
-    set(val) {
-      this._deprecated_anchor = val;
-      if (!deprMsgShown) {
-        console.warn('TextMesh: `anchor` has been deprecated; use `anchorX` and `anchorY` instead.');
-        deprMsgShown = true;
-      }
-      if (Array.isArray(val)) {
-        this.anchorX = `${(+val[0] || 0) * 100}%`;
-        this.anchorY = `${(+val[1] || 0) * 100}%`;
-      } else {
-        this.anchorX = this.anchorY = 0;
-      }
-    }
-  });
+    return Text
+  })();
 
   var COMPONENT_NAME = 'troika-text';
 
 
-  aframe.registerComponent(COMPONENT_NAME, {
+  aframe__default['default'].registerComponent(COMPONENT_NAME, {
     schema: {
-      align: {type: 'string', default: 'left', oneOf: ['left', 'right', 'center']},
+      align: {type: 'string', default: 'left', oneOf: ['left', 'right', 'center', 'justify']},
       anchor: {default: 'center', oneOf: ['left', 'right', 'center', 'align']},
       baseline: {default: 'center', oneOf: ['top', 'center', 'bottom']},
       clipRect: {
@@ -6379,12 +6550,28 @@ if (troikaAlphaMult == 0.0) {
         }
       },
       color: {type: 'color', default: '#FFF'},
+      depthOffset: {type: 'number', default: 0},
       font: {type: 'string'},
       fontSize: {type: 'number', default: 0.2},
       letterSpacing: {type: 'number', default: 0},
       lineHeight: {type: 'number'},
       maxWidth: {type: 'number', default: Infinity},
+      outlineColor: {type: 'color', default: '#000'},
+      outlineWidth: {
+        default: 0,
+        parse: function(value) {
+          if (typeof value === 'string' && value.indexOf('%') > 0) {
+            return value
+          }
+          value = +value;
+          return isNaN(value) ? 0 : value
+        },
+        stringify: function(value) {
+          return '' + value
+        }
+      },
       overflowWrap: {type: 'string', default: 'normal', oneOf: ['normal', 'break-word']},
+      textIndent: {type: 'number', default: 0},
       value: {type: 'string'},
       whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']}
 
@@ -6440,7 +6627,10 @@ if (troikaAlphaMult == 0.0) {
       mesh.fontSize = data.fontSize;
       mesh.letterSpacing = data.letterSpacing || 0;
       mesh.lineHeight = data.lineHeight || 'normal';
+      mesh.outlineColor = data.outlineColor;
+      mesh.outlineWidth = data.outlineWidth;
       mesh.overflowWrap = data.overflowWrap;
+      mesh.textIndent = data.textIndent;
       mesh.whiteSpace = data.whiteSpace;
       mesh.maxWidth = data.maxWidth;
       mesh.sync();
@@ -6487,7 +6677,7 @@ if (troikaAlphaMult == 0.0) {
   var mappings = {};
 
   // From aframe's primitives.js utilities...
-  var schema = aframe.components[COMPONENT_NAME].schema;
+  var schema = aframe__default['default'].components[COMPONENT_NAME].schema;
   Object.keys(schema).map(function (prop) {
     // Hyphenate where there is camelCase.
     var attrName = prop.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
@@ -6495,11 +6685,18 @@ if (troikaAlphaMult == 0.0) {
   });
 
 
-  aframe.registerPrimitive('a-troika-text', {
+  aframe__default['default'].registerPrimitive('a-troika-text', {
     defaultComponents: {
       'troika-text': {}
     },
     mappings: mappings
   });
 
-}(AFRAME, THREE));
+  // Polyfill Three's rename of Math->MathUtils after the super-three fork
+  (function(ThreedleDum) {
+    if (!ThreedleDum.MathUtils) {
+      ThreedleDum.MathUtils = ThreedleDum.Math;
+    }
+  })(THREE__namespace);
+
+}(THREE, AFRAME));
