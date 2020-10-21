@@ -29,12 +29,15 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | color                 | color                  | Text color. This is a shortcut for specifying a custom material.                                            | white                           |
 | depthOffset           | depth-offset           | Depth buffer offset to help prevent z-fighting. Negative numbers are closer to camera, positives further.   | 0                               |
 | font                  | font                   | URL to a font file - can be a .ttf, .otf, or .woff (no .woff2)                                              | Roboto loaded from Google Fonts |
-| fontSize              | font-size              | Em-height at which to render the font, in world units                                                       | 0.2                             |
+| fontSize              | font-size              | Em-height at which to render the font, in meters.                                                           | 0.2                             |
 | letterSpacing         | letter-spacing         | Letter spacing in meters.                                                                                   | 0                               |
 | lineHeight            | line-height            | Line height as a multiple of the fontSize.                                                                  | *derived from font metrics*     |
 | maxWidth              | max-width              | Maximum width of the text block at which text will start wrapping, in meters.                               | Infinity (no wrapping)          |
+| outlineColor          | outline-color          | Color of an outline drawn around the glyph paths.                                                           | black
+| outlineWidth          | outline-width          | Width of an outline drawn around the glyph paths, as a number in meters or a percentage of the font-size.   | 0                               |
 | overflowWrap          | overflow-wrap          | Controls how text wraps: "normal" to break at whitespace characters, or "break-word" to break within words. | normal                          |
 | **value**             | value                  | The actual content of the text. Line breaks and tabs are supported with `\n` and `\t`.                      | ''                              |
+| textIndent            | text-indent            | Width of an indentation space to be added before the first character of a line.                             | 0
 | whiteSpace            | white-space            | How whitespace should be handled (i.e., normal, nowrap).                                                    | normal (behaves like pre-wrap)  |
 
 Note: It does not currently follow how the built-in `text` component interacts with a `geometry` component for auto-sizing and anchoring. I think that's a nice feature so it's probably worth adding; in the meantime just use the `maxWidth` and `anchor`/`baseline` attributes to control it manually.

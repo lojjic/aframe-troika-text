@@ -7,7 +7,7 @@ export var COMPONENT_NAME = 'troika-text'
 
 aframe.registerComponent(COMPONENT_NAME, {
   schema: {
-    align: {type: 'string', default: 'left', oneOf: ['left', 'right', 'center']},
+    align: {type: 'string', default: 'left', oneOf: ['left', 'right', 'center', 'justify']},
     anchor: {default: 'center', oneOf: ['left', 'right', 'center', 'align']},
     baseline: {default: 'center', oneOf: ['top', 'center', 'bottom']},
     clipRect: {
@@ -30,15 +30,30 @@ aframe.registerComponent(COMPONENT_NAME, {
       }
     },
     color: {type: 'color', default: '#FFF'},
+    depthOffset: {type: 'number', default: 0},
     font: {type: 'string'},
     fontSize: {type: 'number', default: 0.2},
     letterSpacing: {type: 'number', default: 0},
     lineHeight: {type: 'number'},
     maxWidth: {type: 'number', default: Infinity},
+    outlineColor: {type: 'color', default: '#000'},
+    outlineWidth: {
+      default: 0,
+      parse: function(value) {
+        if (typeof value === 'string' && value.indexOf('%') > 0) {
+          return value
+        }
+        value = +value
+        return isNaN(value) ? 0 : value
+      },
+      stringify: function(value) {
+        return '' + value
+      }
+    },
     overflowWrap: {type: 'string', default: 'normal', oneOf: ['normal', 'break-word']},
+    textIndent: {type: 'number', default: 0},
     value: {type: 'string'},
-    whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']},
-    depthOffset: {type: 'number', default: 0}
+    whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']}
 
     // attrs that can be configured via troika-text-material:
     // opacity: {type: 'number', default: 1.0},
@@ -92,7 +107,10 @@ aframe.registerComponent(COMPONENT_NAME, {
     mesh.fontSize = data.fontSize
     mesh.letterSpacing = data.letterSpacing || 0
     mesh.lineHeight = data.lineHeight || 'normal'
+    mesh.outlineColor = data.outlineColor
+    mesh.outlineWidth = data.outlineWidth
     mesh.overflowWrap = data.overflowWrap
+    mesh.textIndent = data.textIndent
     mesh.whiteSpace = data.whiteSpace
     mesh.maxWidth = data.maxWidth
     mesh.sync()
