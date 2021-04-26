@@ -4,6 +4,21 @@ import { Text } from 'troika-three-text'
 
 export var COMPONENT_NAME = 'troika-text'
 
+function numberOrPercent(defaultValue) {
+  return {
+    default: defaultValue,
+    parse: function(value) {
+      if (typeof value === 'string' && value.indexOf('%') > 0) {
+        return value
+      }
+      value = +value
+      return isNaN(value) ? 0 : value
+    },
+    stringify: function(value) {
+      return '' + value
+    }
+  }
+}
 
 aframe.registerComponent(COMPONENT_NAME, {
   schema: {
@@ -30,27 +45,25 @@ aframe.registerComponent(COMPONENT_NAME, {
       }
     },
     color: {type: 'color', default: '#FFF'},
+    curveRadius: {type: 'number', default: 0},
     depthOffset: {type: 'number', default: 0},
+    direction: {type: 'string', default: 'auto', oneOf: ['auto', 'ltr', 'rtl']},
+    fillOpacity: {type: 'number', default: 1},
     font: {type: 'string'},
     fontSize: {type: 'number', default: 0.2},
     letterSpacing: {type: 'number', default: 0},
     lineHeight: {type: 'number'},
     maxWidth: {type: 'number', default: Infinity},
+    outlineBlur: numberOrPercent(0),
     outlineColor: {type: 'color', default: '#000'},
-    outlineWidth: {
-      default: 0,
-      parse: function(value) {
-        if (typeof value === 'string' && value.indexOf('%') > 0) {
-          return value
-        }
-        value = +value
-        return isNaN(value) ? 0 : value
-      },
-      stringify: function(value) {
-        return '' + value
-      }
-    },
+    outlineOffsetX: numberOrPercent(0),
+    outlineOffsetY: numberOrPercent(0),
+    outlineOpacity: {type: 'number', default: 1},
+    outlineWidth: numberOrPercent(0),
     overflowWrap: {type: 'string', default: 'normal', oneOf: ['normal', 'break-word']},
+    strokeColor: {type: 'color', default: 'grey'},
+    strokeOpacity: {type: 'number', default: 1},
+    strokeWidth: numberOrPercent(0),
     textIndent: {type: 'number', default: 0},
     value: {type: 'string'},
     whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']}
@@ -102,14 +115,24 @@ aframe.registerComponent(COMPONENT_NAME, {
     mesh.anchorY = baselineMapping[data.baseline] || 'middle'
     mesh.color = data.color
     mesh.clipRect = data.clipRect
+    mesh.curveRadius = data.curveRadius
     mesh.depthOffset = data.depthOffset || 0
+    mesh.direction = data.direction
+    mesh.fillOpacity = data.fillOpacity
     mesh.font = data.font //TODO allow aframe stock font names
     mesh.fontSize = data.fontSize
     mesh.letterSpacing = data.letterSpacing || 0
     mesh.lineHeight = data.lineHeight || 'normal'
+    mesh.outlineBlur = data.outlineBlur
     mesh.outlineColor = data.outlineColor
+    mesh.outlineOffsetX = data.outlineOffsetX
+    mesh.outlineOffsetY = data.outlineOffsetY
+    mesh.outlineOpacity = data.outlineOpacity
     mesh.outlineWidth = data.outlineWidth
     mesh.overflowWrap = data.overflowWrap
+    mesh.strokeColor = data.strokeColor
+    mesh.strokeOpacity = data.strokeOpacity
+    mesh.strokeWidth = data.strokeWidth
     mesh.textIndent = data.textIndent
     mesh.whiteSpace = data.whiteSpace
     mesh.maxWidth = data.maxWidth
