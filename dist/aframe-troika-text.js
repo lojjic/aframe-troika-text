@@ -4,24 +4,23 @@
   function _interopDefaultLegacy (e) { return e && typeof e === 'object' && 'default' in e ? e : { 'default': e }; }
 
   function _interopNamespace(e) {
-    if (e && e.__esModule) { return e; } else {
-      var n = Object.create(null);
-      if (e) {
-        Object.keys(e).forEach(function (k) {
-          if (k !== 'default') {
-            var d = Object.getOwnPropertyDescriptor(e, k);
-            Object.defineProperty(n, k, d.get ? d : {
-              enumerable: true,
-              get: function () {
-                return e[k];
-              }
-            });
-          }
-        });
-      }
-      n['default'] = e;
-      return Object.freeze(n);
+    if (e && e.__esModule) return e;
+    var n = Object.create(null);
+    if (e) {
+      Object.keys(e).forEach(function (k) {
+        if (k !== 'default') {
+          var d = Object.getOwnPropertyDescriptor(e, k);
+          Object.defineProperty(n, k, d.get ? d : {
+            enumerable: true,
+            get: function () {
+              return e[k];
+            }
+          });
+        }
+      });
     }
+    n['default'] = e;
+    return Object.freeze(n);
   }
 
   var THREE__namespace = /*#__PURE__*/_interopNamespace(THREE);
@@ -470,30 +469,11 @@
    * among one another.
    *
    * @param {object} options
-   * @param {function} options.init - The main function that initializes the module. This will be run
-   *        within the worker, and will be passed the resolved dependencies as arguments. Its
-   *        return value becomes the module's content, which can then be used by other modules
-   *        that depend on it. This function can perform any logic using those dependencies, but
-   *        must not depend on anything from its parent closures.
-   * @param {array} [options.dependencies] - Provides any dependencies required by the init function:
-   *        - Primitives like strings, numbers, booleans
-   *        - Raw functions; these will be stringified and rehydrated within the worker so they
-   *          must not depend on anything from their parent closures
-   *        - Other worker modules; these will be resolved within the worker, and therefore modules
-   *          that provide functions can be called without having to cross the worker/main thread
-   *          boundary.
-   * @param {function} [options.getTransferables] - An optional function that will be run in the worker
-   *        just before posting the response value from a module call back to the main thread.
-   *        It will be passed that response value, and if it returns an array then that will be
-   *        used as the "transferables" parameter to `postMessage`. Use this if there are values
-   *        in the response that can/should be transfered rather than cloned.
-   * @param {string} [options.name] - A descriptive name for this module; this can be useful for
-   *        debugging but is not currently used for anything else.
-   * @param {string} [options.workerId] - By default all modules will run in the same dedicated worker,
-   *        but if you want to use multiple workers you can pass a `workerId` to indicate a specific
-   *        worker to spawn. Note that each worker is completely standalone and no data or state will
-   *        be shared between them. If a worker module is used as a dependency by worker modules
-   *        using different `workerId`s, then that dependency will be re-registered in each worker.
+   * @param {function} options.init
+   * @param {array} [options.dependencies]
+   * @param {function} [options.getTransferables]
+   * @param {string} [options.name]
+   * @param {string} [options.workerId]
    * @return {function(...[*]): {then}}
    */
   function defineWorkerModule(options) {
@@ -604,7 +584,7 @@
           throw new Error('WorkerModule response with empty or unknown messageId')
         }
         delete openRequests[msgId];
-        openRequests.count--;
+        openRequests._count--;
         callback(response);
       };
     }
@@ -623,7 +603,7 @@
       }
     };
     openRequests._count++;
-    if (openRequests.count > 1000) { //detect leaks
+    if (openRequests._count > 1000) { //detect leaks
       console.warn('Large number of open WorkerModule requests, some may not be returning');
     }
     getWorker(workerId).postMessage({
@@ -647,6 +627,988 @@
     }
   });
 
+  function bidiFactory() {
+  var bidi = (function (exports) {
+
+    // Bidi character types data, auto generated
+    var DATA = {
+      "R": "13k,1a,2,3,3,2+1j,ch+16,a+1,5+2,2+n,5,a,4,6+16,4+3,h+1b,4mo,179q,2+9,2+11,2i9+7y,2+68,4,3+4,5+13,4+3,2+4k,3+29,8+cf,1t+7z,w+17,3+3m,1t+3z,16o1+5r,8+30,8+mc,29+1r,29+4v,75+73",
+      "EN": "1c+9,3d+1,6,187+9,513,4+5,7+9,sf+j,175h+9,qw+q,161f+1d,4xt+a,25i+9",
+      "ES": "17,2,6dp+1,f+1,av,16vr,mx+1,4o,2",
+      "ET": "z+2,3h+3,b+1,ym,3e+1,2o,p4+1,8,6u,7c,g6,1wc,1n9+4,30+1b,2n,6d,qhx+1,h0m,a+1,49+2,63+1,4+1,6bb+3,12jj",
+      "AN": "16o+5,2j+9,2+1,35,ed,1ff2+9,87+u",
+      "CS": "18,2+1,b,2u,12k,55v,l,17v0,2,3,53,2+1,b",
+      "B": "a,3,f+2,2v,690",
+      "S": "9,2,k",
+      "WS": "c,k,4f4,1vk+a,u,1j,335",
+      "ON": "x+1,4+4,h+5,r+5,r+3,z,5+3,2+1,2+1,5,2+2,3+4,o,w,ci+1,8+d,3+d,6+8,2+g,39+1,9,6+1,2,33,b8,3+1,3c+1,7+1,5r,b,7h+3,sa+5,2,3i+6,jg+3,ur+9,2v,ij+1,9g+9,7+a,8m,4+1,49+x,14u,2+2,c+2,e+2,e+2,e+1,i+n,e+e,2+p,u+2,e+2,36+1,2+3,2+1,b,2+2,6+5,2,2,2,h+1,5+4,6+3,3+f,16+2,5+3l,3+81,1y+p,2+40,q+a,m+13,2r+ch,2+9e,75+hf,3+v,2+2w,6e+5,f+6,75+2a,1a+p,2+2g,d+5x,r+b,6+3,4+o,g,6+1,6+2,2k+1,4,2j,5h+z,1m+1,1e+f,t+2,1f+e,d+3,4o+3,2s+1,w,535+1r,h3l+1i,93+2,2s,b+1,3l+x,2v,4g+3,21+3,kz+1,g5v+1,5a,j+9,n+v,2,3,2+8,2+1,3+2,2,3,46+1,4+4,h+5,r+5,r+a,3h+2,4+6,b+4,78,1r+24,4+c,4,1hb,ey+6,103+j,16j+c,1ux+7,5+g,fsh,jdq+1t,4,57+2e,p1,1m,1m,1m,1m,4kt+1,7j+17,5+2r,d+e,3+e,2+e,2+10,m+4,w,1n+5,1q,4z+5,4b+rb,9+c,4+c,4+37,d+2g,8+b,l+b,5+1j,9+9,7+13,9+t,3+1,27+3c,2+29,2+3q,d+d,3+4,4+2,6+6,a+o,8+6,a+2,e+6,16+42,2+1i",
+      "BN": "0+8,6+d,2s+5,2+p,e,4m9,1kt+2,2b+5,5+5,17q9+v,7k,6p+8,6+1,119d+3,440+7,96s+1,1ekf+1,1ekf+1,1ekf+1,1ekf+1,1ekf+1,1ekf+1,1ekf+1,1ekf+1,1ekf+1,1ekf+1,1ekf+1,1ekf+75,6p+2rz,1ben+1,1ekf+1,1ekf+1",
+      "NSM": "lc+33,7o+6,7c+18,2,2+1,2+1,2,21+a,1d+k,h,2u+6,3+5,3+1,2+3,10,v+q,2k+a,1n+8,a,p+3,2+8,2+2,2+4,18+2,3c+e,2+v,1k,2,5+7,5,4+6,b+1,u,1n,5+3,9,l+1,r,3+1,1m,5+1,5+1,3+2,4,v+1,4,c+1,1m,5+4,2+1,5,l+1,n+5,2,1n,3,2+3,9,8+1,c+1,v,1q,d,1f,4,1m+2,6+2,2+3,8+1,c+1,u,1n,g+1,l+1,t+1,1m+1,5+3,9,l+1,u,21,8+2,2,2j,3+6,d+7,2r,3+8,c+5,23+1,s,2,2,1k+d,2+4,2+1,6+a,2+z,a,2v+3,2+5,2+1,3+1,q+1,5+2,h+3,e,3+1,7,g,jk+2,qb+2,u+2,u+1,v+1,1t+1,2+6,9,3+a,a,1a+2,3c+1,z,3b+2,5+1,a,7+2,64+1,3,1n,2+6,2,2,3+7,7+9,3,1d+g,1s+3,1d,2+4,2,6,15+8,d+1,x+3,3+1,2+2,1l,2+1,4,2+2,1n+7,3+1,49+2,2+c,2+6,5,7,4+1,5j+1l,2+4,k1+w,2db+2,3y,2p+v,ff+3,30+1,n9x+3,2+9,x+1,29+1,7l,4,5,q+1,6,48+1,r+h,e,13+7,q+a,1b+2,1d,3+3,3+1,14,1w+5,3+1,3+1,d,9,1c,1g,2+2,3+1,6+1,2,17+1,9,6n,3,5,fn5,ki+f,h+f,r2,6b,46+4,1af+2,2+1,6+3,15+2,5,4m+1,fy+3,as+1,4a+a,4x,1j+e,1l+2,1e+3,3+1,1y+2,11+4,2+7,1r,d+1,1h+8,b+3,3,2o+2,3,2+1,7,4h,4+7,m+1,1m+1,4,12+6,4+4,5g+7,3+2,2,o,2d+5,2,5+1,2+1,6n+3,7+1,2+1,s+1,2e+7,3,2+1,2z,2,3+5,2,2u+2,3+3,2+4,78+8,2+1,75+1,2,5,41+3,3+1,5,x+5,3+1,15+5,3+3,9,a+5,3+2,1b+c,2+1,bb+6,2+5,2d+l,3+6,2+1,2+1,3f+5,4,2+1,2+6,2,21+1,4,2,9o+1,f0c+4,1o+6,t5,1s+3,2a,f5l+1,43t+2,i+7,3+6,v+3,45+2,1j0+1i,5+1d,9,f,n+4,2+e,11t+6,2+g,3+6,2+1,2+4,7a+6,c6+3,15t+6,32+6,gzhy+6n",
+      "AL": "16w,3,2,e+1b,z+2,2+2s,g+1,8+1,b+m,2+t,s+2i,c+e,4h+f,1d+1e,1bwe+dp,3+3z,x+c,2+1,35+3y,2rm+z,5+7,b+5,dt+l,c+u,17nl+27,1t+27,4x+6n,3+d",
+      "LRO": "6ct",
+      "RLO": "6cu",
+      "LRE": "6cq",
+      "RLE": "6cr",
+      "PDF": "6cs",
+      "LRI": "6ee",
+      "RLI": "6ef",
+      "FSI": "6eg",
+      "PDI": "6eh"
+    };
+
+    const TYPES = {};
+    const TYPES_TO_NAMES = {};
+    TYPES.L = 1; //L is the default
+    TYPES_TO_NAMES[1] = 'L';
+    Object.keys(DATA).forEach((type, i) => {
+      TYPES[type] = 1 << (i + 1);
+      TYPES_TO_NAMES[TYPES[type]] = type;
+    });
+    Object.freeze(TYPES);
+
+    const ISOLATE_INIT_TYPES = TYPES.LRI | TYPES.RLI | TYPES.FSI;
+    const STRONG_TYPES = TYPES.L | TYPES.R | TYPES.AL;
+    const NEUTRAL_ISOLATE_TYPES = TYPES.B | TYPES.S | TYPES.WS | TYPES.ON | TYPES.FSI | TYPES.LRI | TYPES.RLI | TYPES.PDI;
+    const BN_LIKE_TYPES = TYPES.BN | TYPES.RLE | TYPES.LRE | TYPES.RLO | TYPES.LRO | TYPES.PDF;
+    const TRAILING_TYPES = TYPES.S | TYPES.WS | TYPES.B | ISOLATE_INIT_TYPES | TYPES.PDI | BN_LIKE_TYPES;
+
+    let map = null;
+
+    function parseData () {
+      if (!map) {
+        //const start = performance.now()
+        map = new Map();
+        for (let type in DATA) {
+          if (DATA.hasOwnProperty(type)) {
+            let lastCode = 0;
+            DATA[type].split(',').forEach(range => {
+              let [skip, step] = range.split('+');
+              skip = parseInt(skip, 36);
+              step = step ? parseInt(step, 36) : 0;
+              map.set(lastCode += skip, TYPES[type]);
+              for (let i = 0; i < step; i++) {
+                map.set(++lastCode, TYPES[type]);
+              }
+            });
+          }
+        }
+        //console.log(`char types parsed in ${performance.now() - start}ms`)
+      }
+    }
+
+    /**
+     * @param {string} char
+     * @return {number}
+     */
+    function getBidiCharType (char) {
+      parseData();
+      return map.get(char.codePointAt(0)) || TYPES.L
+    }
+
+    function getBidiCharTypeName(char) {
+      return TYPES_TO_NAMES[getBidiCharType(char)]
+    }
+
+    // Bidi bracket pairs data, auto generated
+    var data$1 = {
+      "pairs": "14>1,1e>2,u>2,2wt>1,1>1,1ge>1,1wp>1,1j>1,f>1,hm>1,1>1,u>1,u6>1,1>1,+5,28>1,w>1,1>1,+3,b8>1,1>1,+3,1>3,-1>-1,3>1,1>1,+2,1s>1,1>1,x>1,th>1,1>1,+2,db>1,1>1,+3,3>1,1>1,+2,14qm>1,1>1,+1,4q>1,1e>2,u>2,2>1,+1",
+      "canonical": "6f1>-6dx,6dy>-6dx,6ec>-6ed,6ee>-6ed,6ww>2jj,-2ji>2jj,14r4>-1e7l,1e7m>-1e7l,1e7m>-1e5c,1e5d>-1e5b,1e5c>-14qx,14qy>-14qx,14vn>-1ecg,1ech>-1ecg,1edu>-1ecg,1eci>-1ecg,1eda>-1ecg,1eci>-1ecg,1eci>-168q,168r>-168q,168s>-14ye,14yf>-14ye"
+    };
+
+    /**
+     * Parses an string that holds encoded codepoint mappings, e.g. for bracket pairs or
+     * mirroring characters, as encoded by scripts/generateBidiData.js. Returns an object
+     * holding the `map`, and optionally a `reverseMap` if `includeReverse:true`.
+     * @param {string} encodedString
+     * @param {boolean} includeReverse - true if you want reverseMap in the output
+     * @return {{map: Map<number, number>, reverseMap?: Map<number, number>}}
+     */
+    function parseCharacterMap (encodedString, includeReverse) {
+      const radix = 36;
+      let lastCode = 0;
+      const map = new Map();
+      const reverseMap = includeReverse && new Map();
+      let prevPair;
+      encodedString.split(',').forEach(function visit(entry) {
+        if (entry.indexOf('+') !== -1) {
+          for (let i = +entry; i--;) {
+            visit(prevPair);
+          }
+        } else {
+          prevPair = entry;
+          let [a, b] = entry.split('>');
+          a = String.fromCodePoint(lastCode += parseInt(a, radix));
+          b = String.fromCodePoint(lastCode += parseInt(b, radix));
+          map.set(a, b);
+          includeReverse && reverseMap.set(b, a);
+        }
+      });
+      return { map, reverseMap }
+    }
+
+    let openToClose, closeToOpen, canonical;
+
+    function parse$1 () {
+      if (!openToClose) {
+        //const start = performance.now()
+        let { map, reverseMap } = parseCharacterMap(data$1.pairs, true);
+        openToClose = map;
+        closeToOpen = reverseMap;
+        canonical = parseCharacterMap(data$1.canonical, false).map;
+        //console.log(`brackets parsed in ${performance.now() - start}ms`)
+      }
+    }
+
+    function openingToClosingBracket (char) {
+      parse$1();
+      return openToClose.get(char) || null
+    }
+
+    function closingToOpeningBracket (char) {
+      parse$1();
+      return closeToOpen.get(char) || null
+    }
+
+    function getCanonicalBracket (char) {
+      parse$1();
+      return canonical.get(char) || null
+    }
+
+    // Local type aliases
+    const {
+      L: TYPE_L,
+      R: TYPE_R,
+      EN: TYPE_EN,
+      ES: TYPE_ES,
+      ET: TYPE_ET,
+      AN: TYPE_AN,
+      CS: TYPE_CS,
+      B: TYPE_B,
+      S: TYPE_S,
+      ON: TYPE_ON,
+      BN: TYPE_BN,
+      NSM: TYPE_NSM,
+      AL: TYPE_AL,
+      LRO: TYPE_LRO,
+      RLO: TYPE_RLO,
+      LRE: TYPE_LRE,
+      RLE: TYPE_RLE,
+      PDF: TYPE_PDF,
+      LRI: TYPE_LRI,
+      RLI: TYPE_RLI,
+      FSI: TYPE_FSI,
+      PDI: TYPE_PDI
+    } = TYPES;
+
+    /**
+     * @typedef {object} GetEmbeddingLevelsResult
+     * @property {{start, end, level}[]} paragraphs
+     * @property {Uint8Array} levels
+     */
+
+    /**
+     * This function applies the Bidirectional Algorithm to a string, returning the resolved embedding levels
+     * in a single Uint8Array plus a list of objects holding each paragraph's start and end indices and resolved
+     * base embedding level.
+     *
+     * @param {string} string - The input string
+     * @param {"ltr"|"rtl"|"auto"} [baseDirection] - Use "ltr" or "rtl" to force a base paragraph direction,
+     *        otherwise a direction will be chosen automatically from each paragraph's contents.
+     * @return {GetEmbeddingLevelsResult}
+     */
+    function getEmbeddingLevels (string, baseDirection) {
+      const MAX_DEPTH = 125;
+
+      // Start by mapping all characters to their unicode type, as a bitmask integer
+      const charTypes = new Uint32Array(string.length);
+      for (let i = 0; i < string.length; i++) {
+        charTypes[i] = getBidiCharType(string[i]);
+      }
+
+      const charTypeCounts = new Map(); //will be cleared at start of each paragraph
+      function changeCharType(i, type) {
+        const oldType = charTypes[i];
+        charTypes[i] = type;
+        charTypeCounts.set(oldType, charTypeCounts.get(oldType) - 1);
+        if (oldType & NEUTRAL_ISOLATE_TYPES) {
+          charTypeCounts.set(NEUTRAL_ISOLATE_TYPES, charTypeCounts.get(NEUTRAL_ISOLATE_TYPES) - 1);
+        }
+        charTypeCounts.set(type, (charTypeCounts.get(type) || 0) + 1);
+        if (type & NEUTRAL_ISOLATE_TYPES) {
+          charTypeCounts.set(NEUTRAL_ISOLATE_TYPES, (charTypeCounts.get(NEUTRAL_ISOLATE_TYPES) || 0) + 1);
+        }
+      }
+
+      const embedLevels = new Uint8Array(string.length);
+      const isolationPairs = new Map(); //init->pdi and pdi->init
+
+      // === 3.3.1 The Paragraph Level ===
+      // 3.3.1 P1: Split the text into paragraphs
+      const paragraphs = []; // [{start, end, level}, ...]
+      let paragraph = null;
+      for (let i = 0; i < string.length; i++) {
+        if (!paragraph) {
+          paragraphs.push(paragraph = {
+            start: i,
+            end: string.length - 1,
+            // 3.3.1 P2-P3: Determine the paragraph level
+            level: baseDirection === 'rtl' ? 1 : baseDirection === 'ltr' ? 0 : determineAutoEmbedLevel(i, false)
+          });
+        }
+        if (charTypes[i] & TYPE_B) {
+          paragraph.end = i;
+          paragraph = null;
+        }
+      }
+
+      const FORMATTING_TYPES = TYPE_RLE | TYPE_LRE | TYPE_RLO | TYPE_LRO | ISOLATE_INIT_TYPES | TYPE_PDI | TYPE_PDF | TYPE_B;
+      const nextEven = n => n + ((n & 1) ? 1 : 2);
+      const nextOdd = n => n + ((n & 1) ? 2 : 1);
+
+      // Everything from here on will operate per paragraph.
+      for (let paraIdx = 0; paraIdx < paragraphs.length; paraIdx++) {
+        paragraph = paragraphs[paraIdx];
+        const statusStack = [{
+          _level: paragraph.level,
+          _override: 0, //0=neutral, 1=L, 2=R
+          _isolate: 0 //bool
+        }];
+        let stackTop;
+        let overflowIsolateCount = 0;
+        let overflowEmbeddingCount = 0;
+        let validIsolateCount = 0;
+        charTypeCounts.clear();
+
+        // === 3.3.2 Explicit Levels and Directions ===
+        for (let i = paragraph.start; i <= paragraph.end; i++) {
+          let charType = charTypes[i];
+          stackTop = statusStack[statusStack.length - 1];
+
+          // Set initial counts
+          charTypeCounts.set(charType, (charTypeCounts.get(charType) || 0) + 1);
+          if (charType & NEUTRAL_ISOLATE_TYPES) {
+            charTypeCounts.set(NEUTRAL_ISOLATE_TYPES, (charTypeCounts.get(NEUTRAL_ISOLATE_TYPES) || 0) + 1);
+          }
+
+          // Explicit Embeddings: 3.3.2 X2 - X3
+          if (charType & FORMATTING_TYPES) { //prefilter all formatters
+            if (charType & (TYPE_RLE | TYPE_LRE)) {
+              embedLevels[i] = stackTop._level; // 5.2
+              const level = (charType === TYPE_RLE ? nextOdd : nextEven)(stackTop._level);
+              if (level <= MAX_DEPTH && !overflowIsolateCount && !overflowEmbeddingCount) {
+                statusStack.push({
+                  _level: level,
+                  _override: 0,
+                  _isolate: 0
+                });
+              } else if (!overflowIsolateCount) {
+                overflowEmbeddingCount++;
+              }
+            }
+
+            // Explicit Overrides: 3.3.2 X4 - X5
+            else if (charType & (TYPE_RLO | TYPE_LRO)) {
+              embedLevels[i] = stackTop._level; // 5.2
+              const level = (charType === TYPE_RLO ? nextOdd : nextEven)(stackTop._level);
+              if (level <= MAX_DEPTH && !overflowIsolateCount && !overflowEmbeddingCount) {
+                statusStack.push({
+                  _level: level,
+                  _override: (charType & TYPE_RLO) ? TYPE_R : TYPE_L,
+                  _isolate: 0
+                });
+              } else if (!overflowIsolateCount) {
+                overflowEmbeddingCount++;
+              }
+            }
+
+            // Isolates: 3.3.2 X5a - X5c
+            else if (charType & ISOLATE_INIT_TYPES) {
+              // X5c - FSI becomes either RLI or LRI
+              if (charType & TYPE_FSI) {
+                charType = determineAutoEmbedLevel(i + 1, true) === 1 ? TYPE_RLI : TYPE_LRI;
+              }
+
+              embedLevels[i] = stackTop._level;
+              if (stackTop._override) {
+                changeCharType(i, stackTop._override);
+              }
+              const level = (charType === TYPE_RLI ? nextOdd : nextEven)(stackTop._level);
+              if (level <= MAX_DEPTH && overflowIsolateCount === 0 && overflowEmbeddingCount === 0) {
+                validIsolateCount++;
+                statusStack.push({
+                  _level: level,
+                  _override: 0,
+                  _isolate: 1,
+                  _isolInitIndex: i
+                });
+              } else {
+                overflowIsolateCount++;
+              }
+            }
+
+            // Terminating Isolates: 3.3.2 X6a
+            else if (charType & TYPE_PDI) {
+              if (overflowIsolateCount > 0) {
+                overflowIsolateCount--;
+              } else if (validIsolateCount > 0) {
+                overflowEmbeddingCount = 0;
+                while (!statusStack[statusStack.length - 1]._isolate) {
+                  statusStack.pop();
+                }
+                // Add to isolation pairs bidirectional mapping:
+                const isolInitIndex = statusStack[statusStack.length - 1]._isolInitIndex;
+                if (isolInitIndex != null) {
+                  isolationPairs.set(isolInitIndex, i);
+                  isolationPairs.set(i, isolInitIndex);
+                }
+                statusStack.pop();
+                validIsolateCount--;
+              }
+              stackTop = statusStack[statusStack.length - 1];
+              embedLevels[i] = stackTop._level;
+              if (stackTop._override) {
+                changeCharType(i, stackTop._override);
+              }
+            }
+
+
+            // Terminating Embeddings and Overrides: 3.3.2 X7
+            else if (charType & TYPE_PDF) {
+              if (overflowIsolateCount === 0) {
+                if (overflowEmbeddingCount > 0) {
+                  overflowEmbeddingCount--;
+                } else if (!stackTop._isolate && statusStack.length > 1) {
+                  statusStack.pop();
+                  stackTop = statusStack[statusStack.length - 1];
+                }
+              }
+              embedLevels[i] = stackTop._level; // 5.2
+            }
+
+            // End of Paragraph: 3.3.2 X8
+            else if (charType & TYPE_B) {
+              embedLevels[i] = paragraph.level;
+            }
+          }
+
+          // Non-formatting characters: 3.3.2 X6
+          else {
+            embedLevels[i] = stackTop._level;
+            // NOTE: This exclusion of BN seems to go against what section 5.2 says, but is required for test passage
+            if (stackTop._override && charType !== TYPE_BN) {
+              changeCharType(i, stackTop._override);
+            }
+          }
+        }
+
+        // === 3.3.3 Preparations for Implicit Processing ===
+
+        // Remove all RLE, LRE, RLO, LRO, PDF, and BN characters: 3.3.3 X9
+        // Note: Due to section 5.2, we won't remove them, but we'll use the BN_LIKE_TYPES bitset to
+        // easily ignore them all from here on out.
+
+        // 3.3.3 X10
+        // Compute the set of isolating run sequences as specified by BD13
+        const levelRuns = [];
+        let currentRun = null;
+        for (let i = paragraph.start; i <= paragraph.end; i++) {
+          const charType = charTypes[i];
+          if (!(charType & BN_LIKE_TYPES)) {
+            const lvl = embedLevels[i];
+            const isIsolInit = charType & ISOLATE_INIT_TYPES;
+            const isPDI = charType === TYPE_PDI;
+            if (currentRun && lvl === currentRun._level) {
+              currentRun._end = i;
+              currentRun._endsWithIsolInit = isIsolInit;
+            } else {
+              levelRuns.push(currentRun = {
+                _start: i,
+                _end: i,
+                _level: lvl,
+                _startsWithPDI: isPDI,
+                _endsWithIsolInit: isIsolInit
+              });
+            }
+          }
+        }
+        const isolatingRunSeqs = []; // [{seqIndices: [], sosType: L|R, eosType: L|R}]
+        for (let runIdx = 0; runIdx < levelRuns.length; runIdx++) {
+          const run = levelRuns[runIdx];
+          if (!run._startsWithPDI || (run._startsWithPDI && !isolationPairs.has(run._start))) {
+            const seqRuns = [currentRun = run];
+            for (let pdiIndex; currentRun && currentRun._endsWithIsolInit && (pdiIndex = isolationPairs.get(currentRun._end)) != null;) {
+              for (let i = runIdx + 1; i < levelRuns.length; i++) {
+                if (levelRuns[i]._start === pdiIndex) {
+                  seqRuns.push(currentRun = levelRuns[i]);
+                  break
+                }
+              }
+            }
+            // build flat list of indices across all runs:
+            const seqIndices = [];
+            for (let i = 0; i < seqRuns.length; i++) {
+              const run = seqRuns[i];
+              for (let j = run._start; j <= run._end; j++) {
+                seqIndices.push(j);
+              }
+            }
+            // determine the sos/eos types:
+            let firstLevel = embedLevels[seqIndices[0]];
+            let prevLevel = paragraph.level;
+            for (let i = seqIndices[0] - 1; i >= 0; i--) {
+              if (!(charTypes[i] & BN_LIKE_TYPES)) { //5.2
+                prevLevel = embedLevels[i];
+                break
+              }
+            }
+            const lastIndex = seqIndices[seqIndices.length - 1];
+            let lastLevel = embedLevels[lastIndex];
+            let nextLevel = paragraph.level;
+            if (!(charTypes[lastIndex] & ISOLATE_INIT_TYPES)) {
+              for (let i = lastIndex + 1; i <= paragraph.end; i++) {
+                if (!(charTypes[i] & BN_LIKE_TYPES)) { //5.2
+                  nextLevel = embedLevels[i];
+                  break
+                }
+              }
+            }
+            isolatingRunSeqs.push({
+              _seqIndices: seqIndices,
+              _sosType: Math.max(prevLevel, firstLevel) % 2 ? TYPE_R : TYPE_L,
+              _eosType: Math.max(nextLevel, lastLevel) % 2 ? TYPE_R : TYPE_L
+            });
+          }
+        }
+
+        // The next steps are done per isolating run sequence
+        for (let seqIdx = 0; seqIdx < isolatingRunSeqs.length; seqIdx++) {
+          const { _seqIndices: seqIndices, _sosType: sosType, _eosType: eosType } = isolatingRunSeqs[seqIdx];
+
+          // === 3.3.4 Resolving Weak Types ===
+
+          // W1 + 5.2. Search backward from each NSM to the first character in the isolating run sequence whose
+          // bidirectional type is not BN, and set the NSM to ON if it is an isolate initiator or PDI, and to its
+          // type otherwise. If the NSM is the first non-BN character, change the NSM to the type of sos.
+          if (charTypeCounts.get(TYPE_NSM)) {
+            for (let si = 0; si < seqIndices.length; si++) {
+              const i = seqIndices[si];
+              if (charTypes[i] & TYPE_NSM) {
+                let prevType = sosType;
+                for (let sj = si - 1; sj >= 0; sj--) {
+                  if (!(charTypes[seqIndices[sj]] & BN_LIKE_TYPES)) { //5.2 scan back to first non-BN
+                    prevType = charTypes[seqIndices[sj]];
+                    break
+                  }
+                }
+                changeCharType(i, (prevType & (ISOLATE_INIT_TYPES | TYPE_PDI)) ? TYPE_ON : prevType);
+              }
+            }
+          }
+
+          // W2. Search backward from each instance of a European number until the first strong type (R, L, AL, or sos)
+          // is found. If an AL is found, change the type of the European number to Arabic number.
+          if (charTypeCounts.get(TYPE_EN)) {
+            for (let si = 0; si < seqIndices.length; si++) {
+              const i = seqIndices[si];
+              if (charTypes[i] & TYPE_EN) {
+                for (let sj = si - 1; sj >= -1; sj--) {
+                  const prevCharType = sj === -1 ? sosType : charTypes[seqIndices[sj]];
+                  if (prevCharType & STRONG_TYPES) {
+                    if (prevCharType === TYPE_AL) {
+                      changeCharType(i, TYPE_AN);
+                    }
+                    break
+                  }
+                }
+              }
+            }
+          }
+
+          // W3. Change all ALs to R
+          if (charTypeCounts.get(TYPE_AL)) {
+            for (let si = 0; si < seqIndices.length; si++) {
+              const i = seqIndices[si];
+              if (charTypes[i] & TYPE_AL) {
+                changeCharType(i, TYPE_R);
+              }
+            }
+          }
+
+          // W4. A single European separator between two European numbers changes to a European number. A single common
+          // separator between two numbers of the same type changes to that type.
+          if (charTypeCounts.get(TYPE_ES) || charTypeCounts.get(TYPE_CS)) {
+            for (let si = 1; si < seqIndices.length - 1; si++) {
+              const i = seqIndices[si];
+              if (charTypes[i] & (TYPE_ES | TYPE_CS)) {
+                let prevType = 0, nextType = 0;
+                for (let sj = si - 1; sj >= 0; sj--) {
+                  prevType = charTypes[seqIndices[sj]];
+                  if (!(prevType & BN_LIKE_TYPES)) { //5.2
+                    break
+                  }
+                }
+                for (let sj = si + 1; sj < seqIndices.length; sj++) {
+                  nextType = charTypes[seqIndices[sj]];
+                  if (!(nextType & BN_LIKE_TYPES)) { //5.2
+                    break
+                  }
+                }
+                if (prevType === nextType && (charTypes[i] === TYPE_ES ? prevType === TYPE_EN : (prevType & (TYPE_EN | TYPE_AN)))) {
+                  changeCharType(i, prevType);
+                }
+              }
+            }
+          }
+
+          // W5. A sequence of European terminators adjacent to European numbers changes to all European numbers.
+          if (charTypeCounts.get(TYPE_EN)) {
+            for (let si = 0; si < seqIndices.length; si++) {
+              const i = seqIndices[si];
+              if (charTypes[i] & TYPE_EN) {
+                for (let sj = si - 1; sj >= 0 && (charTypes[seqIndices[sj]] & (TYPE_ET | BN_LIKE_TYPES)); sj--) {
+                  changeCharType(seqIndices[sj], TYPE_EN);
+                }
+                for (let sj = si + 1; sj < seqIndices.length && (charTypes[seqIndices[sj]] & (TYPE_ET | BN_LIKE_TYPES)); sj++) {
+                  changeCharType(seqIndices[sj], TYPE_EN);
+                }
+              }
+            }
+          }
+
+          // W6. Otherwise, separators and terminators change to Other Neutral.
+          if (charTypeCounts.get(TYPE_ET) || charTypeCounts.get(TYPE_ES) || charTypeCounts.get(TYPE_CS)) {
+            for (let si = 0; si < seqIndices.length; si++) {
+              const i = seqIndices[si];
+              if (charTypes[i] & (TYPE_ET | TYPE_ES | TYPE_CS)) {
+                changeCharType(i, TYPE_ON);
+                // 5.2 transform adjacent BNs too:
+                for (let sj = si - 1; sj >= 0 && (charTypes[seqIndices[sj]] & BN_LIKE_TYPES); sj--) {
+                  changeCharType(seqIndices[sj], TYPE_ON);
+                }
+                for (let sj = si + 1; sj < seqIndices.length && (charTypes[seqIndices[sj]] & BN_LIKE_TYPES); sj++) {
+                  changeCharType(seqIndices[sj], TYPE_ON);
+                }
+              }
+            }
+          }
+
+          // W7. Search backward from each instance of a European number until the first strong type (R, L, or sos)
+          // is found. If an L is found, then change the type of the European number to L.
+          // NOTE: implemented in single forward pass for efficiency
+          if (charTypeCounts.get(TYPE_EN)) {
+            for (let si = 0, prevStrongType = sosType; si < seqIndices.length; si++) {
+              const i = seqIndices[si];
+              const type = charTypes[i];
+              if (type & TYPE_EN) {
+                if (prevStrongType === TYPE_L) {
+                  changeCharType(i, TYPE_L);
+                }
+              } else if (type & STRONG_TYPES) {
+                prevStrongType = type;
+              }
+            }
+          }
+
+          // === 3.3.5 Resolving Neutral and Isolate Formatting Types ===
+
+          if (charTypeCounts.get(NEUTRAL_ISOLATE_TYPES)) {
+            // N0. Process bracket pairs in an isolating run sequence sequentially in the logical order of the text
+            // positions of the opening paired brackets using the logic given below. Within this scope, bidirectional
+            // types EN and AN are treated as R.
+            const R_TYPES_FOR_N_STEPS = (TYPE_R | TYPE_EN | TYPE_AN);
+            const STRONG_TYPES_FOR_N_STEPS = R_TYPES_FOR_N_STEPS | TYPE_L;
+
+            // * Identify the bracket pairs in the current isolating run sequence according to BD16.
+            const bracketPairs = [];
+            {
+              const openerStack = [];
+              for (let si = 0; si < seqIndices.length; si++) {
+                // NOTE: for any potential bracket character we also test that it still carries a NI
+                // type, as that may have been changed earlier. This doesn't seem to be explicitly
+                // called out in the spec, but is required for passage of certain tests.
+                if (charTypes[seqIndices[si]] & NEUTRAL_ISOLATE_TYPES) {
+                  const char = string[seqIndices[si]];
+                  let oppositeBracket;
+                  // Opening bracket
+                  if (openingToClosingBracket(char) !== null) {
+                    if (openerStack.length < 63) {
+                      openerStack.push({ char, seqIndex: si });
+                    } else {
+                      break
+                    }
+                  }
+                  // Closing bracket
+                  else if ((oppositeBracket = closingToOpeningBracket(char)) !== null) {
+                    for (let stackIdx = openerStack.length - 1; stackIdx >= 0; stackIdx--) {
+                      const stackChar = openerStack[stackIdx].char;
+                      if (stackChar === oppositeBracket ||
+                        stackChar === closingToOpeningBracket(getCanonicalBracket(char)) ||
+                        openingToClosingBracket(getCanonicalBracket(stackChar)) === char
+                      ) {
+                        bracketPairs.push([openerStack[stackIdx].seqIndex, si]);
+                        openerStack.length = stackIdx; //pop the matching bracket and all following
+                        break
+                      }
+                    }
+                  }
+                }
+              }
+              bracketPairs.sort((a, b) => a[0] - b[0]);
+            }
+            // * For each bracket-pair element in the list of pairs of text positions
+            for (let pairIdx = 0; pairIdx < bracketPairs.length; pairIdx++) {
+              const [openSeqIdx, closeSeqIdx] = bracketPairs[pairIdx];
+              // a. Inspect the bidirectional types of the characters enclosed within the bracket pair.
+              // b. If any strong type (either L or R) matching the embedding direction is found, set the type for both
+              // brackets in the pair to match the embedding direction.
+              let foundStrongType = false;
+              let useStrongType = 0;
+              for (let si = openSeqIdx + 1; si < closeSeqIdx; si++) {
+                const i = seqIndices[si];
+                if (charTypes[i] & STRONG_TYPES_FOR_N_STEPS) {
+                  foundStrongType = true;
+                  const lr = (charTypes[i] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
+                  if (lr === getEmbedDirection(i)) {
+                    useStrongType = lr;
+                    break
+                  }
+                }
+              }
+              // c. Otherwise, if there is a strong type it must be opposite the embedding direction. Therefore, test
+              // for an established context with a preceding strong type by checking backwards before the opening paired
+              // bracket until the first strong type (L, R, or sos) is found.
+              //    1. If the preceding strong type is also opposite the embedding direction, context is established, so
+              //    set the type for both brackets in the pair to that direction.
+              //    2. Otherwise set the type for both brackets in the pair to the embedding direction.
+              if (foundStrongType && !useStrongType) {
+                useStrongType = sosType;
+                for (let si = openSeqIdx - 1; si >= 0; si--) {
+                  const i = seqIndices[si];
+                  if (charTypes[i] & STRONG_TYPES_FOR_N_STEPS) {
+                    const lr = (charTypes[i] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
+                    if (lr !== getEmbedDirection(i)) {
+                      useStrongType = lr;
+                    } else {
+                      useStrongType = getEmbedDirection(i);
+                    }
+                    break
+                  }
+                }
+              }
+              if (useStrongType) {
+                charTypes[seqIndices[openSeqIdx]] = charTypes[seqIndices[closeSeqIdx]] = useStrongType;
+                // * Any number of characters that had original bidirectional character type NSM prior to the application
+                // of W1 that immediately follow a paired bracket which changed to L or R under N0 should change to match
+                // the type of their preceding bracket.
+                if (useStrongType !== getEmbedDirection(seqIndices[openSeqIdx])) {
+                  for (let si = openSeqIdx + 1; si < seqIndices.length; si++) {
+                    if (!(charTypes[seqIndices[si]] & BN_LIKE_TYPES)) {
+                      if (getBidiCharType(string[seqIndices[si]]) & TYPE_NSM) {
+                        charTypes[seqIndices[si]] = useStrongType;
+                      }
+                      break
+                    }
+                  }
+                }
+                if (useStrongType !== getEmbedDirection(seqIndices[closeSeqIdx])) {
+                  for (let si = closeSeqIdx + 1; si < seqIndices.length; si++) {
+                    if (!(charTypes[seqIndices[si]] & BN_LIKE_TYPES)) {
+                      if (getBidiCharType(string[seqIndices[si]]) & TYPE_NSM) {
+                        charTypes[seqIndices[si]] = useStrongType;
+                      }
+                      break
+                    }
+                  }
+                }
+              }
+            }
+
+            // N1. A sequence of NIs takes the direction of the surrounding strong text if the text on both sides has the
+            // same direction.
+            // N2. Any remaining NIs take the embedding direction.
+            for (let si = 0; si < seqIndices.length; si++) {
+              if (charTypes[seqIndices[si]] & NEUTRAL_ISOLATE_TYPES) {
+                let niRunStart = si, niRunEnd = si;
+                let prevType = sosType; //si === 0 ? sosType : (charTypes[seqIndices[si - 1]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L
+                for (let si2 = si - 1; si2 >= 0; si2--) {
+                  if (charTypes[seqIndices[si2]] & BN_LIKE_TYPES) {
+                    niRunStart = si2; //5.2 treat BNs adjacent to NIs as NIs
+                  } else {
+                    prevType = (charTypes[seqIndices[si2]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
+                    break
+                  }
+                }
+                let nextType = eosType;
+                for (let si2 = si + 1; si2 < seqIndices.length; si2++) {
+                  if (charTypes[seqIndices[si2]] & (NEUTRAL_ISOLATE_TYPES | BN_LIKE_TYPES)) {
+                    niRunEnd = si2;
+                  } else {
+                    nextType = (charTypes[seqIndices[si2]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
+                    break
+                  }
+                }
+                for (let sj = niRunStart; sj <= niRunEnd; sj++) {
+                  charTypes[seqIndices[sj]] = prevType === nextType ? prevType : getEmbedDirection(seqIndices[sj]);
+                }
+                si = niRunEnd;
+              }
+            }
+          }
+        }
+
+        // === 3.3.6 Resolving Implicit Levels ===
+
+        for (let i = paragraph.start; i <= paragraph.end; i++) {
+          const level = embedLevels[i];
+          const type = charTypes[i];
+          // I2. For all characters with an odd (right-to-left) embedding level, those of type L, EN or AN go up one level.
+          if (level & 1) {
+            if (type & (TYPE_L | TYPE_EN | TYPE_AN)) {
+              embedLevels[i]++;
+            }
+          }
+            // I1. For all characters with an even (left-to-right) embedding level, those of type R go up one level
+          // and those of type AN or EN go up two levels.
+          else {
+            if (type & TYPE_R) {
+              embedLevels[i]++;
+            } else if (type & (TYPE_AN | TYPE_EN)) {
+              embedLevels[i] += 2;
+            }
+          }
+
+          // 5.2: Resolve any LRE, RLE, LRO, RLO, PDF, or BN to the level of the preceding character if there is one,
+          // and otherwise to the base level.
+          if (type & BN_LIKE_TYPES) {
+            embedLevels[i] = i === 0 ? paragraph.level : embedLevels[i - 1];
+          }
+
+          // 3.4 L1.1-4: Reset the embedding level of segment/paragraph separators, and any sequence of whitespace or
+          // isolate formatting characters preceding them or the end of the paragraph, to the paragraph level.
+          // NOTE: this will also need to be applied to each individual line ending after line wrapping occurs.
+          if (i === paragraph.end || getBidiCharType(string[i]) & (TYPE_S | TYPE_B)) {
+            for (let j = i; j >= 0 && (getBidiCharType(string[j]) & TRAILING_TYPES); j--) {
+              embedLevels[j] = paragraph.level;
+            }
+          }
+        }
+      }
+
+      // DONE! The resolved levels can then be used, after line wrapping, to flip runs of characters
+      // according to section 3.4 Reordering Resolved Levels
+      return {
+        levels: embedLevels,
+        paragraphs
+      }
+
+      function determineAutoEmbedLevel (start, isFSI) {
+        // 3.3.1 P2 - P3
+        for (let i = start; i < string.length; i++) {
+          const charType = charTypes[i];
+          if (charType & (TYPE_R | TYPE_AL)) {
+            return 1
+          }
+          if ((charType & (TYPE_B | TYPE_L)) || (isFSI && charType === TYPE_PDI)) {
+            return 0
+          }
+          if (charType & ISOLATE_INIT_TYPES) {
+            const pdi = indexOfMatchingPDI(i);
+            i = pdi === -1 ? string.length : pdi;
+          }
+        }
+        return 0
+      }
+
+      function indexOfMatchingPDI (isolateStart) {
+        // 3.1.2 BD9
+        let isolationLevel = 1;
+        for (let i = isolateStart + 1; i < string.length; i++) {
+          const charType = charTypes[i];
+          if (charType & TYPE_B) {
+            break
+          }
+          if (charType & TYPE_PDI) {
+            if (--isolationLevel === 0) {
+              return i
+            }
+          } else if (charType & ISOLATE_INIT_TYPES) {
+            isolationLevel++;
+          }
+        }
+        return -1
+      }
+
+      function getEmbedDirection (i) {
+        return (embedLevels[i] & 1) ? TYPE_R : TYPE_L
+      }
+
+    }
+
+    // Bidi mirrored chars data, auto generated
+    var data = "14>1,j>2,t>2,u>2,1a>g,2v3>1,1>1,1ge>1,1wd>1,b>1,1j>1,f>1,ai>3,-2>3,+1,8>1k0,-1jq>1y7,-1y6>1hf,-1he>1h6,-1h5>1ha,-1h8>1qi,-1pu>1,6>3u,-3s>7,6>1,1>1,f>1,1>1,+2,3>1,1>1,+13,4>1,1>1,6>1eo,-1ee>1,3>1mg,-1me>1mk,-1mj>1mi,-1mg>1mi,-1md>1,1>1,+2,1>10k,-103>1,1>1,4>1,5>1,1>1,+10,3>1,1>8,-7>8,+1,-6>7,+1,a>1,1>1,u>1,u6>1,1>1,+5,26>1,1>1,2>1,2>2,8>1,7>1,4>1,1>1,+5,b8>1,1>1,+3,1>3,-2>1,2>1,1>1,+2,c>1,3>1,1>1,+2,h>1,3>1,a>1,1>1,2>1,3>1,1>1,d>1,f>1,3>1,1a>1,1>1,6>1,7>1,13>1,k>1,1>1,+19,4>1,1>1,+2,2>1,1>1,+18,m>1,a>1,1>1,lk>1,1>1,4>1,2>1,f>1,3>1,1>1,+3,db>1,1>1,+3,3>1,1>1,+2,14qm>1,1>1,+1,6>1,4j>1,j>2,t>2,u>2,2>1,+1";
+
+    let mirrorMap;
+
+    function parse () {
+      if (!mirrorMap) {
+        //const start = performance.now()
+        const { map, reverseMap } = parseCharacterMap(data, true);
+        // Combine both maps into one
+        reverseMap.forEach((value, key) => {
+          map.set(key, value);
+        });
+        mirrorMap = map;
+        //console.log(`mirrored chars parsed in ${performance.now() - start}ms`)
+      }
+    }
+
+    function getMirroredCharacter (char) {
+      parse();
+      return mirrorMap.get(char) || null
+    }
+
+    /**
+     * Given a string and its resolved embedding levels, build a map of indices to replacement chars
+     * for any characters in right-to-left segments that have defined mirrored characters.
+     * @param string
+     * @param embeddingLevels
+     * @param [start]
+     * @param [end]
+     * @return {Map<number, string>}
+     */
+    function getMirroredCharactersMap(string, embeddingLevels, start, end) {
+      let strLen = string.length;
+      start = Math.max(0, start == null ? 0 : +start);
+      end = Math.min(strLen - 1, end == null ? strLen - 1 : +end);
+
+      const map = new Map();
+      for (let i = start; i <= end; i++) {
+        if (embeddingLevels[i] & 1) { //only odd (rtl) levels
+          const mirror = getMirroredCharacter(string[i]);
+          if (mirror !== null) {
+            map.set(i, mirror);
+          }
+        }
+      }
+      return map
+    }
+
+    /**
+     * Given a start and end denoting a single line within a string, and a set of precalculated
+     * bidi embedding levels, produce a list of segments whose ordering should be flipped, in sequence.
+     * @param {string} string - the full input string
+     * @param {GetEmbeddingLevelsResult} embeddingLevelsResult - the result object from getEmbeddingLevels
+     * @param {number} [start] - first character in a subset of the full string
+     * @param {number} [end] - last character in a subset of the full string
+     * @return {number[][]} - the list of start/end segments that should be flipped, in order.
+     */
+    function getReorderSegments(string, embeddingLevelsResult, start, end) {
+      let strLen = string.length;
+      start = Math.max(0, start == null ? 0 : +start);
+      end = Math.min(strLen - 1, end == null ? strLen - 1 : +end);
+
+      const segments = [];
+      embeddingLevelsResult.paragraphs.forEach(paragraph => {
+        const lineStart = Math.max(start, paragraph.start);
+        const lineEnd = Math.min(end, paragraph.end);
+        if (lineStart < lineEnd) {
+          // Local slice for mutation
+          const lineLevels = embeddingLevelsResult.levels.slice(lineStart, lineEnd + 1);
+
+          // 3.4 L1.4: Reset any sequence of whitespace characters and/or isolate formatting characters at the
+          // end of the line to the paragraph level.
+          for (let i = lineEnd; i >= lineStart && (getBidiCharType(string[i]) & TRAILING_TYPES); i--) {
+            lineLevels[i] = paragraph.level;
+          }
+
+          // L2. From the highest level found in the text to the lowest odd level on each line, including intermediate levels
+          // not actually present in the text, reverse any contiguous sequence of characters that are at that level or higher.
+          let maxLevel = paragraph.level;
+          let minOddLevel = Infinity;
+          for (let i = 0; i < lineLevels.length; i++) {
+            const level = lineLevels[i];
+            if (level > maxLevel) maxLevel = level;
+            if (level < minOddLevel) minOddLevel = level | 1;
+          }
+          for (let lvl = maxLevel; lvl >= minOddLevel; lvl--) {
+            for (let i = 0; i < lineLevels.length; i++) {
+              if (lineLevels[i] >= lvl) {
+                const segStart = i;
+                while (i + 1 < lineLevels.length && lineLevels[i + 1] >= lvl) {
+                  i++;
+                }
+                if (i > segStart) {
+                  segments.push([segStart + start, i + start]);
+                }
+              }
+            }
+          }
+        }
+      });
+      return segments
+    }
+
+    /**
+     * @param {string} string
+     * @param {GetEmbeddingLevelsResult} embedLevelsResult
+     * @param {number} [start]
+     * @param {number} [end]
+     * @return {string} the new string with bidi segments reordered
+     */
+    function getReorderedString(string, embedLevelsResult, start, end) {
+      const indices = getReorderedIndices(string, embedLevelsResult, start, end);
+      const chars = [...string];
+      indices.forEach((charIndex, i) => {
+        chars[i] = (
+          (embedLevelsResult.levels[charIndex] & 1) ? getMirroredCharacter(string[charIndex]) : null
+        ) || string[charIndex];
+      });
+      return chars.join('')
+    }
+
+    /**
+     * @param {string} string
+     * @param {GetEmbeddingLevelsResult} embedLevelsResult
+     * @param {number} [start]
+     * @param {number} [end]
+     * @return {number[]} an array with character indices in their new bidi order
+     */
+    function getReorderedIndices(string, embedLevelsResult, start, end) {
+      const segments = getReorderSegments(string, embedLevelsResult, start, end);
+      // Fill an array with indices
+      const indices = [];
+      for (let i = 0; i < string.length; i++) {
+        indices[i] = i;
+      }
+      // Reverse each segment in order
+      segments.forEach(([start, end]) => {
+        const slice = indices.slice(start, end + 1);
+        for (let i = slice.length; i--;) {
+          indices[end - i] = slice[i];
+        }
+      });
+      return indices
+    }
+
+    exports.closingToOpeningBracket = closingToOpeningBracket;
+    exports.getBidiCharType = getBidiCharType;
+    exports.getBidiCharTypeName = getBidiCharTypeName;
+    exports.getCanonicalBracket = getCanonicalBracket;
+    exports.getEmbeddingLevels = getEmbeddingLevels;
+    exports.getMirroredCharacter = getMirroredCharacter;
+    exports.getMirroredCharactersMap = getMirroredCharactersMap;
+    exports.getReorderSegments = getReorderSegments;
+    exports.getReorderedIndices = getReorderedIndices;
+    exports.getReorderedString = getReorderedString;
+    exports.openingToClosingBracket = openingToClosingBracket;
+
+    Object.defineProperty(exports, '__esModule', { value: true });
+
+    return exports;
+
+  }({}));
+  return bidi}
+
   /**
    * Regular expression for matching the `void main() {` opener line in GLSL.
    * @type {RegExp}
@@ -669,8 +1631,38 @@
     return source.replace( pattern, replace )
   }
 
+  /*
+   * This is a direct copy of MathUtils.generateUUID from Three.js, to preserve compatibility with three
+   * versions before 0.113.0 as it was changed from Math to MathUtils in that version.
+   * https://github.com/mrdoob/three.js/blob/dd8b5aa3b270c17096b90945cd2d6d1b13aaec53/src/math/MathUtils.js#L16
+   */
+
+  const _lut = [];
+
+  for (let i = 0; i < 256; i++) {
+    _lut[i] = (i < 16 ? '0' : '') + (i).toString(16);
+  }
+
+  function generateUUID() {
+
+    // http://stackoverflow.com/questions/105034/how-to-create-a-guid-uuid-in-javascript/21963136#21963136
+
+    const d0 = Math.random() * 0xffffffff | 0;
+    const d1 = Math.random() * 0xffffffff | 0;
+    const d2 = Math.random() * 0xffffffff | 0;
+    const d3 = Math.random() * 0xffffffff | 0;
+    const uuid = _lut[d0 & 0xff] + _lut[d0 >> 8 & 0xff] + _lut[d0 >> 16 & 0xff] + _lut[d0 >> 24 & 0xff] + '-' +
+      _lut[d1 & 0xff] + _lut[d1 >> 8 & 0xff] + '-' + _lut[d1 >> 16 & 0x0f | 0x40] + _lut[d1 >> 24 & 0xff] + '-' +
+      _lut[d2 & 0x3f | 0x80] + _lut[d2 >> 8 & 0xff] + '-' + _lut[d2 >> 16 & 0xff] + _lut[d2 >> 24 & 0xff] +
+      _lut[d3 & 0xff] + _lut[d3 >> 8 & 0xff] + _lut[d3 >> 16 & 0xff] + _lut[d3 >> 24 & 0xff];
+
+    // .toUpperCase() here flattens concatenated strings to save heap memory space.
+    return uuid.toUpperCase()
+
+  }
+
   // Local assign polyfill to avoid importing troika-core
-  const assign = Object.assign || function(/*target, ...sources*/) {
+  const assign$1 = Object.assign || function(/*target, ...sources*/) {
     let target = arguments[0];
     for (let i = 1, len = arguments.length; i < len; i++) {
       let source = arguments[i];
@@ -789,7 +1781,7 @@
       // Inject upgraded shaders and uniforms into the program
       shaderInfo.vertexShader = upgradedShaders.vertexShader;
       shaderInfo.fragmentShader = upgradedShaders.fragmentShader;
-      assign(shaderInfo.uniforms, this.uniforms);
+      assign$1(shaderInfo.uniforms, this.uniforms);
 
       // Inject auto-updating time uniform if requested
       if (options.timeUniform) {
@@ -817,13 +1809,13 @@
 
       // Needs its own ids
       Object.defineProperty(derived, 'id', { value: materialInstanceId++ });
-      derived.uuid = THREE.MathUtils.generateUUID();
+      derived.uuid = generateUUID();
 
       // Merge uniforms, defines, and extensions
-      derived.uniforms = assign({}, base.uniforms, options.uniforms);
-      derived.defines = assign({}, base.defines, options.defines);
+      derived.uniforms = assign$1({}, base.uniforms, options.uniforms);
+      derived.defines = assign$1({}, base.defines, options.defines);
       derived.defines[`TROIKA_DERIVED_MATERIAL_${optionsKey}`] = ''; //force a program change from the base material
-      derived.extensions = assign({}, base.extensions, options.extensions);
+      derived.extensions = assign$1({}, base.extensions, options.extensions);
 
       // Don't inherit EventDispatcher listeners
       derived._listeners = undefined;
@@ -836,6 +1828,8 @@
       isDerivedMaterial: {value: true},
 
       customProgramCacheKey: {
+        writable: true,
+        configurable: true,
         value: function () {
           return optionsKey
         }
@@ -856,9 +1850,9 @@
         value: function (source) {
           baseMaterial.copy.call(this, source);
           if (!baseMaterial.isShaderMaterial && !baseMaterial.isDerivedMaterial) {
-            assign(this.extensions, source.extensions);
-            assign(this.defines, source.defines);
-            assign(this.uniforms, THREE.UniformsUtils.clone(source.uniforms));
+            assign$1(this.extensions, source.extensions);
+            assign$1(this.defines, source.defines);
+            assign$1(this.uniforms, THREE.UniformsUtils.clone(source.uniforms));
           }
           return this
         }
@@ -1003,10 +1997,13 @@
 
     // Inject a function for the vertexTransform and rename all usages of position/normal/uv
     if (vertexTransform) {
-      vertexDefs = `${vertexDefs}
-vec3 troika_position_${key};
+      // Hoist these defs to the very top so they work in other function defs
+      vertexShader = `vec3 troika_position_${key};
 vec3 troika_normal_${key};
 vec2 troika_uv_${key};
+${vertexShader}
+`;
+      vertexDefs = `${vertexDefs}
 void troikaVertexTransform${key}(inout vec3 position, inout vec3 normal, inout vec2 uv) {
   ${vertexTransform}
 }
@@ -1279,7 +2276,7 @@ void main() {
    * @param {Object} config
    * @return {Object}
    */
-  function createFontProcessor(fontParser, sdfGenerator, config) {
+  function createFontProcessor(fontParser, sdfGenerator, bidi, config) {
 
     const {
       defaultFontURL
@@ -1314,6 +2311,8 @@ void main() {
 
     const INF = Infinity;
 
+    // Set of Unicode Default_Ignorable_Code_Point characters, these will not produce visible glyphs
+    const DEFAULT_IGNORABLE_CHARS = /[\u00AD\u034F\u061C\u115F-\u1160\u17B4-\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFF8]/;
 
     /**
      * Load a given font url
@@ -1416,6 +2415,7 @@ void main() {
         letterSpacing=0,
         lineHeight='normal',
         maxWidth=INF,
+        direction,
         textAlign='left',
         textIndent=0,
         whiteSpace='normal',
@@ -1483,6 +2483,7 @@ void main() {
         let lineXOffset = textIndent;
         let currentLine = new TextLine();
         const lines = [currentLine];
+
         fontObj.forEachGlyph(text, fontSize, letterSpacing, (glyphObj, glyphX, charIndex) => {
           const char = text.charAt(charIndex);
           const glyphWidth = glyphObj.advanceWidth * fontSizeMult;
@@ -1492,7 +2493,7 @@ void main() {
           // Calc isWhitespace and isEmpty once per glyphObj
           if (!('isEmpty' in glyphObj)) {
             glyphObj.isWhitespace = !!char && /\s/.test(char);
-            glyphObj.isEmpty = glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax;
+            glyphObj.isEmpty = glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax || DEFAULT_IGNORABLE_CHARS.test(char);
           }
           if (!glyphObj.isWhitespace && !glyphObj.isEmpty) {
             renderableGlyphCount++;
@@ -1593,6 +2594,9 @@ void main() {
         }
 
         if (!metricsOnly) {
+          // Resolve bidi levels
+          const bidiLevelsResult = bidi.getEmbeddingLevels(text, direction);
+
           // Process each line, applying alignment offsets, adding each glyph to the atlas, and
           // collecting all renderable glyphs into a single collection.
           glyphBounds = new Float32Array(renderableGlyphCount * 4);
@@ -1611,12 +2615,18 @@ void main() {
           let colorCharIndex = -1;
           let chunk;
           let currentColor;
-          lines.forEach(line => {
-            const {count:lineGlyphCount, width:lineWidth} = line;
+          lines.forEach((line, lineIndex) => {
+            let {count:lineGlyphCount, width:lineWidth} = line;
 
             // Ignore empty lines
             if (lineGlyphCount > 0) {
-              // Find x offset for horizontal alignment
+              // Count trailing whitespaces, we want to ignore these for certain things
+              let trailingWhitespaceCount = 0;
+              for (let i = lineGlyphCount; i-- && line.glyphAt(i).glyphObj.isWhitespace;) {
+                trailingWhitespaceCount++;
+              }
+
+              // Apply horizontal alignment adjustments
               let lineXOffset = 0;
               let justifyAdjust = 0;
               if (textAlign === 'center') {
@@ -1624,50 +2634,89 @@ void main() {
               } else if (textAlign === 'right') {
                 lineXOffset = maxLineWidth - lineWidth;
               } else if (textAlign === 'justify' && line.isSoftWrapped) {
-                // just count the non-trailing whitespace characters, and we'll adjust the offsets per
-                // character in the next loop
+                // count non-trailing whitespace characters, and we'll adjust the offsets per character in the next loop
                 let whitespaceCount = 0;
-                for (let i = lineGlyphCount; i--;) {
-                  if (!line.glyphAt(i).glyphObj.isWhitespace) {
-                    while (i--) {
-                      if (!line.glyphAt(i).glyphObj) {
-                        debugger
-                      }
-                      if (line.glyphAt(i).glyphObj.isWhitespace) {
-                        whitespaceCount++;
-                      }
-                    }
-                    break
+                for (let i = lineGlyphCount - trailingWhitespaceCount; i--;) {
+                  if (line.glyphAt(i).glyphObj.isWhitespace) {
+                    whitespaceCount++;
                   }
                 }
                 justifyAdjust = (maxLineWidth - lineWidth) / whitespaceCount;
               }
+              if (justifyAdjust || lineXOffset) {
+                let justifyOffset = 0;
+                for (let i = 0; i < lineGlyphCount; i++) {
+                  let glyphInfo = line.glyphAt(i);
+                  const glyphObj = glyphInfo.glyphObj;
+                  glyphInfo.x += lineXOffset + justifyOffset;
+                  // Expand non-trailing whitespaces for justify alignment
+                  if (justifyAdjust !== 0 && glyphObj.isWhitespace && i < lineGlyphCount - trailingWhitespaceCount) {
+                    justifyOffset += justifyAdjust;
+                    glyphInfo.width += justifyAdjust;
+                  }
+                }
+              }
 
+              // Perform bidi range flipping
+              const flips = bidi.getReorderSegments(
+                text, bidiLevelsResult, line.glyphAt(0).charIndex, line.glyphAt(line.count - 1).charIndex
+              );
+              for (let fi = 0; fi < flips.length; fi++) {
+                const [start, end] = flips[fi];
+                // Map start/end string indices to indices in the line
+                let left = Infinity, right = -Infinity;
+                for (let i = 0; i < lineGlyphCount; i++) {
+                  if (line.glyphAt(i).charIndex >= start) { // gte to handle removed characters
+                    let startInLine = i, endInLine = i;
+                    for (; endInLine < lineGlyphCount; endInLine++) {
+                      let info = line.glyphAt(endInLine);
+                      if (info.charIndex > end) {
+                        break
+                      }
+                      if (endInLine < lineGlyphCount - trailingWhitespaceCount) { //don't include trailing ws in flip width
+                        left = Math.min(left, info.x);
+                        right = Math.max(right, info.x + info.width);
+                      }
+                    }
+                    for (let j = startInLine; j < endInLine; j++) {
+                      const glyphInfo = line.glyphAt(j);
+                      glyphInfo.x = right - (glyphInfo.x + glyphInfo.width - left);
+                    }
+                    break
+                  }
+                }
+              }
+
+              // Assemble final data arrays
+              let glyphObj;
+              const setGlyphObj = g => glyphObj = g;
               for (let i = 0; i < lineGlyphCount; i++) {
-                const glyphInfo = line.glyphAt(i);
-                const glyphObj = glyphInfo.glyphObj;
+                let glyphInfo = line.glyphAt(i);
+                glyphObj = glyphInfo.glyphObj;
 
-                // Apply position adjustments
-                if (lineXOffset) glyphInfo.x += lineXOffset;
-
-                // Expand whitespaces for justify alignment
-                if (justifyAdjust !== 0 && glyphObj.isWhitespace) {
-                  lineXOffset += justifyAdjust;
-                  glyphInfo.width += justifyAdjust;
+                // Replace mirrored characters in rtl
+                const rtl = bidiLevelsResult.levels[glyphInfo.charIndex] & 1; //odd level means rtl
+                if (rtl) {
+                  const mirrored = bidi.getMirroredCharacter(text[glyphInfo.charIndex]);
+                  if (mirrored) {
+                    fontObj.forEachGlyph(mirrored, 0, 0, setGlyphObj);
+                  }
                 }
 
                 // Add caret positions
                 if (includeCaretPositions) {
                   const {charIndex} = glyphInfo;
-                  caretPositions[charIndex * 3] = glyphInfo.x + anchorXOffset; //left edge x
-                  caretPositions[charIndex * 3 + 1] = glyphInfo.x + glyphInfo.width + anchorXOffset; //right edge x
+                  const caretLeft = glyphInfo.x + anchorXOffset;
+                  const caretRight = glyphInfo.x + glyphInfo.width + anchorXOffset;
+                  caretPositions[charIndex * 3] = rtl ? caretRight : caretLeft; //start edge x
+                  caretPositions[charIndex * 3 + 1] = rtl ? caretLeft : caretRight; //end edge x
                   caretPositions[charIndex * 3 + 2] = lineYOffset + caretBottomOffset + anchorYOffset; //common bottom y
 
                   // If we skipped any chars from the previous glyph (due to ligature subs), copy the
                   // previous glyph's info to those missing char indices. In the future we may try to
                   // use the font's LigatureCaretList table to get interior caret positions.
                   while (charIndex - prevCharIndex > 1) {
-                    caretPositions[(prevCharIndex + 1) * 3] = caretPositions[prevCharIndex * 3 + 1];
+                    caretPositions[(prevCharIndex + 1) * 3] = caretPositions[prevCharIndex * 3];
                     caretPositions[(prevCharIndex + 1) * 3 + 1] = caretPositions[prevCharIndex * 3 + 1];
                     caretPositions[(prevCharIndex + 1) * 3 + 2] = caretPositions[prevCharIndex * 3 + 2];
                     prevCharIndex++;
@@ -1825,11 +2874,12 @@ void main() {
     function TextLine() {
       this.data = [];
     }
+    const textLineProps = ['glyphObj', 'x', 'width', 'charIndex'];
     TextLine.prototype = {
       width: 0,
       isSoftWrapped: false,
       get count() {
-        return Math.ceil(this.data.length / 4)
+        return Math.ceil(this.data.length / textLineProps.length)
       },
       glyphAt(i) {
         let fly = TextLine.flyweight;
@@ -1839,17 +2889,17 @@ void main() {
       },
       splitAt(i) {
         let newLine = new TextLine();
-        newLine.data = this.data.splice(i * 4);
+        newLine.data = this.data.splice(i * textLineProps.length);
         return newLine
       }
     };
-    TextLine.flyweight = ['glyphObj', 'x', 'width', 'charIndex'].reduce((obj, prop, i, all) => {
+    TextLine.flyweight = textLineProps.reduce((obj, prop, i, all) => {
       Object.defineProperty(obj, prop, {
         get() {
-          return this.data[this.index * 4 + i]
+          return this.data[this.index * textLineProps.length + i]
         },
         set(val) {
-          this.data[this.index * 4 + i] = val;
+          this.data[this.index * textLineProps.length + i] = val;
         }
       });
       return obj
@@ -1966,3199 +3016,20 @@ void main() {
     }
   }
 
-  // Custom bundle of Typr.js (https://github.com/photopea/Typr.js) for use in troika-3d-text. 
-  // Original MIT license applies: https://github.com/photopea/Typr.js/blob/gh-pages/LICENSE
-
-  function typrFactory() {
-
-  const window = self;
-
-  // Begin Typr.js
-
-
-  var Typr = {};
-
-  Typr.parse = function(buff)
-  {
-  	var bin = Typr._bin;
-  	var data = new Uint8Array(buff);
-  	
-  	var tag = bin.readASCII(data, 0, 4);  
-  	if(tag=="ttcf") {
-  		var offset = 4;
-  		var majV = bin.readUshort(data, offset);  offset+=2;
-  		var minV = bin.readUshort(data, offset);  offset+=2;
-  		var numF = bin.readUint  (data, offset);  offset+=4;
-  		var fnts = [];
-  		for(var i=0; i<numF; i++) {
-  			var foff = bin.readUint  (data, offset);  offset+=4;
-  			fnts.push(Typr._readFont(data, foff));
-  		}
-  		return fnts;
-  	}
-  	else return [Typr._readFont(data, 0)];
-  };
-
-  Typr._readFont = function(data, offset) {
-  	var bin = Typr._bin;
-  	var ooff = offset;
-  	
-  	var sfnt_version = bin.readFixed(data, offset);
-  	offset += 4;
-  	var numTables = bin.readUshort(data, offset);
-  	offset += 2;
-  	var searchRange = bin.readUshort(data, offset);
-  	offset += 2;
-  	var entrySelector = bin.readUshort(data, offset);
-  	offset += 2;
-  	var rangeShift = bin.readUshort(data, offset);
-  	offset += 2;
-  	
-  	var tags = [
-  		"cmap",
-  		"head",
-  		"hhea",
-  		"maxp",
-  		"hmtx",
-  		"name",
-  		"OS/2",
-  		"post",
-  		
-  		//"cvt",
-  		//"fpgm",
-  		"loca",
-  		"glyf",
-  		"kern",
-  		
-  		//"prep"
-  		//"gasp"
-  		
-  		"CFF ",
-  		
-  		
-  		"GPOS",
-  		"GSUB",
-  		
-  		"SVG "
-  		//"VORG",
-  		];
-  	
-  	var obj = {_data:data, _offset:ooff};
-  	//console.log(sfnt_version, numTables, searchRange, entrySelector, rangeShift);
-  	
-  	var tabs = {};
-  	
-  	for(var i=0; i<numTables; i++)
-  	{
-  		var tag = bin.readASCII(data, offset, 4);   offset += 4;
-  		var checkSum = bin.readUint(data, offset);  offset += 4;
-  		var toffset = bin.readUint(data, offset);   offset += 4;
-  		var length = bin.readUint(data, offset);    offset += 4;
-  		tabs[tag] = {offset:toffset, length:length};
-  		
-  		//if(tags.indexOf(tag)==-1) console.log("unknown tag", tag, length);
-  	}
-  	
-  	for(var i=0; i< tags.length; i++)
-  	{
-  		var t = tags[i];
-  		//console.log(t);
-  		//if(tabs[t]) console.log(t, tabs[t].offset, tabs[t].length);
-  		if(tabs[t]) obj[t.trim()] = Typr[t.trim()].parse(data, tabs[t].offset, tabs[t].length, obj);
-  	}
-  	
-  	return obj;
-  };
-
-  Typr._tabOffset = function(data, tab, foff)
-  {
-  	var bin = Typr._bin;
-  	var numTables = bin.readUshort(data, foff+4);
-  	var offset = foff+12;
-  	for(var i=0; i<numTables; i++)
-  	{
-  		var tag = bin.readASCII(data, offset, 4);   offset += 4;
-  		var checkSum = bin.readUint(data, offset);  offset += 4;
-  		var toffset = bin.readUint(data, offset);   offset += 4;
-  		var length = bin.readUint(data, offset);    offset += 4;
-  		if(tag==tab) return toffset;
-  	}
-  	return 0;
-  };
-
-
-
-
-
-  Typr._bin = {
-  	readFixed : function(data, o)
-  	{
-  		return ((data[o]<<8) | data[o+1]) +  (((data[o+2]<<8)|data[o+3])/(256*256+4));
-  	},
-  	readF2dot14 : function(data, o)
-  	{
-  		var num = Typr._bin.readShort(data, o);
-  		return num / 16384;
-  	},
-  	readInt : function(buff, p)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		var a = Typr._bin.t.uint8;
-  		a[0] = buff[p+3];
-  		a[1] = buff[p+2];
-  		a[2] = buff[p+1];
-  		a[3] = buff[p];
-  		return Typr._bin.t.int32[0];
-  	},
-  	
-  	readInt8 : function(buff, p)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		var a = Typr._bin.t.uint8;
-  		a[0] = buff[p];
-  		return Typr._bin.t.int8[0];
-  	},
-  	readShort : function(buff, p)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		var a = Typr._bin.t.uint8;
-  		a[1] = buff[p]; a[0] = buff[p+1];
-  		return Typr._bin.t.int16[0];
-  	},
-  	readUshort : function(buff, p)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		return (buff[p]<<8) | buff[p+1];
-  	},
-  	readUshorts : function(buff, p, len)
-  	{
-  		var arr = [];
-  		for(var i=0; i<len; i++) arr.push(Typr._bin.readUshort(buff, p+i*2));
-  		return arr;
-  	},
-  	readUint : function(buff, p)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		var a = Typr._bin.t.uint8;
-  		a[3] = buff[p];  a[2] = buff[p+1];  a[1] = buff[p+2];  a[0] = buff[p+3];
-  		return Typr._bin.t.uint32[0];
-  	},
-  	readUint64 : function(buff, p)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		return (Typr._bin.readUint(buff, p)*(0xffffffff+1)) + Typr._bin.readUint(buff, p+4);
-  	},
-  	readASCII : function(buff, p, l)	// l : length in Characters (not Bytes)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		var s = "";
-  		for(var i = 0; i < l; i++) s += String.fromCharCode(buff[p+i]);
-  		return s;
-  	},
-  	readUnicode : function(buff, p, l)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		var s = "";
-  		for(var i = 0; i < l; i++)	
-  		{
-  			var c = (buff[p++]<<8) | buff[p++];
-  			s += String.fromCharCode(c);
-  		}
-  		return s;
-  	},
-  	_tdec : window["TextDecoder"] ? new window["TextDecoder"]() : null,
-  	readUTF8 : function(buff, p, l) {
-  		var tdec = Typr._bin._tdec;
-  		if(tdec && p==0 && l==buff.length) return tdec["decode"](buff);
-  		return Typr._bin.readASCII(buff,p,l);
-  	},
-  	readBytes : function(buff, p, l)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		var arr = [];
-  		for(var i=0; i<l; i++) arr.push(buff[p+i]);
-  		return arr;
-  	},
-  	readASCIIArray : function(buff, p, l)	// l : length in Characters (not Bytes)
-  	{
-  		//if(p>=buff.length) throw "error";
-  		var s = [];
-  		for(var i = 0; i < l; i++)	
-  			s.push(String.fromCharCode(buff[p+i]));
-  		return s;
-  	}
-  };
-
-  Typr._bin.t = {
-  	buff: new ArrayBuffer(8),
-  };
-  Typr._bin.t.int8   = new Int8Array  (Typr._bin.t.buff);
-  Typr._bin.t.uint8  = new Uint8Array (Typr._bin.t.buff);
-  Typr._bin.t.int16  = new Int16Array (Typr._bin.t.buff);
-  Typr._bin.t.uint16 = new Uint16Array(Typr._bin.t.buff);
-  Typr._bin.t.int32  = new Int32Array (Typr._bin.t.buff);
-  Typr._bin.t.uint32 = new Uint32Array(Typr._bin.t.buff);
-
-
-
-
-
-  // OpenType Layout Common Table Formats
-
-  Typr._lctf = {};
-
-  Typr._lctf.parse = function(data, offset, length, font, subt)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	var offset0 = offset;
-  	var tableVersion = bin.readFixed(data, offset);  offset += 4;
-  	
-  	var offScriptList  = bin.readUshort(data, offset);  offset += 2;
-  	var offFeatureList = bin.readUshort(data, offset);  offset += 2;
-  	var offLookupList  = bin.readUshort(data, offset);  offset += 2;
-  	
-  	
-  	obj.scriptList  = Typr._lctf.readScriptList (data, offset0 + offScriptList);
-  	obj.featureList = Typr._lctf.readFeatureList(data, offset0 + offFeatureList);
-  	obj.lookupList  = Typr._lctf.readLookupList (data, offset0 + offLookupList, subt);
-  	
-  	return obj;
-  };
-
-  Typr._lctf.readLookupList = function(data, offset, subt)
-  {
-  	var bin = Typr._bin;
-  	var offset0 = offset;
-  	var obj = [];
-  	var count = bin.readUshort(data, offset);  offset+=2;
-  	for(var i=0; i<count; i++) 
-  	{
-  		var noff = bin.readUshort(data, offset);  offset+=2;
-  		var lut = Typr._lctf.readLookupTable(data, offset0 + noff, subt);
-  		obj.push(lut);
-  	}
-  	return obj;
-  };
-
-  Typr._lctf.readLookupTable = function(data, offset, subt)
-  {
-  	//console.log("Parsing lookup table", offset);
-  	var bin = Typr._bin;
-  	var offset0 = offset;
-  	var obj = {tabs:[]};
-  	
-  	obj.ltype = bin.readUshort(data, offset);  offset+=2;
-  	obj.flag  = bin.readUshort(data, offset);  offset+=2;
-  	var cnt   = bin.readUshort(data, offset);  offset+=2;
-  	
-  	for(var i=0; i<cnt; i++)
-  	{
-  		var noff = bin.readUshort(data, offset);  offset+=2;
-  		var tab = subt(data, obj.ltype, offset0 + noff);
-  		//console.log(obj.type, tab);
-  		obj.tabs.push(tab);
-  	}
-  	return obj;
-  };
-
-  Typr._lctf.numOfOnes = function(n)
-  {
-  	var num = 0;
-  	for(var i=0; i<32; i++) if(((n>>>i)&1) != 0) num++;
-  	return num;
-  };
-
-  Typr._lctf.readClassDef = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var obj = [];
-  	var format = bin.readUshort(data, offset);  offset+=2;
-  	if(format==1) 
-  	{
-  		var startGlyph  = bin.readUshort(data, offset);  offset+=2;
-  		var glyphCount  = bin.readUshort(data, offset);  offset+=2;
-  		for(var i=0; i<glyphCount; i++)
-  		{
-  			obj.push(startGlyph+i);
-  			obj.push(startGlyph+i);
-  			obj.push(bin.readUshort(data, offset));  offset+=2;
-  		}
-  	}
-  	if(format==2)
-  	{
-  		var count = bin.readUshort(data, offset);  offset+=2;
-  		for(var i=0; i<count; i++)
-  		{
-  			obj.push(bin.readUshort(data, offset));  offset+=2;
-  			obj.push(bin.readUshort(data, offset));  offset+=2;
-  			obj.push(bin.readUshort(data, offset));  offset+=2;
-  		}
-  	}
-  	return obj;
-  };
-  Typr._lctf.getInterval = function(tab, val)
-  {
-  	for(var i=0; i<tab.length; i+=3)
-  	{
-  		var start = tab[i], end = tab[i+1], index = tab[i+2];
-  		if(start<=val && val<=end) return i;
-  	}
-  	return -1;
-  };
-
-
-  Typr._lctf.readCoverage = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var cvg = {};
-  	cvg.fmt   = bin.readUshort(data, offset);  offset+=2;
-  	var count = bin.readUshort(data, offset);  offset+=2;
-  	//console.log("parsing coverage", offset-4, format, count);
-  	if(cvg.fmt==1) cvg.tab = bin.readUshorts(data, offset, count); 
-  	if(cvg.fmt==2) cvg.tab = bin.readUshorts(data, offset, count*3);
-  	return cvg;
-  };
-
-  Typr._lctf.coverageIndex = function(cvg, val)
-  {
-  	var tab = cvg.tab;
-  	if(cvg.fmt==1) return tab.indexOf(val);
-  	if(cvg.fmt==2) {
-  		var ind = Typr._lctf.getInterval(tab, val);
-  		if(ind!=-1) return tab[ind+2] + (val - tab[ind]);
-  	}
-  	return -1;
-  };
-
-  Typr._lctf.readFeatureList = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var offset0 = offset;
-  	var obj = [];
-  	
-  	var count = bin.readUshort(data, offset);  offset+=2;
-  	
-  	for(var i=0; i<count; i++)
-  	{
-  		var tag = bin.readASCII(data, offset, 4);  offset+=4;
-  		var noff = bin.readUshort(data, offset);  offset+=2;
-  		obj.push({tag: tag.trim(), tab:Typr._lctf.readFeatureTable(data, offset0 + noff)});
-  	}
-  	return obj;
-  };
-
-  Typr._lctf.readFeatureTable = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	
-  	var featureParams = bin.readUshort(data, offset);  offset+=2;	// = 0
-  	var lookupCount = bin.readUshort(data, offset);  offset+=2;
-  	
-  	var indices = [];
-  	for(var i=0; i<lookupCount; i++) indices.push(bin.readUshort(data, offset+2*i));
-  	return indices;
-  };
-
-
-  Typr._lctf.readScriptList = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var offset0 = offset;
-  	var obj = {};
-  	
-  	var count = bin.readUshort(data, offset);  offset+=2;
-  	
-  	for(var i=0; i<count; i++)
-  	{
-  		var tag = bin.readASCII(data, offset, 4);  offset+=4;
-  		var noff = bin.readUshort(data, offset);  offset+=2;
-  		obj[tag.trim()] = Typr._lctf.readScriptTable(data, offset0 + noff);
-  	}
-  	return obj;
-  };
-
-  Typr._lctf.readScriptTable = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var offset0 = offset;
-  	var obj = {};
-  	
-  	var defLangSysOff = bin.readUshort(data, offset);  offset+=2;
-  	obj.default = Typr._lctf.readLangSysTable(data, offset0 + defLangSysOff);
-  	
-  	var langSysCount = bin.readUshort(data, offset);  offset+=2;
-  	
-  	for(var i=0; i<langSysCount; i++)
-  	{
-  		var tag = bin.readASCII(data, offset, 4);  offset+=4;
-  		var langSysOff = bin.readUshort(data, offset);  offset+=2;
-  		obj[tag.trim()] = Typr._lctf.readLangSysTable(data, offset0 + langSysOff);
-  	}
-  	return obj;
-  };
-
-  Typr._lctf.readLangSysTable = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	
-  	var lookupOrder = bin.readUshort(data, offset);  offset+=2;
-  	//if(lookupOrder!=0)  throw "lookupOrder not 0";
-  	obj.reqFeature = bin.readUshort(data, offset);  offset+=2;
-  	//if(obj.reqFeature != 0xffff) throw "reqFeatureIndex != 0xffff";
-  	
-  	//console.log(lookupOrder, obj.reqFeature);
-  	
-  	var featureCount = bin.readUshort(data, offset);  offset+=2;
-  	obj.features = bin.readUshorts(data, offset, featureCount);
-  	return obj;
-  };
-
-  	Typr.CFF = {};
-  	Typr.CFF.parse = function(data, offset, length)
-  	{
-  		var bin = Typr._bin;
-  		
-  		data = new Uint8Array(data.buffer, offset, length);
-  		offset = 0;
-  		
-  		// Header
-  		var major = data[offset];  offset++;
-  		var minor = data[offset];  offset++;
-  		var hdrSize = data[offset];  offset++;
-  		var offsize = data[offset];  offset++;
-  		//console.log(major, minor, hdrSize, offsize);
-  		
-  		// Name INDEX
-  		var ninds = [];
-  		offset = Typr.CFF.readIndex(data, offset, ninds);
-  		var names = [];
-  		
-  		for(var i=0; i<ninds.length-1; i++) names.push(bin.readASCII(data, offset+ninds[i], ninds[i+1]-ninds[i]));
-  		offset += ninds[ninds.length-1];
-  		
-  		
-  		// Top DICT INDEX
-  		var tdinds = [];
-  		offset = Typr.CFF.readIndex(data, offset, tdinds);  //console.log(tdinds);
-  		// Top DICT Data
-  		var topDicts = [];
-  		for(var i=0; i<tdinds.length-1; i++) topDicts.push( Typr.CFF.readDict(data, offset+tdinds[i], offset+tdinds[i+1]) );
-  		offset += tdinds[tdinds.length-1];
-  		var topdict = topDicts[0];
-  		//console.log(topdict);
-  		
-  		// String INDEX
-  		var sinds = [];
-  		offset = Typr.CFF.readIndex(data, offset, sinds);
-  		// String Data
-  		var strings = [];
-  		for(var i=0; i<sinds.length-1; i++) strings.push(bin.readASCII(data, offset+sinds[i], sinds[i+1]-sinds[i]));
-  		offset += sinds[sinds.length-1];
-  		
-  		// Global Subr INDEX  (subroutines)		
-  		Typr.CFF.readSubrs(data, offset, topdict);
-  		
-  		// charstrings
-  		if(topdict.CharStrings)
-  		{
-  			offset = topdict.CharStrings;
-  			var sinds = [];
-  			offset = Typr.CFF.readIndex(data, offset, sinds);
-  			
-  			var cstr = [];
-  			for(var i=0; i<sinds.length-1; i++) cstr.push(bin.readBytes(data, offset+sinds[i], sinds[i+1]-sinds[i]));
-  			//offset += sinds[sinds.length-1];
-  			topdict.CharStrings = cstr;
-  			//console.log(topdict.CharStrings);
-  		}
-  		
-  		// CID font
-  		if(topdict.ROS) {
-  			offset = topdict.FDArray;
-  			var fdind = [];
-  			offset = Typr.CFF.readIndex(data, offset, fdind);
-  			
-  			topdict.FDArray = [];
-  			for(var i=0; i<fdind.length-1; i++) {
-  				var dict = Typr.CFF.readDict(data, offset+fdind[i], offset+fdind[i+1]);
-  				Typr.CFF._readFDict(data, dict, strings);
-  				topdict.FDArray.push( dict );
-  			}
-  			offset += fdind[fdind.length-1];
-  			
-  			offset = topdict.FDSelect;
-  			topdict.FDSelect = [];
-  			var fmt = data[offset];  offset++;
-  			if(fmt==3) {
-  				var rns = bin.readUshort(data, offset);  offset+=2;
-  				for(var i=0; i<rns+1; i++) {
-  					topdict.FDSelect.push(bin.readUshort(data, offset), data[offset+2]);  offset+=3;
-  				}
-  			}
-  			else throw fmt;
-  		}
-  		
-  		// Encoding
-  		if(topdict.Encoding) topdict.Encoding = Typr.CFF.readEncoding(data, topdict.Encoding, topdict.CharStrings.length);
-  		
-  		// charset
-  		if(topdict.charset ) topdict.charset  = Typr.CFF.readCharset (data, topdict.charset , topdict.CharStrings.length);
-  		
-  		Typr.CFF._readFDict(data, topdict, strings);
-  		return topdict;
-  	};
-  	Typr.CFF._readFDict = function(data, dict, ss) {
-  		var offset;
-  		if(dict.Private) {
-  			offset = dict.Private[1];
-  			dict.Private = Typr.CFF.readDict(data, offset, offset+dict.Private[0]);
-  			if(dict.Private.Subrs)  Typr.CFF.readSubrs(data, offset+dict.Private.Subrs, dict.Private);
-  		}
-  		for(var p in dict) if(["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(p)!=-1)  dict[p]=ss[dict[p] -426 + 35];
-  	};
-  	
-  	Typr.CFF.readSubrs = function(data, offset, obj)
-  	{
-  		var bin = Typr._bin;
-  		var gsubinds = [];
-  		offset = Typr.CFF.readIndex(data, offset, gsubinds);
-  		
-  		var bias, nSubrs = gsubinds.length;
-  		if (nSubrs <  1240) bias = 107;
-  		else if (nSubrs < 33900) bias = 1131;
-  		else bias = 32768;
-  		obj.Bias = bias;
-  		
-  		obj.Subrs = [];
-  		for(var i=0; i<gsubinds.length-1; i++) obj.Subrs.push(bin.readBytes(data, offset+gsubinds[i], gsubinds[i+1]-gsubinds[i]));
-  		//offset += gsubinds[gsubinds.length-1];
-  	};
-  	
-  	Typr.CFF.tableSE = [
-        0,   0,   0,   0,   0,   0,   0,   0,
-        0,   0,   0,   0,   0,   0,   0,   0,
-        0,   0,   0,   0,   0,   0,   0,   0,
-        0,   0,   0,   0,   0,   0,   0,   0,
-        1,   2,   3,   4,   5,   6,   7,   8,
-        9,  10,  11,  12,  13,  14,  15,  16,
-       17,  18,  19,  20,  21,  22,  23,  24,
-       25,  26,  27,  28,  29,  30,  31,  32,
-       33,  34,  35,  36,  37,  38,  39,  40,
-       41,  42,  43,  44,  45,  46,  47,  48,
-       49,  50,  51,  52,  53,  54,  55,  56,
-       57,  58,  59,  60,  61,  62,  63,  64,
-       65,  66,  67,  68,  69,  70,  71,  72,
-       73,  74,  75,  76,  77,  78,  79,  80,
-       81,  82,  83,  84,  85,  86,  87,  88,
-       89,  90,  91,  92,  93,  94,  95,   0,
-        0,   0,   0,   0,   0,   0,   0,   0,
-        0,   0,   0,   0,   0,   0,   0,   0,
-        0,   0,   0,   0,   0,   0,   0,   0,
-        0,   0,   0,   0,   0,   0,   0,   0,
-        0,  96,  97,  98,  99, 100, 101, 102,
-      103, 104, 105, 106, 107, 108, 109, 110,
-        0, 111, 112, 113, 114,   0, 115, 116,
-      117, 118, 119, 120, 121, 122,   0, 123,
-        0, 124, 125, 126, 127, 128, 129, 130,
-      131,   0, 132, 133,   0, 134, 135, 136,
-      137,   0,   0,   0,   0,   0,   0,   0,
-        0,   0,   0,   0,   0,   0,   0,   0,
-        0, 138,   0, 139,   0,   0,   0,   0,
-      140, 141, 142, 143,   0,   0,   0,   0,
-        0, 144,   0,   0,   0, 145,   0,   0,
-      146, 147, 148, 149,   0,   0,   0,   0
-    ];
-    
-  	Typr.CFF.glyphByUnicode = function(cff, code)
-  	{
-  		for(var i=0; i<cff.charset.length; i++) if(cff.charset[i]==code) return i;
-  		return -1;
-  	};
-  	
-  	Typr.CFF.glyphBySE = function(cff, charcode)	// glyph by standard encoding
-  	{
-  		if ( charcode < 0 || charcode > 255 ) return -1;
-  		return Typr.CFF.glyphByUnicode(cff, Typr.CFF.tableSE[charcode]);		
-  	};
-  	
-  	Typr.CFF.readEncoding = function(data, offset, num)
-  	{
-  		var bin = Typr._bin;
-  		
-  		var array = ['.notdef'];
-  		var format = data[offset];  offset++;
-  		//console.log("Encoding");
-  		//console.log(format);
-  		
-  		if(format==0)
-  		{
-  			var nCodes = data[offset];  offset++;
-  			for(var i=0; i<nCodes; i++)  array.push(data[offset+i]);
-  		}
-  		/*
-  		else if(format==1 || format==2)
-  		{
-  			while(charset.length<num)
-  			{
-  				var first = bin.readUshort(data, offset);  offset+=2;
-  				var nLeft=0;
-  				if(format==1) {  nLeft = data[offset];  offset++;  }
-  				else          {  nLeft = bin.readUshort(data, offset);  offset+=2;  }
-  				for(var i=0; i<=nLeft; i++)  {  charset.push(first);  first++;  }
-  			}
-  		}
-  		*/
-  		else throw "error: unknown encoding format: " + format;
-  		
-  		return array;
-  	};
-
-  	Typr.CFF.readCharset = function(data, offset, num)
-  	{
-  		var bin = Typr._bin;
-  		
-  		var charset = ['.notdef'];
-  		var format = data[offset];  offset++;
-  		
-  		if(format==0)
-  		{
-  			for(var i=0; i<num; i++) 
-  			{
-  				var first = bin.readUshort(data, offset);  offset+=2;
-  				charset.push(first);
-  			}
-  		}
-  		else if(format==1 || format==2)
-  		{
-  			while(charset.length<num)
-  			{
-  				var first = bin.readUshort(data, offset);  offset+=2;
-  				var nLeft=0;
-  				if(format==1) {  nLeft = data[offset];  offset++;  }
-  				else          {  nLeft = bin.readUshort(data, offset);  offset+=2;  }
-  				for(var i=0; i<=nLeft; i++)  {  charset.push(first);  first++;  }
-  			}
-  		}
-  		else throw "error: format: " + format;
-  		
-  		return charset;
-  	};
-
-  	Typr.CFF.readIndex = function(data, offset, inds)
-  	{
-  		var bin = Typr._bin;
-  		
-  		var count = bin.readUshort(data, offset)+1;  offset+=2;
-  		var offsize = data[offset];  offset++;
-  		
-  		if     (offsize==1) for(var i=0; i<count; i++) inds.push( data[offset+i] );
-  		else if(offsize==2) for(var i=0; i<count; i++) inds.push( bin.readUshort(data, offset+i*2) );
-  		else if(offsize==3) for(var i=0; i<count; i++) inds.push( bin.readUint  (data, offset+i*3 - 1) & 0x00ffffff );
-  		else if(count!=1) throw "unsupported offset size: " + offsize + ", count: " + count;
-  		
-  		offset += count*offsize;
-  		return offset-1;
-  	};
-  	
-  	Typr.CFF.getCharString = function(data, offset, o)
-  	{
-  		var bin = Typr._bin;
-  		
-  		var b0 = data[offset], b1 = data[offset+1], b2 = data[offset+2], b3 = data[offset+3], b4=data[offset+4];
-  		var vs = 1;
-  		var op=null, val=null;
-  		// operand
-  		if(b0<=20) { op = b0;  vs=1;  }
-  		if(b0==12) { op = b0*100+b1;  vs=2;  }
-  		//if(b0==19 || b0==20) { op = b0/*+" "+b1*/;  vs=2; }
-  		if(21 <=b0 && b0<= 27) { op = b0;  vs=1; }
-  		if(b0==28) { val = bin.readShort(data,offset+1);  vs=3; }
-  		if(29 <=b0 && b0<= 31) { op = b0;  vs=1; }
-  		if(32 <=b0 && b0<=246) { val = b0-139;  vs=1; }
-  		if(247<=b0 && b0<=250) { val = (b0-247)*256+b1+108;  vs=2; }
-  		if(251<=b0 && b0<=254) { val =-(b0-251)*256-b1-108;  vs=2; }
-  		if(b0==255) {  val = bin.readInt(data, offset+1)/0xffff;  vs=5;   }
-  		
-  		o.val = val!=null ? val : "o"+op;
-  		o.size = vs;
-  	};
-  	
-  	Typr.CFF.readCharString = function(data, offset, length)
-  	{
-  		var end = offset + length;
-  		var bin = Typr._bin;
-  		var arr = [];
-  		
-  		while(offset<end)
-  		{
-  			var b0 = data[offset], b1 = data[offset+1], b2 = data[offset+2], b3 = data[offset+3], b4=data[offset+4];
-  			var vs = 1;
-  			var op=null, val=null;
-  			// operand
-  			if(b0<=20) { op = b0;  vs=1;  }
-  			if(b0==12) { op = b0*100+b1;  vs=2;  }
-  			if(b0==19 || b0==20) { op = b0/*+" "+b1*/;  vs=2; }
-  			if(21 <=b0 && b0<= 27) { op = b0;  vs=1; }
-  			if(b0==28) { val = bin.readShort(data,offset+1);  vs=3; }
-  			if(29 <=b0 && b0<= 31) { op = b0;  vs=1; }
-  			if(32 <=b0 && b0<=246) { val = b0-139;  vs=1; }
-  			if(247<=b0 && b0<=250) { val = (b0-247)*256+b1+108;  vs=2; }
-  			if(251<=b0 && b0<=254) { val =-(b0-251)*256-b1-108;  vs=2; }
-  			if(b0==255) {  val = bin.readInt(data, offset+1)/0xffff;  vs=5;   }
-  			
-  			arr.push(val!=null ? val : "o"+op);
-  			offset += vs;	
-
-  			//var cv = arr[arr.length-1];
-  			//if(cv==undefined) throw "error";
-  			//console.log()
-  		}	
-  		return arr;
-  	};
-
-  	Typr.CFF.readDict = function(data, offset, end)
-  	{
-  		var bin = Typr._bin;
-  		//var dict = [];
-  		var dict = {};
-  		var carr = [];
-  		
-  		while(offset<end)
-  		{
-  			var b0 = data[offset], b1 = data[offset+1], b2 = data[offset+2], b3 = data[offset+3], b4=data[offset+4];
-  			var vs = 1;
-  			var key=null, val=null;
-  			// operand
-  			if(b0==28) { val = bin.readShort(data,offset+1);  vs=3; }
-  			if(b0==29) { val = bin.readInt  (data,offset+1);  vs=5; }
-  			if(32 <=b0 && b0<=246) { val = b0-139;  vs=1; }
-  			if(247<=b0 && b0<=250) { val = (b0-247)*256+b1+108;  vs=2; }
-  			if(251<=b0 && b0<=254) { val =-(b0-251)*256-b1-108;  vs=2; }
-  			if(b0==255) {  val = bin.readInt(data, offset+1)/0xffff;  vs=5;  throw "unknown number";  }
-  			
-  			if(b0==30) 
-  			{  
-  				var nibs = [];
-  				vs = 1;
-  				while(true)
-  				{
-  					var b = data[offset+vs];  vs++;
-  					var nib0 = b>>4, nib1 = b&0xf;
-  					if(nib0 != 0xf) nibs.push(nib0);  if(nib1!=0xf) nibs.push(nib1);
-  					if(nib1==0xf) break;
-  				}
-  				var s = "";
-  				var chars = [0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"];
-  				for(var i=0; i<nibs.length; i++) s += chars[nibs[i]];
-  				//console.log(nibs);
-  				val = parseFloat(s);
-  			}
-  			
-  			if(b0<=21)	// operator
-  			{
-  				var keys = ["version", "Notice", "FullName", "FamilyName", "Weight", "FontBBox", "BlueValues", "OtherBlues", "FamilyBlues","FamilyOtherBlues",
-  					"StdHW", "StdVW", "escape", "UniqueID", "XUID", "charset", "Encoding", "CharStrings", "Private", "Subrs", 
-  					"defaultWidthX", "nominalWidthX"];
-  					
-  				key = keys[b0];  vs=1;
-  				if(b0==12) { 
-  					var keys = [ "Copyright", "isFixedPitch", "ItalicAngle", "UnderlinePosition", "UnderlineThickness", "PaintType", "CharstringType", "FontMatrix", "StrokeWidth", "BlueScale",
-  					"BlueShift", "BlueFuzz", "StemSnapH", "StemSnapV", "ForceBold", 0,0, "LanguageGroup", "ExpansionFactor", "initialRandomSeed",
-  					"SyntheticBase", "PostScript", "BaseFontName", "BaseFontBlend", 0,0,0,0,0,0, 
-  					"ROS", "CIDFontVersion", "CIDFontRevision", "CIDFontType", "CIDCount", "UIDBase", "FDArray", "FDSelect", "FontName"];
-  					key = keys[b1];  vs=2; 
-  				}
-  			}
-  			
-  			if(key!=null) {  dict[key] = carr.length==1 ? carr[0] : carr;  carr=[]; }
-  			else  carr.push(val);  
-  			
-  			offset += vs;		
-  		}	
-  		return dict;
-  	};
-
-
-  Typr.cmap = {};
-  Typr.cmap.parse = function(data, offset, length)
-  {
-  	data = new Uint8Array(data.buffer, offset, length);
-  	offset = 0;
-  	var bin = Typr._bin;
-  	var obj = {};
-  	var version   = bin.readUshort(data, offset);  offset += 2;
-  	var numTables = bin.readUshort(data, offset);  offset += 2;
-  	
-  	//console.log(version, numTables);
-  	
-  	var offs = [];
-  	obj.tables = [];
-  	
-  	
-  	for(var i=0; i<numTables; i++)
-  	{
-  		var platformID = bin.readUshort(data, offset);  offset += 2;
-  		var encodingID = bin.readUshort(data, offset);  offset += 2;
-  		var noffset = bin.readUint(data, offset);       offset += 4;
-  		
-  		var id = "p"+platformID+"e"+encodingID;
-  		
-  		//console.log("cmap subtable", platformID, encodingID, noffset);
-  		
-  		
-  		var tind = offs.indexOf(noffset);
-  		
-  		if(tind==-1)
-  		{
-  			tind = obj.tables.length;
-  			var subt;
-  			offs.push(noffset);
-  			var format = bin.readUshort(data, noffset);
-  			if     (format== 0) subt = Typr.cmap.parse0(data, noffset);
-  			else if(format== 4) subt = Typr.cmap.parse4(data, noffset);
-  			else if(format== 6) subt = Typr.cmap.parse6(data, noffset);
-  			else if(format==12) subt = Typr.cmap.parse12(data,noffset);
-  			else console.log("unknown format: "+format, platformID, encodingID, noffset);
-  			obj.tables.push(subt);
-  		}
-  		
-  		if(obj[id]!=null) throw "multiple tables for one platform+encoding";
-  		obj[id] = tind;
-  	}
-  	return obj;
-  };
-
-  Typr.cmap.parse0 = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	obj.format = bin.readUshort(data, offset);  offset += 2;
-  	var len    = bin.readUshort(data, offset);  offset += 2;
-  	var lang   = bin.readUshort(data, offset);  offset += 2;
-  	obj.map = [];
-  	for(var i=0; i<len-6; i++) obj.map.push(data[offset+i]);
-  	return obj;
-  };
-
-  Typr.cmap.parse4 = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var offset0 = offset;
-  	var obj = {};
-  	
-  	obj.format = bin.readUshort(data, offset);  offset+=2;
-  	var length = bin.readUshort(data, offset);  offset+=2;
-  	var language = bin.readUshort(data, offset);  offset+=2;
-  	var segCountX2 = bin.readUshort(data, offset);  offset+=2;
-  	var segCount = segCountX2/2;
-  	obj.searchRange = bin.readUshort(data, offset);  offset+=2;
-  	obj.entrySelector = bin.readUshort(data, offset);  offset+=2;
-  	obj.rangeShift = bin.readUshort(data, offset);  offset+=2;
-  	obj.endCount   = bin.readUshorts(data, offset, segCount);  offset += segCount*2;
-  	offset+=2;
-  	obj.startCount = bin.readUshorts(data, offset, segCount);  offset += segCount*2;
-  	obj.idDelta = [];
-  	for(var i=0; i<segCount; i++) {obj.idDelta.push(bin.readShort(data, offset));  offset+=2;}
-  	obj.idRangeOffset = bin.readUshorts(data, offset, segCount);  offset += segCount*2;
-  	obj.glyphIdArray = [];
-  	while(offset< offset0+length) {obj.glyphIdArray.push(bin.readUshort(data, offset));  offset+=2;}
-  	return obj;
-  };
-
-  Typr.cmap.parse6 = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	
-  	obj.format = bin.readUshort(data, offset);  offset+=2;
-  	var length = bin.readUshort(data, offset);  offset+=2;
-  	var language = bin.readUshort(data, offset);  offset+=2;
-  	obj.firstCode = bin.readUshort(data, offset);  offset+=2;
-  	var entryCount = bin.readUshort(data, offset);  offset+=2;
-  	obj.glyphIdArray = [];
-  	for(var i=0; i<entryCount; i++) {obj.glyphIdArray.push(bin.readUshort(data, offset));  offset+=2;}
-  	
-  	return obj;
-  };
-
-  Typr.cmap.parse12 = function(data, offset)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	
-  	obj.format = bin.readUshort(data, offset);  offset+=2;
-  	offset += 2;
-  	var length = bin.readUint(data, offset);  offset+=4;
-  	var lang   = bin.readUint(data, offset);  offset+=4;
-  	var nGroups= bin.readUint(data, offset);  offset+=4;
-  	obj.groups = [];
-  	
-  	for(var i=0; i<nGroups; i++)  
-  	{
-  		var off = offset + i * 12;
-  		var startCharCode = bin.readUint(data, off+0);
-  		var endCharCode   = bin.readUint(data, off+4);
-  		var startGlyphID  = bin.readUint(data, off+8);
-  		obj.groups.push([  startCharCode, endCharCode, startGlyphID  ]);
-  	}
-  	return obj;
-  };
-
-  Typr.glyf = {};
-  Typr.glyf.parse = function(data, offset, length, font)
-  {
-  	var obj = [];
-  	for(var g=0; g<font.maxp.numGlyphs; g++) obj.push(null);
-  	return obj;
-  };
-
-  Typr.glyf._parseGlyf = function(font, g)
-  {
-  	var bin = Typr._bin;
-  	var data = font._data;
-  	
-  	var offset = Typr._tabOffset(data, "glyf", font._offset) + font.loca[g];
-  		
-  	if(font.loca[g]==font.loca[g+1]) return null;
-  		
-  	var gl = {};
-  		
-  	gl.noc  = bin.readShort(data, offset);  offset+=2;		// number of contours
-  	gl.xMin = bin.readShort(data, offset);  offset+=2;
-  	gl.yMin = bin.readShort(data, offset);  offset+=2;
-  	gl.xMax = bin.readShort(data, offset);  offset+=2;
-  	gl.yMax = bin.readShort(data, offset);  offset+=2;
-  	
-  	if(gl.xMin>=gl.xMax || gl.yMin>=gl.yMax) return null;
-  		
-  	if(gl.noc>0)
-  	{
-  		gl.endPts = [];
-  		for(var i=0; i<gl.noc; i++) { gl.endPts.push(bin.readUshort(data,offset)); offset+=2; }
-  		
-  		var instructionLength = bin.readUshort(data,offset); offset+=2;
-  		if((data.length-offset)<instructionLength) return null;
-  		gl.instructions = bin.readBytes(data, offset, instructionLength);   offset+=instructionLength;
-  		
-  		var crdnum = gl.endPts[gl.noc-1]+1;
-  		gl.flags = [];
-  		for(var i=0; i<crdnum; i++ ) 
-  		{ 
-  			var flag = data[offset];  offset++; 
-  			gl.flags.push(flag); 
-  			if((flag&8)!=0)
-  			{
-  				var rep = data[offset];  offset++;
-  				for(var j=0; j<rep; j++) { gl.flags.push(flag); i++; }
-  			}
-  		}
-  		gl.xs = [];
-  		for(var i=0; i<crdnum; i++) {
-  			var i8=((gl.flags[i]&2)!=0), same=((gl.flags[i]&16)!=0);  
-  			if(i8) { gl.xs.push(same ? data[offset] : -data[offset]);  offset++; }
-  			else
-  			{
-  				if(same) gl.xs.push(0);
-  				else { gl.xs.push(bin.readShort(data, offset));  offset+=2; }
-  			}
-  		}
-  		gl.ys = [];
-  		for(var i=0; i<crdnum; i++) {
-  			var i8=((gl.flags[i]&4)!=0), same=((gl.flags[i]&32)!=0);  
-  			if(i8) { gl.ys.push(same ? data[offset] : -data[offset]);  offset++; }
-  			else
-  			{
-  				if(same) gl.ys.push(0);
-  				else { gl.ys.push(bin.readShort(data, offset));  offset+=2; }
-  			}
-  		}
-  		var x = 0, y = 0;
-  		for(var i=0; i<crdnum; i++) { x += gl.xs[i]; y += gl.ys[i];  gl.xs[i]=x;  gl.ys[i]=y; }
-  		//console.log(endPtsOfContours, instructionLength, instructions, flags, xCoordinates, yCoordinates);
-  	}
-  	else
-  	{
-  		var ARG_1_AND_2_ARE_WORDS	= 1<<0;
-  		var ARGS_ARE_XY_VALUES		= 1<<1;
-  		var WE_HAVE_A_SCALE			= 1<<3;
-  		var MORE_COMPONENTS			= 1<<5;
-  		var WE_HAVE_AN_X_AND_Y_SCALE= 1<<6;
-  		var WE_HAVE_A_TWO_BY_TWO	= 1<<7;
-  		var WE_HAVE_INSTRUCTIONS	= 1<<8;
-  		
-  		gl.parts = [];
-  		var flags;
-  		do {
-  			flags = bin.readUshort(data, offset);  offset += 2;
-  			var part = { m:{a:1,b:0,c:0,d:1,tx:0,ty:0}, p1:-1, p2:-1 };  gl.parts.push(part);
-  			part.glyphIndex = bin.readUshort(data, offset);  offset += 2;
-  			if ( flags & ARG_1_AND_2_ARE_WORDS) {
-  				var arg1 = bin.readShort(data, offset);  offset += 2;
-  				var arg2 = bin.readShort(data, offset);  offset += 2;
-  			} else {
-  				var arg1 = bin.readInt8(data, offset);  offset ++;
-  				var arg2 = bin.readInt8(data, offset);  offset ++;
-  			}
-  			
-  			if(flags & ARGS_ARE_XY_VALUES) { part.m.tx = arg1;  part.m.ty = arg2; }
-  			else  {  part.p1=arg1;  part.p2=arg2;  }
-  			//part.m.tx = arg1;  part.m.ty = arg2;
-  			//else { throw "params are not XY values"; }
-  			
-  			if ( flags & WE_HAVE_A_SCALE ) {
-  				part.m.a = part.m.d = bin.readF2dot14(data, offset);  offset += 2;    
-  			} else if ( flags & WE_HAVE_AN_X_AND_Y_SCALE ) {
-  				part.m.a = bin.readF2dot14(data, offset);  offset += 2; 
-  				part.m.d = bin.readF2dot14(data, offset);  offset += 2; 
-  			} else if ( flags & WE_HAVE_A_TWO_BY_TWO ) {
-  				part.m.a = bin.readF2dot14(data, offset);  offset += 2; 
-  				part.m.b = bin.readF2dot14(data, offset);  offset += 2; 
-  				part.m.c = bin.readF2dot14(data, offset);  offset += 2; 
-  				part.m.d = bin.readF2dot14(data, offset);  offset += 2; 
-  			}
-  		} while ( flags & MORE_COMPONENTS ) 
-  		if (flags & WE_HAVE_INSTRUCTIONS){
-  			var numInstr = bin.readUshort(data, offset);  offset += 2;
-  			gl.instr = [];
-  			for(var i=0; i<numInstr; i++) { gl.instr.push(data[offset]);  offset++; }
-  		}
-  	}
-  	return gl;
-  };
-
-
-  Typr.GPOS = {};
-  Typr.GPOS.parse = function(data, offset, length, font) {  return Typr._lctf.parse(data, offset, length, font, Typr.GPOS.subt);  };
-
-
-  Typr.GPOS.subt = function(data, ltype, offset)	// lookup type
-  {
-  	var bin = Typr._bin, offset0 = offset, tab = {};
-  	
-  	tab.fmt  = bin.readUshort(data, offset);  offset+=2;
-  	
-  	//console.log(ltype, tab.fmt);
-  	
-  	if(ltype==1 || ltype==2 || ltype==3 || ltype==7 || (ltype==8 && tab.fmt<=2)) {
-  		var covOff  = bin.readUshort(data, offset);  offset+=2;
-  		tab.coverage = Typr._lctf.readCoverage(data, covOff+offset0);
-  	}
-  	if(ltype==1 && tab.fmt==1) {
-  		var valFmt1 = bin.readUshort(data, offset);  offset+=2;
-  		var ones1 = Typr._lctf.numOfOnes(valFmt1);
-  		if(valFmt1!=0)  tab.pos = Typr.GPOS.readValueRecord(data, offset, valFmt1);
-  	}
-  	else if(ltype==2) {
-  		var valFmt1 = bin.readUshort(data, offset);  offset+=2;
-  		var valFmt2 = bin.readUshort(data, offset);  offset+=2;
-  		var ones1 = Typr._lctf.numOfOnes(valFmt1);
-  		var ones2 = Typr._lctf.numOfOnes(valFmt2);
-  		if(tab.fmt==1)
-  		{
-  			tab.pairsets = [];
-  			var psc = bin.readUshort(data, offset);  offset+=2;  // PairSetCount
-  			
-  			for(var i=0; i<psc; i++)
-  			{
-  				var psoff = offset0 + bin.readUshort(data, offset);  offset+=2;
-  				
-  				var pvc = bin.readUshort(data, psoff);  psoff+=2;
-  				var arr = [];
-  				for(var j=0; j<pvc; j++)
-  				{
-  					var gid2 = bin.readUshort(data, psoff);  psoff+=2;
-  					var value1, value2;
-  					if(valFmt1!=0) {  value1 = Typr.GPOS.readValueRecord(data, psoff, valFmt1);  psoff+=ones1*2;  }
-  					if(valFmt2!=0) {  value2 = Typr.GPOS.readValueRecord(data, psoff, valFmt2);  psoff+=ones2*2;  }
-  					//if(value1!=null) throw "e";
-  					arr.push({gid2:gid2, val1:value1, val2:value2});
-  				}
-  				tab.pairsets.push(arr);
-  			}
-  		}
-  		if(tab.fmt==2)
-  		{
-  			var classDef1 = bin.readUshort(data, offset);  offset+=2;
-  			var classDef2 = bin.readUshort(data, offset);  offset+=2;
-  			var class1Count = bin.readUshort(data, offset);  offset+=2;
-  			var class2Count = bin.readUshort(data, offset);  offset+=2;
-  			
-  			tab.classDef1 = Typr._lctf.readClassDef(data, offset0 + classDef1);
-  			tab.classDef2 = Typr._lctf.readClassDef(data, offset0 + classDef2);
-  			
-  			tab.matrix = [];
-  			for(var i=0; i<class1Count; i++)
-  			{
-  				var row = [];
-  				for(var j=0; j<class2Count; j++)
-  				{
-  					var value1 = null, value2 = null;
-  					if(tab.valFmt1!=0) { value1 = Typr.GPOS.readValueRecord(data, offset, tab.valFmt1);  offset+=ones1*2; }
-  					if(tab.valFmt2!=0) { value2 = Typr.GPOS.readValueRecord(data, offset, tab.valFmt2);  offset+=ones2*2; }
-  					row.push({val1:value1, val2:value2});
-  				}
-  				tab.matrix.push(row);
-  			}
-  		}
-  	}
-  	return tab;
-  };
-
-
-  Typr.GPOS.readValueRecord = function(data, offset, valFmt)
-  {
-  	var bin = Typr._bin;
-  	var arr = [];
-  	arr.push( (valFmt&1) ? bin.readShort(data, offset) : 0 );  offset += (valFmt&1) ? 2 : 0;  // X_PLACEMENT
-  	arr.push( (valFmt&2) ? bin.readShort(data, offset) : 0 );  offset += (valFmt&2) ? 2 : 0;  // Y_PLACEMENT
-  	arr.push( (valFmt&4) ? bin.readShort(data, offset) : 0 );  offset += (valFmt&4) ? 2 : 0;  // X_ADVANCE
-  	arr.push( (valFmt&8) ? bin.readShort(data, offset) : 0 );  offset += (valFmt&8) ? 2 : 0;  // Y_ADVANCE
-  	return arr;
-  };
-
-  Typr.GSUB = {};
-  Typr.GSUB.parse = function(data, offset, length, font) {  return Typr._lctf.parse(data, offset, length, font, Typr.GSUB.subt);  };
-
-
-  Typr.GSUB.subt = function(data, ltype, offset)	// lookup type
-  {
-  	var bin = Typr._bin, offset0 = offset, tab = {};
-  	
-  	tab.fmt  = bin.readUshort(data, offset);  offset+=2;
-  	
-  	if(ltype!=1 && ltype!=4 && ltype!=5 && ltype!=6) return null;
-  	
-  	if(ltype==1 || ltype==4 || (ltype==5 && tab.fmt<=2) || (ltype==6 && tab.fmt<=2)) {
-  		var covOff  = bin.readUshort(data, offset);  offset+=2;
-  		tab.coverage = Typr._lctf.readCoverage(data, offset0+covOff);	// not always is coverage here
-  	}
-  	
-  	if(ltype==1) {	
-  		if(tab.fmt==1) {
-  			tab.delta = bin.readShort(data, offset);  offset+=2;
-  		}
-  		else if(tab.fmt==2) {
-  			var cnt = bin.readUshort(data, offset);  offset+=2;
-  			tab.newg = bin.readUshorts(data, offset, cnt);  offset+=tab.newg.length*2;
-  		}
-  	}
-  	//  Ligature Substitution Subtable
-  	else if(ltype==4) {
-  		tab.vals = [];
-  		var cnt = bin.readUshort(data, offset);  offset+=2;
-  		for(var i=0; i<cnt; i++) {
-  			var loff = bin.readUshort(data, offset);  offset+=2;
-  			tab.vals.push(Typr.GSUB.readLigatureSet(data, offset0+loff));
-  		}
-  		//console.log(tab.coverage);
-  		//console.log(tab.vals);
-  	} 
-  	//  Contextual Substitution Subtable
-  	else if(ltype==5) {
-  		if(tab.fmt==2) {
-  			var cDefOffset = bin.readUshort(data, offset);  offset+=2;
-  			tab.cDef = Typr._lctf.readClassDef(data, offset0 + cDefOffset);
-  			tab.scset = [];
-  			var subClassSetCount = bin.readUshort(data, offset);  offset+=2;
-  			for(var i=0; i<subClassSetCount; i++)
-  			{
-  				var scsOff = bin.readUshort(data, offset);  offset+=2;
-  				tab.scset.push(  scsOff==0 ? null : Typr.GSUB.readSubClassSet(data, offset0 + scsOff)  );
-  			}
-  		}
-  		//else console.log("unknown table format", tab.fmt);
-  	}
-  	//*
-  	else if(ltype==6) {
-  		/*
-  		if(tab.fmt==2) {
-  			var btDef = bin.readUshort(data, offset);  offset+=2;
-  			var inDef = bin.readUshort(data, offset);  offset+=2;
-  			var laDef = bin.readUshort(data, offset);  offset+=2;
-  			
-  			tab.btDef = Typr._lctf.readClassDef(data, offset0 + btDef);
-  			tab.inDef = Typr._lctf.readClassDef(data, offset0 + inDef);
-  			tab.laDef = Typr._lctf.readClassDef(data, offset0 + laDef);
-  			
-  			tab.scset = [];
-  			var cnt = bin.readUshort(data, offset);  offset+=2;
-  			for(var i=0; i<cnt; i++) {
-  				var loff = bin.readUshort(data, offset);  offset+=2;
-  				tab.scset.push(Typr.GSUB.readChainSubClassSet(data, offset0+loff));
-  			}
-  		}
-  		*/
-  		if(tab.fmt==3) {
-  			for(var i=0; i<3; i++) {
-  				var cnt = bin.readUshort(data, offset);  offset+=2;
-  				var cvgs = [];
-  				for(var j=0; j<cnt; j++) cvgs.push(  Typr._lctf.readCoverage(data, offset0 + bin.readUshort(data, offset+j*2))   );
-  				offset+=cnt*2;
-  				if(i==0) tab.backCvg = cvgs;
-  				if(i==1) tab.inptCvg = cvgs;
-  				if(i==2) tab.ahedCvg = cvgs;
-  			}
-  			var cnt = bin.readUshort(data, offset);  offset+=2;
-  			tab.lookupRec = Typr.GSUB.readSubstLookupRecords(data, offset, cnt);
-  		}
-  		//console.log(tab);
-  	} //*/
-  	//if(tab.coverage.indexOf(3)!=-1) console.log(ltype, fmt, tab);
-  	
-  	return tab;
-  };
-
-  Typr.GSUB.readSubClassSet = function(data, offset)
-  {
-  	var rUs = Typr._bin.readUshort, offset0 = offset, lset = [];
-  	var cnt = rUs(data, offset);  offset+=2;
-  	for(var i=0; i<cnt; i++) {
-  		var loff = rUs(data, offset);  offset+=2;
-  		lset.push(Typr.GSUB.readSubClassRule(data, offset0+loff));
-  	}
-  	return lset;
-  };
-  Typr.GSUB.readSubClassRule= function(data, offset)
-  {
-  	var rUs = Typr._bin.readUshort, rule = {};
-  	var gcount = rUs(data, offset);  offset+=2;
-  	var scount = rUs(data, offset);  offset+=2;
-  	rule.input = [];
-  	for(var i=0; i<gcount-1; i++) {
-  		rule.input.push(rUs(data, offset));  offset+=2;
-  	}
-  	rule.substLookupRecords = Typr.GSUB.readSubstLookupRecords(data, offset, scount);
-  	return rule;
-  };
-  Typr.GSUB.readSubstLookupRecords = function(data, offset, cnt)
-  {
-  	var rUs = Typr._bin.readUshort;
-  	var out = [];
-  	for(var i=0; i<cnt; i++) {  out.push(rUs(data, offset), rUs(data, offset+2));  offset+=4;  }
-  	return out;
-  };
-
-  Typr.GSUB.readChainSubClassSet = function(data, offset)
-  {
-  	var bin = Typr._bin, offset0 = offset, lset = [];
-  	var cnt = bin.readUshort(data, offset);  offset+=2;
-  	for(var i=0; i<cnt; i++) {
-  		var loff = bin.readUshort(data, offset);  offset+=2;
-  		lset.push(Typr.GSUB.readChainSubClassRule(data, offset0+loff));
-  	}
-  	return lset;
-  };
-  Typr.GSUB.readChainSubClassRule= function(data, offset)
-  {
-  	var bin = Typr._bin, rule = {};
-  	var pps = ["backtrack", "input", "lookahead"];
-  	for(var pi=0; pi<pps.length; pi++) {
-  		var cnt = bin.readUshort(data, offset);  offset+=2;  if(pi==1) cnt--;
-  		rule[pps[pi]]=bin.readUshorts(data, offset, cnt);  offset+= rule[pps[pi]].length*2;
-  	}
-  	var cnt = bin.readUshort(data, offset);  offset+=2;
-  	rule.subst = bin.readUshorts(data, offset, cnt*2);  offset += rule.subst.length*2;
-  	return rule;
-  };
-
-  Typr.GSUB.readLigatureSet = function(data, offset)
-  {
-  	var bin = Typr._bin, offset0 = offset, lset = [];
-  	var lcnt = bin.readUshort(data, offset);  offset+=2;
-  	for(var j=0; j<lcnt; j++) {
-  		var loff = bin.readUshort(data, offset);  offset+=2;
-  		lset.push(Typr.GSUB.readLigature(data, offset0+loff));
-  	}
-  	return lset;
-  };
-  Typr.GSUB.readLigature = function(data, offset)
-  {
-  	var bin = Typr._bin, lig = {chain:[]};
-  	lig.nglyph = bin.readUshort(data, offset);  offset+=2;
-  	var ccnt = bin.readUshort(data, offset);  offset+=2;
-  	for(var k=0; k<ccnt-1; k++) {  lig.chain.push(bin.readUshort(data, offset));  offset+=2;  }
-  	return lig;
-  };
-
-
-
-  Typr.head = {};
-  Typr.head.parse = function(data, offset, length)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	var tableVersion = bin.readFixed(data, offset);  offset += 4;
-  	obj.fontRevision = bin.readFixed(data, offset);  offset += 4;
-  	var checkSumAdjustment = bin.readUint(data, offset);  offset += 4;
-  	var magicNumber = bin.readUint(data, offset);  offset += 4;
-  	obj.flags = bin.readUshort(data, offset);  offset += 2;
-  	obj.unitsPerEm = bin.readUshort(data, offset);  offset += 2;
-  	obj.created  = bin.readUint64(data, offset);  offset += 8;
-  	obj.modified = bin.readUint64(data, offset);  offset += 8;
-  	obj.xMin = bin.readShort(data, offset);  offset += 2;
-  	obj.yMin = bin.readShort(data, offset);  offset += 2;
-  	obj.xMax = bin.readShort(data, offset);  offset += 2;
-  	obj.yMax = bin.readShort(data, offset);  offset += 2;
-  	obj.macStyle = bin.readUshort(data, offset);  offset += 2;
-  	obj.lowestRecPPEM = bin.readUshort(data, offset);  offset += 2;
-  	obj.fontDirectionHint = bin.readShort(data, offset);  offset += 2;
-  	obj.indexToLocFormat  = bin.readShort(data, offset);  offset += 2;
-  	obj.glyphDataFormat   = bin.readShort(data, offset);  offset += 2;
-  	return obj;
-  };
-
-
-  Typr.hhea = {};
-  Typr.hhea.parse = function(data, offset, length)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	var tableVersion = bin.readFixed(data, offset);  offset += 4;
-  	obj.ascender  = bin.readShort(data, offset);  offset += 2;
-  	obj.descender = bin.readShort(data, offset);  offset += 2;
-  	obj.lineGap = bin.readShort(data, offset);  offset += 2;
-  	
-  	obj.advanceWidthMax = bin.readUshort(data, offset);  offset += 2;
-  	obj.minLeftSideBearing  = bin.readShort(data, offset);  offset += 2;
-  	obj.minRightSideBearing = bin.readShort(data, offset);  offset += 2;
-  	obj.xMaxExtent = bin.readShort(data, offset);  offset += 2;
-  	
-  	obj.caretSlopeRise = bin.readShort(data, offset);  offset += 2;
-  	obj.caretSlopeRun  = bin.readShort(data, offset);  offset += 2;
-  	obj.caretOffset    = bin.readShort(data, offset);  offset += 2;
-  	
-  	offset += 4*2;
-  	
-  	obj.metricDataFormat = bin.readShort (data, offset);  offset += 2;
-  	obj.numberOfHMetrics = bin.readUshort(data, offset);  offset += 2;
-  	return obj;
-  };
-
-
-  Typr.hmtx = {};
-  Typr.hmtx.parse = function(data, offset, length, font)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	
-  	obj.aWidth = [];
-  	obj.lsBearing = [];
-  	
-  	
-  	var aw = 0, lsb = 0;
-  	
-  	for(var i=0; i<font.maxp.numGlyphs; i++)
-  	{
-  		if(i<font.hhea.numberOfHMetrics) {  aw=bin.readUshort(data, offset);  offset += 2;  lsb=bin.readShort(data, offset);  offset+=2;  }
-  		obj.aWidth.push(aw);
-  		obj.lsBearing.push(lsb);
-  	}
-  	
-  	return obj;
-  };
-
-
-  Typr.kern = {};
-  Typr.kern.parse = function(data, offset, length, font)
-  {
-  	var bin = Typr._bin;
-  	
-  	var version = bin.readUshort(data, offset);  offset+=2;
-  	if(version==1) return Typr.kern.parseV1(data, offset-2, length, font);
-  	var nTables = bin.readUshort(data, offset);  offset+=2;
-  	
-  	var map = {glyph1: [], rval:[]};
-  	for(var i=0; i<nTables; i++)
-  	{
-  		offset+=2;	// skip version
-  		var length  = bin.readUshort(data, offset);  offset+=2;
-  		var coverage = bin.readUshort(data, offset);  offset+=2;
-  		var format = coverage>>>8;
-  		/* I have seen format 128 once, that's why I do */ format &= 0xf;
-  		if(format==0) offset = Typr.kern.readFormat0(data, offset, map);
-  		else throw "unknown kern table format: "+format;
-  	}
-  	return map;
-  };
-
-  Typr.kern.parseV1 = function(data, offset, length, font)
-  {
-  	var bin = Typr._bin;
-  	
-  	var version = bin.readFixed(data, offset);  offset+=4;
-  	var nTables = bin.readUint(data, offset);  offset+=4;
-  	
-  	var map = {glyph1: [], rval:[]};
-  	for(var i=0; i<nTables; i++)
-  	{
-  		var length = bin.readUint(data, offset);   offset+=4;
-  		var coverage = bin.readUshort(data, offset);  offset+=2;
-  		var tupleIndex = bin.readUshort(data, offset);  offset+=2;
-  		var format = coverage>>>8;
-  		/* I have seen format 128 once, that's why I do */ format &= 0xf;
-  		if(format==0) offset = Typr.kern.readFormat0(data, offset, map);
-  		else throw "unknown kern table format: "+format;
-  	}
-  	return map;
-  };
-
-  Typr.kern.readFormat0 = function(data, offset, map)
-  {
-  	var bin = Typr._bin;
-  	var pleft = -1;
-  	var nPairs        = bin.readUshort(data, offset);  offset+=2;
-  	var searchRange   = bin.readUshort(data, offset);  offset+=2;
-  	var entrySelector = bin.readUshort(data, offset);  offset+=2;
-  	var rangeShift    = bin.readUshort(data, offset);  offset+=2;
-  	for(var j=0; j<nPairs; j++)
-  	{
-  		var left  = bin.readUshort(data, offset);  offset+=2;
-  		var right = bin.readUshort(data, offset);  offset+=2;
-  		var value = bin.readShort (data, offset);  offset+=2;
-  		if(left!=pleft) { map.glyph1.push(left);  map.rval.push({ glyph2:[], vals:[] }); }
-  		var rval = map.rval[map.rval.length-1];
-  		rval.glyph2.push(right);   rval.vals.push(value);
-  		pleft = left;
-  	}
-  	return offset;
-  };
-
-
-
-  Typr.loca = {};
-  Typr.loca.parse = function(data, offset, length, font)
-  {
-  	var bin = Typr._bin;
-  	var obj = [];
-  	
-  	var ver = font.head.indexToLocFormat;
-  	//console.log("loca", ver, length, 4*font.maxp.numGlyphs);
-  	var len = font.maxp.numGlyphs+1;
-  	
-  	if(ver==0) for(var i=0; i<len; i++) obj.push(bin.readUshort(data, offset+(i<<1))<<1);
-  	if(ver==1) for(var i=0; i<len; i++) obj.push(bin.readUint  (data, offset+(i<<2))   );
-  	
-  	return obj;
-  };
-
-
-  Typr.maxp = {};
-  Typr.maxp.parse = function(data, offset, length)
-  {
-  	//console.log(data.length, offset, length);
-  	
-  	var bin = Typr._bin;
-  	var obj = {};
-  	
-  	// both versions 0.5 and 1.0
-  	var ver = bin.readUint(data, offset); offset += 4;
-  	obj.numGlyphs = bin.readUshort(data, offset);  offset += 2;
-  	
-  	// only 1.0
-  	if(ver == 0x00010000)
-  	{
-  		obj.maxPoints             = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxContours           = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxCompositePoints    = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxCompositeContours  = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxZones              = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxTwilightPoints     = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxStorage            = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxFunctionDefs       = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxInstructionDefs    = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxStackElements      = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxSizeOfInstructions = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxComponentElements  = bin.readUshort(data, offset);  offset += 2;
-  		obj.maxComponentDepth     = bin.readUshort(data, offset);  offset += 2;
-  	}
-  	
-  	return obj;
-  };
-
-
-  Typr.name = {};
-  Typr.name.parse = function(data, offset, length)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	var format = bin.readUshort(data, offset);  offset += 2;
-  	var count  = bin.readUshort(data, offset);  offset += 2;
-  	var stringOffset = bin.readUshort(data, offset);  offset += 2;
-  	
-  	//console.log(format,count);
-  	
-  	var names = [
-  		"copyright",
-  		"fontFamily",
-  		"fontSubfamily",
-  		"ID",
-  		"fullName",
-  		"version",
-  		"postScriptName",
-  		"trademark",
-  		"manufacturer",
-  		"designer",
-  		"description",
-  		"urlVendor",
-  		"urlDesigner",
-  		"licence",
-  		"licenceURL",
-  		"---",
-  		"typoFamilyName",
-  		"typoSubfamilyName",
-  		"compatibleFull",
-  		"sampleText",
-  		"postScriptCID",
-  		"wwsFamilyName",
-  		"wwsSubfamilyName",
-  		"lightPalette",
-  		"darkPalette"
-  	];
-  	
-  	var offset0 = offset;
-  	
-  	for(var i=0; i<count; i++)
-  	{
-  		var platformID = bin.readUshort(data, offset);  offset += 2;
-  		var encodingID = bin.readUshort(data, offset);  offset += 2;
-  		var languageID = bin.readUshort(data, offset);  offset += 2;
-  		var nameID     = bin.readUshort(data, offset);  offset += 2;
-  		var slen       = bin.readUshort(data, offset);  offset += 2;
-  		var noffset    = bin.readUshort(data, offset);  offset += 2;
-  		//console.log(platformID, encodingID, languageID.toString(16), nameID, length, noffset);
-  		
-  		var cname = names[nameID];
-  		var soff = offset0 + count*12 + noffset;
-  		var str;
-  		if(platformID == 0) str = bin.readUnicode(data, soff, slen/2);
-  		else if(platformID == 3 && encodingID == 0) str = bin.readUnicode(data, soff, slen/2);
-  		else if(encodingID == 0) str = bin.readASCII  (data, soff, slen);
-  		else if(encodingID == 1) str = bin.readUnicode(data, soff, slen/2);
-  		else if(encodingID == 3) str = bin.readUnicode(data, soff, slen/2);
-  		
-  		else if(platformID == 1) { str = bin.readASCII(data, soff, slen);  console.log("reading unknown MAC encoding "+encodingID+" as ASCII"); }
-  		else throw "unknown encoding "+encodingID + ", platformID: "+platformID;
-  		
-  		var tid = "p"+platformID+","+(languageID).toString(16);//Typr._platforms[platformID];
-  		if(obj[tid]==null) obj[tid] = {};
-  		obj[tid][cname] = str;
-  		obj[tid]._lang = languageID;
-  		//console.log(tid, obj[tid]);
-  	}
-  	/*
-  	if(format == 1)
-  	{
-  		var langTagCount = bin.readUshort(data, offset);  offset += 2;
-  		for(var i=0; i<langTagCount; i++)
-  		{
-  			var length  = bin.readUshort(data, offset);  offset += 2;
-  			var noffset = bin.readUshort(data, offset);  offset += 2;
-  		}
-  	}
-  	*/
-  	
-  	//console.log(obj);
-  	
-  	for(var p in obj) if(obj[p].postScriptName!=null && obj[p]._lang==0x0409) return obj[p];		// United States
-  	for(var p in obj) if(obj[p].postScriptName!=null && obj[p]._lang==0x0000) return obj[p];		// Universal
-  	for(var p in obj) if(obj[p].postScriptName!=null && obj[p]._lang==0x0c0c) return obj[p];		// Canada
-  	for(var p in obj) if(obj[p].postScriptName!=null) return obj[p];
-  	
-  	var tname;
-  	for(var p in obj) { tname=p; break; }
-  	console.log("returning name table with languageID "+ obj[tname]._lang);
-  	return obj[tname];
-  };
-
-
-  Typr["OS/2"] = {};
-  Typr["OS/2"].parse = function(data, offset, length)
-  {
-  	var bin = Typr._bin;
-  	var ver = bin.readUshort(data, offset); offset += 2;
-  	
-  	var obj = {};
-  	if     (ver==0) Typr["OS/2"].version0(data, offset, obj);
-  	else if(ver==1) Typr["OS/2"].version1(data, offset, obj);
-  	else if(ver==2 || ver==3 || ver==4) Typr["OS/2"].version2(data, offset, obj);
-  	else if(ver==5) Typr["OS/2"].version5(data, offset, obj);
-  	else throw "unknown OS/2 table version: "+ver;
-  	
-  	return obj;
-  };
-
-  Typr["OS/2"].version0 = function(data, offset, obj)
-  {
-  	var bin = Typr._bin;
-  	obj.xAvgCharWidth = bin.readShort(data, offset); offset += 2;
-  	obj.usWeightClass = bin.readUshort(data, offset); offset += 2;
-  	obj.usWidthClass  = bin.readUshort(data, offset); offset += 2;
-  	obj.fsType = bin.readUshort(data, offset); offset += 2;
-  	obj.ySubscriptXSize = bin.readShort(data, offset); offset += 2;
-  	obj.ySubscriptYSize = bin.readShort(data, offset); offset += 2;
-  	obj.ySubscriptXOffset = bin.readShort(data, offset); offset += 2;
-  	obj.ySubscriptYOffset = bin.readShort(data, offset); offset += 2; 
-  	obj.ySuperscriptXSize = bin.readShort(data, offset); offset += 2; 
-  	obj.ySuperscriptYSize = bin.readShort(data, offset); offset += 2; 
-  	obj.ySuperscriptXOffset = bin.readShort(data, offset); offset += 2;
-  	obj.ySuperscriptYOffset = bin.readShort(data, offset); offset += 2;
-  	obj.yStrikeoutSize = bin.readShort(data, offset); offset += 2;
-  	obj.yStrikeoutPosition = bin.readShort(data, offset); offset += 2;
-  	obj.sFamilyClass = bin.readShort(data, offset); offset += 2;
-  	obj.panose = bin.readBytes(data, offset, 10);  offset += 10;
-  	obj.ulUnicodeRange1	= bin.readUint(data, offset);  offset += 4;
-  	obj.ulUnicodeRange2	= bin.readUint(data, offset);  offset += 4;
-  	obj.ulUnicodeRange3	= bin.readUint(data, offset);  offset += 4;
-  	obj.ulUnicodeRange4	= bin.readUint(data, offset);  offset += 4;
-  	obj.achVendID = [bin.readInt8(data, offset), bin.readInt8(data, offset+1),bin.readInt8(data, offset+2),bin.readInt8(data, offset+3)];  offset += 4;
-  	obj.fsSelection	 = bin.readUshort(data, offset); offset += 2;
-  	obj.usFirstCharIndex = bin.readUshort(data, offset); offset += 2;
-  	obj.usLastCharIndex = bin.readUshort(data, offset); offset += 2;
-  	obj.sTypoAscender = bin.readShort(data, offset); offset += 2;
-  	obj.sTypoDescender = bin.readShort(data, offset); offset += 2;
-  	obj.sTypoLineGap = bin.readShort(data, offset); offset += 2;
-  	obj.usWinAscent = bin.readUshort(data, offset); offset += 2;
-  	obj.usWinDescent = bin.readUshort(data, offset); offset += 2;
-  	return offset;
-  };
-
-  Typr["OS/2"].version1 = function(data, offset, obj)
-  {
-  	var bin = Typr._bin;
-  	offset = Typr["OS/2"].version0(data, offset, obj);
-  	
-  	obj.ulCodePageRange1 = bin.readUint(data, offset); offset += 4;
-  	obj.ulCodePageRange2 = bin.readUint(data, offset); offset += 4;
-  	return offset;
-  };
-
-  Typr["OS/2"].version2 = function(data, offset, obj)
-  {
-  	var bin = Typr._bin;
-  	offset = Typr["OS/2"].version1(data, offset, obj);
-  	
-  	obj.sxHeight = bin.readShort(data, offset); offset += 2;
-  	obj.sCapHeight = bin.readShort(data, offset); offset += 2;
-  	obj.usDefault = bin.readUshort(data, offset); offset += 2;
-  	obj.usBreak = bin.readUshort(data, offset); offset += 2;
-  	obj.usMaxContext = bin.readUshort(data, offset); offset += 2;
-  	return offset;
-  };
-
-  Typr["OS/2"].version5 = function(data, offset, obj)
-  {
-  	var bin = Typr._bin;
-  	offset = Typr["OS/2"].version2(data, offset, obj);
-
-  	obj.usLowerOpticalPointSize = bin.readUshort(data, offset); offset += 2;
-  	obj.usUpperOpticalPointSize = bin.readUshort(data, offset); offset += 2;
-  	return offset;
-  };
-
-  Typr.post = {};
-  Typr.post.parse = function(data, offset, length)
-  {
-  	var bin = Typr._bin;
-  	var obj = {};
-  	
-  	obj.version           = bin.readFixed(data, offset);  offset+=4;
-  	obj.italicAngle       = bin.readFixed(data, offset);  offset+=4;
-  	obj.underlinePosition = bin.readShort(data, offset);  offset+=2;
-  	obj.underlineThickness = bin.readShort(data, offset);  offset+=2;
-
-  	return obj;
-  };
-  Typr.SVG = {};
-  Typr.SVG.parse = function(data, offset, length)
-  {
-  	var bin = Typr._bin;
-  	var obj = { entries: []};
-
-  	var offset0 = offset;
-
-  	var tableVersion = bin.readUshort(data, offset);	offset += 2;
-  	var svgDocIndexOffset = bin.readUint(data, offset);	offset += 4;
-  	var reserved = bin.readUint(data, offset); offset += 4;
-
-  	offset = svgDocIndexOffset + offset0;
-
-  	var numEntries = bin.readUshort(data, offset);	offset += 2;
-
-  	for(var i=0; i<numEntries; i++)
-  	{
-  		var startGlyphID = bin.readUshort(data, offset);  offset += 2;
-  		var endGlyphID   = bin.readUshort(data, offset);  offset += 2;
-  		var svgDocOffset = bin.readUint  (data, offset);  offset += 4;
-  		var svgDocLength = bin.readUint  (data, offset);  offset += 4;
-
-  		var sbuf = new Uint8Array(data.buffer, offset0 + svgDocOffset + svgDocIndexOffset, svgDocLength);
-  		var svg = bin.readUTF8(sbuf, 0, sbuf.length);
-  		
-  		for(var f=startGlyphID; f<=endGlyphID; f++) {
-  			obj.entries[f] = svg;
-  		}
-  	}
-  	return obj;
-  };
-
-  Typr.SVG.toPath = function(str)
-  {
-  	var pth = {cmds:[], crds:[]};
-  	if(str==null) return pth;
-  	
-  	var prsr = new DOMParser();
-  	var doc = prsr["parseFromString"](str,"image/svg+xml");
-  	
-  	var svg = doc.firstChild;  while(svg.tagName!="svg") svg = svg.nextSibling;
-  	var vb = svg.getAttribute("viewBox");
-  	if(vb) vb = vb.trim().split(" ").map(parseFloat);  else   vb = [0,0,1000,1000];
-  	Typr.SVG._toPath(svg.children, pth);
-  	for(var i=0; i<pth.crds.length; i+=2) {
-  		var x = pth.crds[i], y = pth.crds[i+1];
-  		x -= vb[0];
-  		y -= vb[1];
-  		y = -y;
-  		pth.crds[i] = x;
-  		pth.crds[i+1] = y;
-  	}
-  	return pth;
-  };
-
-  Typr.SVG._toPath = function(nds, pth, fill) {
-  	for(var ni=0; ni<nds.length; ni++) {
-  		var nd = nds[ni], tn = nd.tagName;
-  		var cfl = nd.getAttribute("fill");  if(cfl==null) cfl = fill;
-  		if(tn=="g") Typr.SVG._toPath(nd.children, pth, cfl);
-  		else if(tn=="path") {
-  			pth.cmds.push(cfl?cfl:"#000000");
-  			var d = nd.getAttribute("d");  //console.log(d);
-  			var toks = Typr.SVG._tokens(d);  //console.log(toks);
-  			Typr.SVG._toksToPath(toks, pth);  pth.cmds.push("X");
-  		}
-  		else if(tn=="defs") ;
-  		else console.log(tn, nd);
-  	}
-  };
-
-  Typr.SVG._tokens = function(d) {
-  	var ts = [], off = 0, rn=false, cn="";  // reading number, current number
-  	while(off<d.length){
-  		var cc=d.charCodeAt(off), ch = d.charAt(off);  off++;
-  		var isNum = (48<=cc && cc<=57) || ch=="." || ch=="-";
-  		
-  		if(rn) {
-  			if(ch=="-") {  ts.push(parseFloat(cn));  cn=ch;  }
-  			else if(isNum) cn+=ch;
-  			else {  ts.push(parseFloat(cn));  if(ch!="," && ch!=" ") ts.push(ch);  rn=false;  }
-  		}
-  		else {
-  			if(isNum) {  cn=ch;  rn=true;  }
-  			else if(ch!="," && ch!=" ") ts.push(ch);
-  		}
-  	}
-  	if(rn) ts.push(parseFloat(cn));
-  	return ts;
-  };
-
-  Typr.SVG._toksToPath = function(ts, pth) {	
-  	var i = 0, x = 0, y = 0, ox = 0, oy = 0;
-  	var pc = {"M":2,"L":2,"H":1,"V":1,   "S":4,   "C":6};
-  	var cmds = pth.cmds, crds = pth.crds;
-  	
-  	while(i<ts.length) {
-  		var cmd = ts[i];  i++;
-  		
-  		if(cmd=="z") {  cmds.push("Z");  x=ox;  y=oy;  }
-  		else {
-  			var cmu = cmd.toUpperCase();
-  			var ps = pc[cmu], reps = Typr.SVG._reps(ts, i, ps);
-  		
-  			for(var j=0; j<reps; j++) {
-  				var xi = 0, yi = 0;   if(cmd!=cmu) {  xi=x;  yi=y;  }
-  				
-  				if(cmu=="M") {  x = xi+ts[i++];  y = yi+ts[i++];  cmds.push("M");  crds.push(x,y);  ox=x;  oy=y; }
-  				else if(cmu=="L") {  x = xi+ts[i++];  y = yi+ts[i++];  cmds.push("L");  crds.push(x,y);  }
-  				else if(cmu=="H") {  x = xi+ts[i++];                   cmds.push("L");  crds.push(x,y);  }
-  				else if(cmu=="V") {  y = yi+ts[i++];                   cmds.push("L");  crds.push(x,y);  }
-  				else if(cmu=="C") {
-  					var x1=xi+ts[i++], y1=yi+ts[i++], x2=xi+ts[i++], y2=yi+ts[i++], x3=xi+ts[i++], y3=yi+ts[i++];
-  					cmds.push("C");  crds.push(x1,y1,x2,y2,x3,y3);  x=x3;  y=y3;
-  				}
-  				else if(cmu=="S") {
-  					var co = Math.max(crds.length-4, 0);
-  					var x1 = x+x-crds[co], y1 = y+y-crds[co+1];
-  					var x2=xi+ts[i++], y2=yi+ts[i++], x3=xi+ts[i++], y3=yi+ts[i++];  
-  					cmds.push("C");  crds.push(x1,y1,x2,y2,x3,y3);  x=x3;  y=y3;
-  				}
-  				else console.log("Unknown SVG command "+cmd);
-  			}
-  		}
-  	}
-  };
-  Typr.SVG._reps = function(ts, off, ps) {
-  	var i = off;
-  	while(i<ts.length) {  if((typeof ts[i]) == "string") break;  i+=ps;  }
-  	return (i-off)/ps;
-  };
-  // End Typr.js
-
-  // Begin Typr.U.js
-
-  if(Typr  ==null) Typr   = {};
-  if(Typr.U==null) Typr.U = {};
-
-
-  Typr.U.codeToGlyph = function(font, code)
-  {
-  	var cmap = font.cmap;
-  	
-  	var tind = -1;
-  	if(cmap.p0e4!=null) tind = cmap.p0e4;
-  	else if(cmap.p3e1!=null) tind = cmap.p3e1;
-  	else if(cmap.p1e0!=null) tind = cmap.p1e0;
-  	else if(cmap.p0e3!=null) tind = cmap.p0e3;
-  	
-  	if(tind==-1) throw "no familiar platform and encoding!";
-  	
-  	var tab = cmap.tables[tind];
-  	
-  	if(tab.format==0)
-  	{
-  		if(code>=tab.map.length) return 0;
-  		return tab.map[code];
-  	}
-  	else if(tab.format==4)
-  	{
-  		var sind = -1;
-  		for(var i=0; i<tab.endCount.length; i++)   if(code<=tab.endCount[i]){  sind=i;  break;  } 
-  		if(sind==-1) return 0;
-  		if(tab.startCount[sind]>code) return 0;
-  		
-  		var gli = 0;
-  		if(tab.idRangeOffset[sind]!=0) gli = tab.glyphIdArray[(code-tab.startCount[sind]) + (tab.idRangeOffset[sind]>>1) - (tab.idRangeOffset.length-sind)];
-  		else                           gli = code + tab.idDelta[sind];
-  		return gli & 0xFFFF;
-  	}
-  	else if(tab.format==12)
-  	{
-  		if(code>tab.groups[tab.groups.length-1][1]) return 0;
-  		for(var i=0; i<tab.groups.length; i++)
-  		{
-  			var grp = tab.groups[i];
-  			if(grp[0]<=code && code<=grp[1]) return grp[2] + (code-grp[0]);
-  		}
-  		return 0;
-  	}
-  	else throw "unknown cmap table format "+tab.format;
-  };
-
-
-  Typr.U.glyphToPath = function(font, gid)
-  {
-  	var path = { cmds:[], crds:[] };
-  	if(font.SVG && font.SVG.entries[gid]) {
-  		var p = font.SVG.entries[gid];  if(p==null) return path;
-  		if(typeof p == "string") {  p = Typr.SVG.toPath(p);  font.SVG.entries[gid]=p;  }
-  		return p;
-  	}
-  	else if(font.CFF) {
-  		var state = {x:0,y:0,stack:[],nStems:0,haveWidth:false,width: font.CFF.Private ? font.CFF.Private.defaultWidthX : 0,open:false};
-  		var cff=font.CFF, pdct = font.CFF.Private;
-  		if(cff.ROS) {
-  			var gi = 0;
-  			while(cff.FDSelect[gi+2]<=gid) gi+=2;
-  			pdct = cff.FDArray[cff.FDSelect[gi+1]].Private;
-  		}
-  		Typr.U._drawCFF(font.CFF.CharStrings[gid], state, cff, pdct, path);
-  	}
-  	else if(font.glyf) {  Typr.U._drawGlyf(gid, font, path);  }
-  	return path;
-  };
-
-  Typr.U._drawGlyf = function(gid, font, path)
-  {
-  	var gl = font.glyf[gid];
-  	if(gl==null) gl = font.glyf[gid] = Typr.glyf._parseGlyf(font, gid);
-  	if(gl!=null){
-  		if(gl.noc>-1) Typr.U._simpleGlyph(gl, path);
-  		else          Typr.U._compoGlyph (gl, font, path);
-  	}
-  };
-  Typr.U._simpleGlyph = function(gl, p)
-  {
-  	for(var c=0; c<gl.noc; c++)
-  	{
-  		var i0 = (c==0) ? 0 : (gl.endPts[c-1] + 1);
-  		var il = gl.endPts[c];
-  		
-  		for(var i=i0; i<=il; i++)
-  		{
-  			var pr = (i==i0)?il:(i-1);
-  			var nx = (i==il)?i0:(i+1);
-  			var onCurve = gl.flags[i]&1;
-  			var prOnCurve = gl.flags[pr]&1;
-  			var nxOnCurve = gl.flags[nx]&1;
-  			
-  			var x = gl.xs[i], y = gl.ys[i];
-  			
-  			if(i==i0) { 
-  				if(onCurve)  
-  				{
-  					if(prOnCurve) Typr.U.P.moveTo(p, gl.xs[pr], gl.ys[pr]); 
-  					else          {  Typr.U.P.moveTo(p,x,y);  continue;  /*  will do curveTo at il  */  }
-  				}
-  				else        
-  				{
-  					if(prOnCurve) Typr.U.P.moveTo(p,  gl.xs[pr],       gl.ys[pr]        );
-  					else          Typr.U.P.moveTo(p, (gl.xs[pr]+x)/2, (gl.ys[pr]+y)/2   ); 
-  				}
-  			}
-  			if(onCurve)
-  			{
-  				if(prOnCurve) Typr.U.P.lineTo(p,x,y);
-  			}
-  			else
-  			{
-  				if(nxOnCurve) Typr.U.P.qcurveTo(p, x, y, gl.xs[nx], gl.ys[nx]); 
-  				else          Typr.U.P.qcurveTo(p, x, y, (x+gl.xs[nx])/2, (y+gl.ys[nx])/2); 
-  			}
-  		}
-  		Typr.U.P.closePath(p);
-  	}
-  };
-  Typr.U._compoGlyph = function(gl, font, p)
-  {
-  	for(var j=0; j<gl.parts.length; j++)
-  	{
-  		var path = { cmds:[], crds:[] };
-  		var prt = gl.parts[j];
-  		Typr.U._drawGlyf(prt.glyphIndex, font, path);
-  		
-  		var m = prt.m;
-  		for(var i=0; i<path.crds.length; i+=2)
-  		{
-  			var x = path.crds[i  ], y = path.crds[i+1];
-  			p.crds.push(x*m.a + y*m.b + m.tx);
-  			p.crds.push(x*m.c + y*m.d + m.ty);
-  		}
-  		for(var i=0; i<path.cmds.length; i++) p.cmds.push(path.cmds[i]);
-  	}
-  };
-
-
-  Typr.U._getGlyphClass = function(g, cd)
-  {
-  	var intr = Typr._lctf.getInterval(cd, g);
-  	return intr==-1 ? 0 : cd[intr+2];
-  	//for(var i=0; i<cd.start.length; i++) 
-  	//	if(cd.start[i]<=g && cd.end[i]>=g) return cd.class[i];
-  	//return 0;
-  };
-
-  Typr.U.getPairAdjustment = function(font, g1, g2)
-  {
-  	//return 0;
-  	if(font.GPOS) {
-  		var gpos = font["GPOS"];
-  		var llist = gpos.lookupList, flist = gpos.featureList;
-  		var tused = [];
-  		for(var i=0; i<flist.length; i++) 
-  		{
-  			var fl = flist[i];  //console.log(fl);
-  			if(fl.tag!="kern") continue;
-  			for(var ti=0; ti<fl.tab.length; ti++) {
-  				if(tused[fl.tab[ti]]) continue;  tused[fl.tab[ti]] = true;
-  				var tab = llist[fl.tab[ti]];
-  				//console.log(tab);
-  				
-  				for(var j=0; j<tab.tabs.length; j++)
-  				{
-  					if(tab.tabs[i]==null) continue;
-  					var ltab = tab.tabs[j], ind;
-  					if(ltab.coverage) {  ind = Typr._lctf.coverageIndex(ltab.coverage, g1);  if(ind==-1) continue;  }
-  					
-  					if(tab.ltype==1) ;
-  					else if(tab.ltype==2)
-  					{
-  						var adj;
-  						if(ltab.fmt==1)
-  						{
-  							var right = ltab.pairsets[ind];
-  							for(var i=0; i<right.length; i++) if(right[i].gid2==g2) adj = right[i];
-  						}
-  						else if(ltab.fmt==2)
-  						{
-  							var c1 = Typr.U._getGlyphClass(g1, ltab.classDef1);
-  							var c2 = Typr.U._getGlyphClass(g2, ltab.classDef2);
-  							adj = ltab.matrix[c1][c2];
-  						}
-  						//if(adj) console.log(ltab, adj);
-  						if(adj && adj.val2) return adj.val2[2];
-  					}
-  				}
-  			}
-  		}
-  	}
-  	if(font.kern)
-  	{
-  		var ind1 = font.kern.glyph1.indexOf(g1);
-  		if(ind1!=-1)
-  		{
-  			var ind2 = font.kern.rval[ind1].glyph2.indexOf(g2);
-  			if(ind2!=-1) return font.kern.rval[ind1].vals[ind2];
-  		}
-  	}
-  	
-  	return 0;
-  };
-
-  Typr.U.stringToGlyphs = function(font, str)
-  {
-  	var gls = [];
-  	for(var i=0; i<str.length; i++) {
-  		var cc = str.codePointAt(i);  if(cc>0xffff) i++;
-  		gls.push(Typr.U.codeToGlyph(font, cc));
-  	}
-  	for(var i=0; i<str.length; i++) {
-  		var cc = str.codePointAt(i);  //
-  		if(cc==2367) {  var t=gls[i-1];  gls[i-1]=gls[i];  gls[i]=t;  }
-  		//if(cc==2381) {  var t=gls[i+1];  gls[i+1]=gls[i];  gls[i]=t;  }
-  		if(cc>0xffff) i++;
-  	}
-  	//console.log(gls.slice(0));
-  	
-  	//console.log(gls);  return gls;
-  	
-  	var gsub = font["GSUB"];  if(gsub==null) return gls;
-  	var llist = gsub.lookupList, flist = gsub.featureList;
-  	
-  	var cligs = ["rlig", "liga", "mset",  "isol","init","fina","medi",   "half", "pres", 
-  				"blws" /* Tibetan fonts like Himalaya.ttf */ ];
-  	
-  	//console.log(gls.slice(0));
-  	var tused = [];
-  	for(var fi=0; fi<flist.length; fi++)
-  	{
-  		var fl = flist[fi];  if(cligs.indexOf(fl.tag)==-1) continue;
-  		//if(fl.tag=="blwf") continue;
-  		//console.log(fl);
-  		//console.log(fl.tag);
-  		for(var ti=0; ti<fl.tab.length; ti++) {
-  			if(tused[fl.tab[ti]]) continue;  tused[fl.tab[ti]] = true;
-  			var tab = llist[fl.tab[ti]];
-  			//console.log(fl.tab[ti], tab.ltype);
-  			//console.log(fl.tag, tab);
-  			for(var ci=0; ci<gls.length; ci++) {
-  				var feat = Typr.U._getWPfeature(str, ci);
-  				if("isol,init,fina,medi".indexOf(fl.tag)!=-1 && fl.tag!=feat) continue;
-  				
-  				Typr.U._applySubs(gls, ci, tab, llist);
-  			}
-  		}
-  	}
-  	
-  	return gls;
-  };
-  Typr.U._getWPfeature = function(str, ci) {  // get Word Position feature
-  	var wsep = "\n\t\" ,.:;!?()  ،";
-  	var R = "آأؤإاةدذرزوٱٲٳٵٶٷڈډڊڋڌڍڎڏڐڑڒړڔڕږڗژڙۀۃۄۅۆۇۈۉۊۋۍۏےۓەۮۯܐܕܖܗܘܙܞܨܪܬܯݍݙݚݛݫݬݱݳݴݸݹࡀࡆࡇࡉࡔࡧࡩࡪࢪࢫࢬࢮࢱࢲࢹૅેૉ૊૎૏ૐ૑૒૝ૡ૤૯஁ஃ஄அஉ஌எஏ஑னப஫஬";
-  	var L = "ꡲ્૗";
-  	
-  	var slft = ci==0            || wsep.indexOf(str[ci-1])!=-1;
-  	var srgt = ci==str.length-1 || wsep.indexOf(str[ci+1])!=-1;
-  		
-  	if(!slft && R.indexOf(str[ci-1])!=-1) slft=true;
-  	if(!srgt && R.indexOf(str[ci  ])!=-1) srgt=true;
-  		
-  	if(!srgt && L.indexOf(str[ci+1])!=-1) srgt=true;
-  	if(!slft && L.indexOf(str[ci  ])!=-1) slft=true;
-  		
-  	var feat = null;
-  	if(slft) feat = srgt ? "isol" : "init";
-  	else     feat = srgt ? "fina" : "medi";
-  	
-  	return feat;
-  };
-  Typr.U._applySubs = function(gls, ci, tab, llist) {
-  	var rlim = gls.length-ci-1;
-  	//if(ci==0) console.log("++++ ", tab.ltype);
-  	for(var j=0; j<tab.tabs.length; j++)
-  	{
-  		if(tab.tabs[j]==null) continue;
-  		var ltab = tab.tabs[j], ind;
-  		if(ltab.coverage) {  ind = Typr._lctf.coverageIndex(ltab.coverage, gls[ci]);  if(ind==-1) continue;  }
-  		//if(ci==0) console.log(ind, ltab);
-  		//*
-  		if(tab.ltype==1) {
-  			var gl = gls[ci];
-  			if(ltab.fmt==1) gls[ci] = gls[ci]+ltab.delta;
-  			else            gls[ci] = ltab.newg[ind];
-  			//console.log("applying ... 1", ci, gl, gls[ci]);
-  		}//*
-  		else if(tab.ltype==4) {
-  			var vals = ltab.vals[ind];
-  			
-  			for(var k=0; k<vals.length; k++) {
-  				var lig = vals[k], rl = lig.chain.length;  if(rl>rlim) continue;
-  				var good = true, em1 = 0;
-  				for(var l=0; l<rl; l++) {  while(gls[ci+em1+(1+l)]==-1)em1++;  if(lig.chain[l]!=gls[ci+em1+(1+l)]) good=false;  }
-  				if(!good) continue;
-  				gls[ci]=lig.nglyph;
-  				for(var l=0; l<rl+em1; l++) gls[ci+l+1]=-1;   break;  // first character changed, other ligatures do not apply anymore
-  				//console.log("lig", ci, lig.chain, lig.nglyph);
-  				//console.log("applying ...");
-  			}
-  		}
-  		else  if(tab.ltype==5 && ltab.fmt==2) {
-  			var cind = Typr._lctf.getInterval(ltab.cDef, gls[ci]);
-  			var cls = ltab.cDef[cind+2], scs = ltab.scset[cls]; 
-  			for(var i=0; i<scs.length; i++) {
-  				var sc = scs[i], inp = sc.input;
-  				if(inp.length>rlim) continue;
-  				var good = true;
-  				for(var l=0; l<inp.length; l++) {
-  					var cind2 = Typr._lctf.getInterval(ltab.cDef, gls[ci+1+l]);
-  					if(cind==-1 && ltab.cDef[cind2+2]!=inp[l]) {  good=false;  break;  }
-  				}
-  				if(!good) continue;
-  				//console.log(ci, gl);
-  				var lrs = sc.substLookupRecords;
-  				for(var k=0; k<lrs.length; k+=2)
-  				{
-  					var gi = lrs[k], tabi = lrs[k+1];
-  					//Typr.U._applyType1(gls, ci+gi, llist[tabi]);
-  					//console.log(tabi, gls[ci+gi], llist[tabi]);
-  				}
-  			}
-  		}
-  		else if(tab.ltype==6 && ltab.fmt==3) {
-  			//if(ltab.backCvg.length==0) return;
-  			if(!Typr.U._glsCovered(gls, ltab.backCvg, ci-ltab.backCvg.length)) continue;
-  			if(!Typr.U._glsCovered(gls, ltab.inptCvg, ci)) continue;
-  			if(!Typr.U._glsCovered(gls, ltab.ahedCvg, ci+ltab.inptCvg.length)) continue;
-  			//console.log(ci, ltab);
-  			var lr = ltab.lookupRec;  //console.log(ci, gl, lr);
-  			for(var i=0; i<lr.length; i+=2) {
-  				var cind = lr[i], tab2 = llist[lr[i+1]];
-  				//console.log("-", lr[i+1], tab2);
-  				Typr.U._applySubs(gls, ci+cind, tab2, llist);
-  			}
-  		}
-  		//else console.log("Unknown table", tab.ltype, ltab.fmt);
-  		//*/
-  	}
-  };
-
-  Typr.U._glsCovered = function(gls, cvgs, ci) {
-  	for(var i=0; i<cvgs.length; i++) {
-  		var ind = Typr._lctf.coverageIndex(cvgs[i], gls[ci+i]);  if(ind==-1) return false;
-  	}
-  	return true;
-  };
-
-  Typr.U.glyphsToPath = function(font, gls, clr)
-  {	
-  	//gls = gls.reverse();//gls.slice(0,12).concat(gls.slice(12).reverse());
-  	
-  	var tpath = {cmds:[], crds:[]};
-  	var x = 0;
-  	
-  	for(var i=0; i<gls.length; i++)
-  	{
-  		var gid = gls[i];  if(gid==-1) continue;
-  		var gid2 = (i<gls.length-1 && gls[i+1]!=-1)  ? gls[i+1] : 0;
-  		var path = Typr.U.glyphToPath(font, gid);
-  		for(var j=0; j<path.crds.length; j+=2)
-  		{
-  			tpath.crds.push(path.crds[j] + x);
-  			tpath.crds.push(path.crds[j+1]);
-  		}
-  		if(clr) tpath.cmds.push(clr);
-  		for(var j=0; j<path.cmds.length; j++) tpath.cmds.push(path.cmds[j]);
-  		if(clr) tpath.cmds.push("X");
-  		x += font.hmtx.aWidth[gid];// - font.hmtx.lsBearing[gid];
-  		if(i<gls.length-1) x += Typr.U.getPairAdjustment(font, gid, gid2);
-  	}
-  	return tpath;
-  };
-
-  Typr.U.pathToSVG = function(path, prec)
-  {
-  	if(prec==null) prec = 5;
-  	var out = [], co = 0, lmap = {"M":2,"L":2,"Q":4,"C":6};
-  	for(var i=0; i<path.cmds.length; i++)
-  	{
-  		var cmd = path.cmds[i], cn = co+(lmap[cmd]?lmap[cmd]:0);  
-  		out.push(cmd);
-  		while(co<cn) {  var c = path.crds[co++];  out.push(parseFloat(c.toFixed(prec))+(co==cn?"":" "));  }
-  	}
-  	return out.join("");
-  };
-
-  Typr.U.pathToContext = function(path, ctx)
-  {
-  	var c = 0, crds = path.crds;
-  	
-  	for(var j=0; j<path.cmds.length; j++)
-  	{
-  		var cmd = path.cmds[j];
-  		if     (cmd=="M") {
-  			ctx.moveTo(crds[c], crds[c+1]);
-  			c+=2;
-  		}
-  		else if(cmd=="L") {
-  			ctx.lineTo(crds[c], crds[c+1]);
-  			c+=2;
-  		}
-  		else if(cmd=="C") {
-  			ctx.bezierCurveTo(crds[c], crds[c+1], crds[c+2], crds[c+3], crds[c+4], crds[c+5]);
-  			c+=6;
-  		}
-  		else if(cmd=="Q") {
-  			ctx.quadraticCurveTo(crds[c], crds[c+1], crds[c+2], crds[c+3]);
-  			c+=4;
-  		}
-  		else if(cmd.charAt(0)=="#") {
-  			ctx.beginPath();
-  			ctx.fillStyle = cmd;
-  		}
-  		else if(cmd=="Z") {
-  			ctx.closePath();
-  		}
-  		else if(cmd=="X") {
-  			ctx.fill();
-  		}
-  	}
-  };
-
-
-  Typr.U.P = {};
-  Typr.U.P.moveTo = function(p, x, y)
-  {
-  	p.cmds.push("M");  p.crds.push(x,y);
-  };
-  Typr.U.P.lineTo = function(p, x, y)
-  {
-  	p.cmds.push("L");  p.crds.push(x,y);
-  };
-  Typr.U.P.curveTo = function(p, a,b,c,d,e,f)
-  {
-  	p.cmds.push("C");  p.crds.push(a,b,c,d,e,f);
-  };
-  Typr.U.P.qcurveTo = function(p, a,b,c,d)
-  {
-  	p.cmds.push("Q");  p.crds.push(a,b,c,d);
-  };
-  Typr.U.P.closePath = function(p) {  p.cmds.push("Z");  };
-
-
-
-
-  Typr.U._drawCFF = function(cmds, state, font, pdct, p)
-  {
-  	var stack = state.stack;
-  	var nStems = state.nStems, haveWidth=state.haveWidth, width=state.width, open=state.open;
-  	var i=0;
-  	var x=state.x, y=state.y, c1x=0, c1y=0, c2x=0, c2y=0, c3x=0, c3y=0, c4x=0, c4y=0, jpx=0, jpy=0;
-  	
-  	var o = {val:0,size:0};
-  	//console.log(cmds);
-  	while(i<cmds.length)
-  	{
-  		Typr.CFF.getCharString(cmds, i, o);
-  		var v = o.val;
-  		i += o.size;
-  			
-  		if(v=="o1" || v=="o18")  //  hstem || hstemhm
-  		{
-  			var hasWidthArg;
-
-  			// The number of stem operators on the stack is always even.
-  			// If the value is uneven, that means a width is specified.
-  			hasWidthArg = stack.length % 2 !== 0;
-  			if (hasWidthArg && !haveWidth) {
-  				width = stack.shift() + pdct.nominalWidthX;
-  			}
-
-  			nStems += stack.length >> 1;
-  			stack.length = 0;
-  			haveWidth = true;
-  		}
-  		else if(v=="o3" || v=="o23")  // vstem || vstemhm
-  		{
-  			var hasWidthArg;
-
-  			// The number of stem operators on the stack is always even.
-  			// If the value is uneven, that means a width is specified.
-  			hasWidthArg = stack.length % 2 !== 0;
-  			if (hasWidthArg && !haveWidth) {
-  				width = stack.shift() + pdct.nominalWidthX;
-  			}
-
-  			nStems += stack.length >> 1;
-  			stack.length = 0;
-  			haveWidth = true;
-  		}
-  		else if(v=="o4")
-  		{
-  			if (stack.length > 1 && !haveWidth) {
-                          width = stack.shift() + pdct.nominalWidthX;
-                          haveWidth = true;
-                      }
-  			if(open) Typr.U.P.closePath(p);
-
-                      y += stack.pop();
-  					Typr.U.P.moveTo(p,x,y);   open=true;
-  		}
-  		else if(v=="o5")
-  		{
-  			while (stack.length > 0) {
-                          x += stack.shift();
-                          y += stack.shift();
-                          Typr.U.P.lineTo(p, x, y);
-                      }
-  		}
-  		else if(v=="o6" || v=="o7")  // hlineto || vlineto
-  		{
-  			var count = stack.length;
-  			var isX = (v == "o6");
-  			
-  			for(var j=0; j<count; j++) {
-  				var sval = stack.shift();
-  				
-  				if(isX) x += sval;  else  y += sval;
-  				isX = !isX;
-  				Typr.U.P.lineTo(p, x, y);
-  			}
-  		}
-  		else if(v=="o8" || v=="o24")	// rrcurveto || rcurveline
-  		{
-  			var count = stack.length;
-  			var index = 0;
-  			while(index+6 <= count) {
-  				c1x = x + stack.shift();
-  				c1y = y + stack.shift();
-  				c2x = c1x + stack.shift();
-  				c2y = c1y + stack.shift();
-  				x = c2x + stack.shift();
-  				y = c2y + stack.shift();
-  				Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, x, y);
-  				index+=6;
-  			}
-  			if(v=="o24")
-  			{
-  				x += stack.shift();
-  				y += stack.shift();
-  				Typr.U.P.lineTo(p, x, y);
-  			}
-  		}
-  		else if(v=="o11")  break;
-  		else if(v=="o1234" || v=="o1235" || v=="o1236" || v=="o1237")//if((v+"").slice(0,3)=="o12")
-  		{
-  			if(v=="o1234")
-  			{
-  				c1x = x   + stack.shift();    // dx1
-                  c1y = y;                      // dy1
-  				c2x = c1x + stack.shift();    // dx2
-  				c2y = c1y + stack.shift();    // dy2
-  				jpx = c2x + stack.shift();    // dx3
-  				jpy = c2y;                    // dy3
-  				c3x = jpx + stack.shift();    // dx4
-  				c3y = c2y;                    // dy4
-  				c4x = c3x + stack.shift();    // dx5
-  				c4y = y;                      // dy5
-  				x = c4x + stack.shift();      // dx6
-  				Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, jpx, jpy);
-  				Typr.U.P.curveTo(p, c3x, c3y, c4x, c4y, x, y);
-  				
-  			}
-  			if(v=="o1235")
-  			{
-  				c1x = x   + stack.shift();    // dx1
-  				c1y = y   + stack.shift();    // dy1
-  				c2x = c1x + stack.shift();    // dx2
-  				c2y = c1y + stack.shift();    // dy2
-  				jpx = c2x + stack.shift();    // dx3
-  				jpy = c2y + stack.shift();    // dy3
-  				c3x = jpx + stack.shift();    // dx4
-  				c3y = jpy + stack.shift();    // dy4
-  				c4x = c3x + stack.shift();    // dx5
-  				c4y = c3y + stack.shift();    // dy5
-  				x = c4x + stack.shift();      // dx6
-  				y = c4y + stack.shift();      // dy6
-  				stack.shift();                // flex depth
-  				Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, jpx, jpy);
-  				Typr.U.P.curveTo(p, c3x, c3y, c4x, c4y, x, y);
-  			}
-  			if(v=="o1236")
-  			{
-  				c1x = x   + stack.shift();    // dx1
-  				c1y = y   + stack.shift();    // dy1
-  				c2x = c1x + stack.shift();    // dx2
-  				c2y = c1y + stack.shift();    // dy2
-  				jpx = c2x + stack.shift();    // dx3
-  				jpy = c2y;                    // dy3
-  				c3x = jpx + stack.shift();    // dx4
-  				c3y = c2y;                    // dy4
-  				c4x = c3x + stack.shift();    // dx5
-  				c4y = c3y + stack.shift();    // dy5
-  				x = c4x + stack.shift();      // dx6
-  				Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, jpx, jpy);
-  				Typr.U.P.curveTo(p, c3x, c3y, c4x, c4y, x, y);
-  			}
-  			if(v=="o1237")
-  			{
-  				c1x = x   + stack.shift();    // dx1
-  				c1y = y   + stack.shift();    // dy1
-  				c2x = c1x + stack.shift();    // dx2
-  				c2y = c1y + stack.shift();    // dy2
-  				jpx = c2x + stack.shift();    // dx3
-  				jpy = c2y + stack.shift();    // dy3
-  				c3x = jpx + stack.shift();    // dx4
-  				c3y = jpy + stack.shift();    // dy4
-  				c4x = c3x + stack.shift();    // dx5
-  				c4y = c3y + stack.shift();    // dy5
-  				if (Math.abs(c4x - x) > Math.abs(c4y - y)) {
-  				    x = c4x + stack.shift();
-  				} else {
-  				    y = c4y + stack.shift();
-  				}
-  				Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, jpx, jpy);
-  				Typr.U.P.curveTo(p, c3x, c3y, c4x, c4y, x, y);
-  			}
-  		}
-  		else if(v=="o14")
-  		{
-  			if (stack.length > 0 && !haveWidth) {
-                          width = stack.shift() + font.nominalWidthX;
-                          haveWidth = true;
-                      }
-  			if(stack.length==4) // seac = standard encoding accented character
-  			{
-  				var adx = stack.shift();
-  				var ady = stack.shift();
-  				var bchar = stack.shift();
-  				var achar = stack.shift();
-  			
-  				
-  				var bind = Typr.CFF.glyphBySE(font, bchar);
-  				var aind = Typr.CFF.glyphBySE(font, achar);
-  				
-  				//console.log(bchar, bind);
-  				//console.log(achar, aind);
-  				//state.x=x; state.y=y; state.nStems=nStems; state.haveWidth=haveWidth; state.width=width;  state.open=open;
-  				
-  				Typr.U._drawCFF(font.CharStrings[bind], state,font,pdct,p);
-  				state.x = adx; state.y = ady;
-  				Typr.U._drawCFF(font.CharStrings[aind], state,font,pdct,p);
-  				
-  				//x=state.x; y=state.y; nStems=state.nStems; haveWidth=state.haveWidth; width=state.width;  open=state.open;
-  			}
-  			if(open) {  Typr.U.P.closePath(p);  open=false;  }
-  		}		
-  		else if(v=="o19" || v=="o20") 
-  		{ 
-  			var hasWidthArg;
-
-  			// The number of stem operators on the stack is always even.
-  			// If the value is uneven, that means a width is specified.
-  			hasWidthArg = stack.length % 2 !== 0;
-  			if (hasWidthArg && !haveWidth) {
-  				width = stack.shift() + pdct.nominalWidthX;
-  			}
-
-  			nStems += stack.length >> 1;
-  			stack.length = 0;
-  			haveWidth = true;
-  			
-  			i += (nStems + 7) >> 3;
-  		}
-  		
-  		else if(v=="o21") {
-  			if (stack.length > 2 && !haveWidth) {
-                          width = stack.shift() + pdct.nominalWidthX;
-                          haveWidth = true;
-                      }
-
-                      y += stack.pop();
-                      x += stack.pop();
-  					
-  					if(open) Typr.U.P.closePath(p);
-                      Typr.U.P.moveTo(p,x,y);   open=true;
-  		}
-  		else if(v=="o22")
-  		{
-  			 if (stack.length > 1 && !haveWidth) {
-                          width = stack.shift() + pdct.nominalWidthX;
-                          haveWidth = true;
-                      }
-  					
-                      x += stack.pop();
-  					
-  					if(open) Typr.U.P.closePath(p);
-  					Typr.U.P.moveTo(p,x,y);   open=true;                    
-  		}
-  		else if(v=="o25")
-  		{
-  			while (stack.length > 6) {
-                          x += stack.shift();
-                          y += stack.shift();
-                          Typr.U.P.lineTo(p, x, y);
-                      }
-
-                      c1x = x + stack.shift();
-                      c1y = y + stack.shift();
-                      c2x = c1x + stack.shift();
-                      c2y = c1y + stack.shift();
-                      x = c2x + stack.shift();
-                      y = c2y + stack.shift();
-                      Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, x, y);
-  		}
-  		else if(v=="o26") 
-  		{
-  			if (stack.length % 2) {
-                          x += stack.shift();
-                      }
-
-                      while (stack.length > 0) {
-                          c1x = x;
-                          c1y = y + stack.shift();
-                          c2x = c1x + stack.shift();
-                          c2y = c1y + stack.shift();
-                          x = c2x;
-                          y = c2y + stack.shift();
-                          Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, x, y);
-                      }
-
-  		}
-  		else if(v=="o27")
-  		{
-  			if (stack.length % 2) {
-                          y += stack.shift();
-                      }
-
-                      while (stack.length > 0) {
-                          c1x = x + stack.shift();
-                          c1y = y;
-                          c2x = c1x + stack.shift();
-                          c2y = c1y + stack.shift();
-                          x = c2x + stack.shift();
-                          y = c2y;
-                          Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, x, y);
-                      }
-  		}
-  		else if(v=="o10" || v=="o29")	// callsubr || callgsubr
-  		{
-  			var obj = (v=="o10" ? pdct : font);
-  			if(stack.length==0) { console.log("error: empty stack");  }
-  			else {
-  				var ind = stack.pop();
-  				var subr = obj.Subrs[ ind + obj.Bias ];
-  				state.x=x; state.y=y; state.nStems=nStems; state.haveWidth=haveWidth; state.width=width;  state.open=open;
-  				Typr.U._drawCFF(subr, state,font,pdct,p);
-  				x=state.x; y=state.y; nStems=state.nStems; haveWidth=state.haveWidth; width=state.width;  open=state.open;
-  			}
-  		}
-  		else if(v=="o30" || v=="o31")   // vhcurveto || hvcurveto
-  		{
-  			var count, count1 = stack.length;
-  			var index = 0;
-  			var alternate = v == "o31";
-  			
-  			count  = count1 & ~2;
-  			index += count1 - count;
-  			
-  			while ( index < count ) 
-  			{
-  				if(alternate)
-  				{
-  					c1x = x + stack.shift();
-  					c1y = y;
-  					c2x = c1x + stack.shift();
-  					c2y = c1y + stack.shift();
-  					y = c2y + stack.shift();
-  					if(count-index == 5) {  x = c2x + stack.shift();  index++;  }
-  					else x = c2x;
-  					alternate = false;
-  				}
-  				else
-  				{
-  					c1x = x;
-  					c1y = y + stack.shift();
-  					c2x = c1x + stack.shift();
-  					c2y = c1y + stack.shift();
-  					x = c2x + stack.shift();
-  					if(count-index == 5) {  y = c2y + stack.shift();  index++;  }
-  					else y = c2y;
-  					alternate = true;
-  				}
-                  Typr.U.P.curveTo(p, c1x, c1y, c2x, c2y, x, y);
-  				index += 4;
-  			}
-  		}
-  		
-  		else if((v+"").charAt(0)=="o") {   console.log("Unknown operation: "+v, cmds); throw v;  }
-  		else stack.push(v);
-  	}
-  	//console.log(cmds);
-  	state.x=x; state.y=y; state.nStems=nStems; state.haveWidth=haveWidth; state.width=width; state.open=open;
-  };
-
-  // End Typr.U.js
-
-  return Typr
-
-  }
-
-  // Custom bundle of woff2otf (https://github.com/arty-name/woff2otf) with tiny-inflate 
-  // (https://github.com/foliojs/tiny-inflate) for use in troika-3d-text. 
-  // Original licenses apply: 
-  // - tiny-inflate: https://github.com/foliojs/tiny-inflate/blob/master/LICENSE (MIT)
-  // - woff2otf.js: https://github.com/arty-name/woff2otf/blob/master/woff2otf.js (Apache2)
-
-  function woff2otfFactory() {
-
-  // Begin tinyInflate
-  const tinyInflate = (function() {
-    const module = {};
-    var TINF_OK = 0;
-  var TINF_DATA_ERROR = -3;
-
-  function Tree() {
-    this.table = new Uint16Array(16);   /* table of code length counts */
-    this.trans = new Uint16Array(288);  /* code -> symbol translation table */
-  }
-
-  function Data(source, dest) {
-    this.source = source;
-    this.sourceIndex = 0;
-    this.tag = 0;
-    this.bitcount = 0;
-    
-    this.dest = dest;
-    this.destLen = 0;
-    
-    this.ltree = new Tree();  /* dynamic length/symbol tree */
-    this.dtree = new Tree();  /* dynamic distance tree */
-  }
-
-  /* --------------------------------------------------- *
-   * -- uninitialized global data (static structures) -- *
-   * --------------------------------------------------- */
-
-  var sltree = new Tree();
-  var sdtree = new Tree();
-
-  /* extra bits and base tables for length codes */
-  var length_bits = new Uint8Array(30);
-  var length_base = new Uint16Array(30);
-
-  /* extra bits and base tables for distance codes */
-  var dist_bits = new Uint8Array(30);
-  var dist_base = new Uint16Array(30);
-
-  /* special ordering of code length codes */
-  var clcidx = new Uint8Array([
-    16, 17, 18, 0, 8, 7, 9, 6,
-    10, 5, 11, 4, 12, 3, 13, 2,
-    14, 1, 15
-  ]);
-
-  /* used by tinf_decode_trees, avoids allocations every call */
-  var code_tree = new Tree();
-  var lengths = new Uint8Array(288 + 32);
-
-  /* ----------------------- *
-   * -- utility functions -- *
-   * ----------------------- */
-
-  /* build extra bits and base tables */
-  function tinf_build_bits_base(bits, base, delta, first) {
-    var i, sum;
-
-    /* build bits table */
-    for (i = 0; i < delta; ++i) bits[i] = 0;
-    for (i = 0; i < 30 - delta; ++i) bits[i + delta] = i / delta | 0;
-
-    /* build base table */
-    for (sum = first, i = 0; i < 30; ++i) {
-      base[i] = sum;
-      sum += 1 << bits[i];
-    }
-  }
-
-  /* build the fixed huffman trees */
-  function tinf_build_fixed_trees(lt, dt) {
-    var i;
-
-    /* build fixed length tree */
-    for (i = 0; i < 7; ++i) lt.table[i] = 0;
-
-    lt.table[7] = 24;
-    lt.table[8] = 152;
-    lt.table[9] = 112;
-
-    for (i = 0; i < 24; ++i) lt.trans[i] = 256 + i;
-    for (i = 0; i < 144; ++i) lt.trans[24 + i] = i;
-    for (i = 0; i < 8; ++i) lt.trans[24 + 144 + i] = 280 + i;
-    for (i = 0; i < 112; ++i) lt.trans[24 + 144 + 8 + i] = 144 + i;
-
-    /* build fixed distance tree */
-    for (i = 0; i < 5; ++i) dt.table[i] = 0;
-
-    dt.table[5] = 32;
-
-    for (i = 0; i < 32; ++i) dt.trans[i] = i;
-  }
-
-  /* given an array of code lengths, build a tree */
-  var offs = new Uint16Array(16);
-
-  function tinf_build_tree(t, lengths, off, num) {
-    var i, sum;
-
-    /* clear code length count table */
-    for (i = 0; i < 16; ++i) t.table[i] = 0;
-
-    /* scan symbol lengths, and sum code length counts */
-    for (i = 0; i < num; ++i) t.table[lengths[off + i]]++;
-
-    t.table[0] = 0;
-
-    /* compute offset table for distribution sort */
-    for (sum = 0, i = 0; i < 16; ++i) {
-      offs[i] = sum;
-      sum += t.table[i];
-    }
-
-    /* create code->symbol translation table (symbols sorted by code) */
-    for (i = 0; i < num; ++i) {
-      if (lengths[off + i]) t.trans[offs[lengths[off + i]]++] = i;
-    }
-  }
-
-  /* ---------------------- *
-   * -- decode functions -- *
-   * ---------------------- */
-
-  /* get one bit from source stream */
-  function tinf_getbit(d) {
-    /* check if tag is empty */
-    if (!d.bitcount--) {
-      /* load next tag */
-      d.tag = d.source[d.sourceIndex++];
-      d.bitcount = 7;
-    }
-
-    /* shift bit out of tag */
-    var bit = d.tag & 1;
-    d.tag >>>= 1;
-
-    return bit;
-  }
-
-  /* read a num bit value from a stream and add base */
-  function tinf_read_bits(d, num, base) {
-    if (!num)
-      return base;
-
-    while (d.bitcount < 24) {
-      d.tag |= d.source[d.sourceIndex++] << d.bitcount;
-      d.bitcount += 8;
-    }
-
-    var val = d.tag & (0xffff >>> (16 - num));
-    d.tag >>>= num;
-    d.bitcount -= num;
-    return val + base;
-  }
-
-  /* given a data stream and a tree, decode a symbol */
-  function tinf_decode_symbol(d, t) {
-    while (d.bitcount < 24) {
-      d.tag |= d.source[d.sourceIndex++] << d.bitcount;
-      d.bitcount += 8;
-    }
-    
-    var sum = 0, cur = 0, len = 0;
-    var tag = d.tag;
-
-    /* get more bits while code value is above sum */
-    do {
-      cur = 2 * cur + (tag & 1);
-      tag >>>= 1;
-      ++len;
-
-      sum += t.table[len];
-      cur -= t.table[len];
-    } while (cur >= 0);
-    
-    d.tag = tag;
-    d.bitcount -= len;
-
-    return t.trans[sum + cur];
-  }
-
-  /* given a data stream, decode dynamic trees from it */
-  function tinf_decode_trees(d, lt, dt) {
-    var hlit, hdist, hclen;
-    var i, num, length;
-
-    /* get 5 bits HLIT (257-286) */
-    hlit = tinf_read_bits(d, 5, 257);
-
-    /* get 5 bits HDIST (1-32) */
-    hdist = tinf_read_bits(d, 5, 1);
-
-    /* get 4 bits HCLEN (4-19) */
-    hclen = tinf_read_bits(d, 4, 4);
-
-    for (i = 0; i < 19; ++i) lengths[i] = 0;
-
-    /* read code lengths for code length alphabet */
-    for (i = 0; i < hclen; ++i) {
-      /* get 3 bits code length (0-7) */
-      var clen = tinf_read_bits(d, 3, 0);
-      lengths[clcidx[i]] = clen;
-    }
-
-    /* build code length tree */
-    tinf_build_tree(code_tree, lengths, 0, 19);
-
-    /* decode code lengths for the dynamic trees */
-    for (num = 0; num < hlit + hdist;) {
-      var sym = tinf_decode_symbol(d, code_tree);
-
-      switch (sym) {
-        case 16:
-          /* copy previous code length 3-6 times (read 2 bits) */
-          var prev = lengths[num - 1];
-          for (length = tinf_read_bits(d, 2, 3); length; --length) {
-            lengths[num++] = prev;
-          }
-          break;
-        case 17:
-          /* repeat code length 0 for 3-10 times (read 3 bits) */
-          for (length = tinf_read_bits(d, 3, 3); length; --length) {
-            lengths[num++] = 0;
-          }
-          break;
-        case 18:
-          /* repeat code length 0 for 11-138 times (read 7 bits) */
-          for (length = tinf_read_bits(d, 7, 11); length; --length) {
-            lengths[num++] = 0;
-          }
-          break;
-        default:
-          /* values 0-15 represent the actual code lengths */
-          lengths[num++] = sym;
-          break;
-      }
-    }
-
-    /* build dynamic trees */
-    tinf_build_tree(lt, lengths, 0, hlit);
-    tinf_build_tree(dt, lengths, hlit, hdist);
-  }
-
-  /* ----------------------------- *
-   * -- block inflate functions -- *
-   * ----------------------------- */
-
-  /* given a stream and two trees, inflate a block of data */
-  function tinf_inflate_block_data(d, lt, dt) {
-    while (1) {
-      var sym = tinf_decode_symbol(d, lt);
-
-      /* check for end of block */
-      if (sym === 256) {
-        return TINF_OK;
-      }
-
-      if (sym < 256) {
-        d.dest[d.destLen++] = sym;
-      } else {
-        var length, dist, offs;
-        var i;
-
-        sym -= 257;
-
-        /* possibly get more bits from length code */
-        length = tinf_read_bits(d, length_bits[sym], length_base[sym]);
-
-        dist = tinf_decode_symbol(d, dt);
-
-        /* possibly get more bits from distance code */
-        offs = d.destLen - tinf_read_bits(d, dist_bits[dist], dist_base[dist]);
-
-        /* copy match */
-        for (i = offs; i < offs + length; ++i) {
-          d.dest[d.destLen++] = d.dest[i];
-        }
-      }
-    }
-  }
-
-  /* inflate an uncompressed block of data */
-  function tinf_inflate_uncompressed_block(d) {
-    var length, invlength;
-    var i;
-    
-    /* unread from bitbuffer */
-    while (d.bitcount > 8) {
-      d.sourceIndex--;
-      d.bitcount -= 8;
-    }
-
-    /* get length */
-    length = d.source[d.sourceIndex + 1];
-    length = 256 * length + d.source[d.sourceIndex];
-
-    /* get one's complement of length */
-    invlength = d.source[d.sourceIndex + 3];
-    invlength = 256 * invlength + d.source[d.sourceIndex + 2];
-
-    /* check length */
-    if (length !== (~invlength & 0x0000ffff))
-      return TINF_DATA_ERROR;
-
-    d.sourceIndex += 4;
-
-    /* copy block */
-    for (i = length; i; --i)
-      d.dest[d.destLen++] = d.source[d.sourceIndex++];
-
-    /* make sure we start next block on a byte boundary */
-    d.bitcount = 0;
-
-    return TINF_OK;
-  }
-
-  /* inflate stream from source to dest */
-  function tinf_uncompress(source, dest) {
-    var d = new Data(source, dest);
-    var bfinal, btype, res;
-
-    do {
-      /* read final block flag */
-      bfinal = tinf_getbit(d);
-
-      /* read block type (2 bits) */
-      btype = tinf_read_bits(d, 2, 0);
-
-      /* decompress block */
-      switch (btype) {
-        case 0:
-          /* decompress uncompressed block */
-          res = tinf_inflate_uncompressed_block(d);
-          break;
-        case 1:
-          /* decompress block with fixed huffman trees */
-          res = tinf_inflate_block_data(d, sltree, sdtree);
-          break;
-        case 2:
-          /* decompress block with dynamic huffman trees */
-          tinf_decode_trees(d, d.ltree, d.dtree);
-          res = tinf_inflate_block_data(d, d.ltree, d.dtree);
-          break;
-        default:
-          res = TINF_DATA_ERROR;
-      }
-
-      if (res !== TINF_OK)
-        throw new Error('Data error');
-
-    } while (!bfinal);
-
-    if (d.destLen < d.dest.length) {
-      if (typeof d.dest.slice === 'function')
-        return d.dest.slice(0, d.destLen);
-      else
-        return d.dest.subarray(0, d.destLen);
-    }
-    
-    return d.dest;
-  }
-
-  /* -------------------- *
-   * -- initialization -- *
-   * -------------------- */
-
-  /* build fixed huffman trees */
-  tinf_build_fixed_trees(sltree, sdtree);
-
-  /* build extra bits and base tables */
-  tinf_build_bits_base(length_bits, length_base, 4, 3);
-  tinf_build_bits_base(dist_bits, dist_base, 2, 1);
-
-  /* fix a special case */
-  length_bits[28] = 0;
-  length_base[28] = 258;
-
-  module.exports = tinf_uncompress;
-
-    return module.exports
-  })();
-  // End tinyInflate
-
-  // Begin woff2otf.js
-  /*
-   Copyright 2012, Steffen Hanikel (https://github.com/hanikesn)
-   Modified by Artemy Tregubenko, 2014 (https://github.com/arty-name/woff2otf)
-   Modified by Jason Johnston, 2019 (pako --> tiny-inflate)
-   
-     Licensed under the Apache License, Version 2.0 (the "License");
-     you may not use this file except in compliance with the License.
-     You may obtain a copy of the License at
-
-         http://www.apache.org/licenses/LICENSE-2.0
-
-     Unless required by applicable law or agreed to in writing, software
-     distributed under the License is distributed on an "AS IS" BASIS,
-     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-     See the License for the specific language governing permissions and
-     limitations under the License.
-
-   A tool to convert a WOFF back to a TTF/OTF font file, in pure Javascript
+  /*!
+  Custom build of Typr.ts (https://github.com/fredli74/Typr.ts) for use in Troika text rendering.
+  Original MIT license applies: https://github.com/fredli74/Typr.ts/blob/master/LICENSE
   */
+  function typrFactory(){return "undefined"==typeof window&&(self.window=self),function(r){var e={parse:function(r){var t=e._bin,a=new Uint8Array(r);if("ttcf"==t.readASCII(a,0,4)){var n=4;t.readUshort(a,n),n+=2,t.readUshort(a,n),n+=2;var o=t.readUint(a,n);n+=4;for(var s=[],i=0;i<o;i++){var h=t.readUint(a,n);n+=4,s.push(e._readFont(a,h));}return s}return [e._readFont(a,0)]},_readFont:function(r,t){var a=e._bin,n=t;a.readFixed(r,t),t+=4;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2;for(var s=["cmap","head","hhea","maxp","hmtx","name","OS/2","post","loca","glyf","kern","CFF ","GPOS","GSUB","SVG "],i={_data:r,_offset:n},h={},f=0;f<o;f++){var d=a.readASCII(r,t,4);t+=4,a.readUint(r,t),t+=4;var u=a.readUint(r,t);t+=4;var l=a.readUint(r,t);t+=4,h[d]={offset:u,length:l};}for(f=0;f<s.length;f++){var v=s[f];h[v]&&(i[v.trim()]=e[v.trim()].parse(r,h[v].offset,h[v].length,i));}return i},_tabOffset:function(r,t,a){for(var n=e._bin,o=n.readUshort(r,a+4),s=a+12,i=0;i<o;i++){var h=n.readASCII(r,s,4);s+=4,n.readUint(r,s),s+=4;var f=n.readUint(r,s);if(s+=4,n.readUint(r,s),s+=4,h==t)return f}return 0}};e._bin={readFixed:function(r,e){return (r[e]<<8|r[e+1])+(r[e+2]<<8|r[e+3])/65540},readF2dot14:function(r,t){return e._bin.readShort(r,t)/16384},readInt:function(r,t){var a=e._bin.t.uint8;return a[0]=r[t+3],a[1]=r[t+2],a[2]=r[t+1],a[3]=r[t],e._bin.t.int32[0]},readInt8:function(r,t){return e._bin.t.uint8[0]=r[t],e._bin.t.int8[0]},readShort:function(r,t){var a=e._bin.t.uint8;return a[1]=r[t],a[0]=r[t+1],e._bin.t.int16[0]},readUshort:function(r,e){return r[e]<<8|r[e+1]},readUshorts:function(r,t,a){for(var n=[],o=0;o<a;o++)n.push(e._bin.readUshort(r,t+2*o));return n},readUint:function(r,t){var a=e._bin.t.uint8;return a[3]=r[t],a[2]=r[t+1],a[1]=r[t+2],a[0]=r[t+3],e._bin.t.uint32[0]},readUint64:function(r,t){return 4294967296*e._bin.readUint(r,t)+e._bin.readUint(r,t+4)},readASCII:function(r,e,t){for(var a="",n=0;n<t;n++)a+=String.fromCharCode(r[e+n]);return a},readUnicode:function(r,e,t){for(var a="",n=0;n<t;n++){var o=r[e++]<<8|r[e++];a+=String.fromCharCode(o);}return a},_tdec:"undefined"!=typeof window&&window.TextDecoder?new window.TextDecoder:null,readUTF8:function(r,t,a){var n=e._bin._tdec;return n&&0==t&&a==r.length?n.decode(r):e._bin.readASCII(r,t,a)},readBytes:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(r[e+n]);return a},readASCIIArray:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(String.fromCharCode(r[e+n]));return a}},e._bin.t={buff:new ArrayBuffer(8)},e._bin.t.int8=new Int8Array(e._bin.t.buff),e._bin.t.uint8=new Uint8Array(e._bin.t.buff),e._bin.t.int16=new Int16Array(e._bin.t.buff),e._bin.t.uint16=new Uint16Array(e._bin.t.buff),e._bin.t.int32=new Int32Array(e._bin.t.buff),e._bin.t.uint32=new Uint32Array(e._bin.t.buff),e._lctf={},e._lctf.parse=function(r,t,a,n,o){var s=e._bin,i={},h=t;s.readFixed(r,t),t+=4;var f=s.readUshort(r,t);t+=2;var d=s.readUshort(r,t);t+=2;var u=s.readUshort(r,t);return t+=2,i.scriptList=e._lctf.readScriptList(r,h+f),i.featureList=e._lctf.readFeatureList(r,h+d),i.lookupList=e._lctf.readLookupList(r,h+u,o),i},e._lctf.readLookupList=function(r,t,a){var n=e._bin,o=t,s=[],i=n.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=n.readUshort(r,t);t+=2;var d=e._lctf.readLookupTable(r,o+f,a);s.push(d);}return s},e._lctf.readLookupTable=function(r,t,a){var n=e._bin,o=t,s={tabs:[]};s.ltype=n.readUshort(r,t),t+=2,s.flag=n.readUshort(r,t),t+=2;var i=n.readUshort(r,t);t+=2;for(var h=s.ltype,f=0;f<i;f++){var d=n.readUshort(r,t);t+=2;var u=a(r,h,o+d,s);s.tabs.push(u);}return s},e._lctf.numOfOnes=function(r){for(var e=0,t=0;t<32;t++)0!=(r>>>t&1)&&e++;return e},e._lctf.readClassDef=function(r,t){var a=e._bin,n=[],o=a.readUshort(r,t);if(t+=2,1==o){var s=a.readUshort(r,t);t+=2;var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++)n.push(s+h),n.push(s+h),n.push(a.readUshort(r,t)),t+=2;}if(2==o){var f=a.readUshort(r,t);t+=2;for(h=0;h<f;h++)n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2;}return n},e._lctf.getInterval=function(r,e){for(var t=0;t<r.length;t+=3){var a=r[t],n=r[t+1];if(r[t+2],a<=e&&e<=n)return t}return -1},e._lctf.readCoverage=function(r,t){var a=e._bin,n={};n.fmt=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,1==n.fmt&&(n.tab=a.readUshorts(r,t,o)),2==n.fmt&&(n.tab=a.readUshorts(r,t,3*o)),n},e._lctf.coverageIndex=function(r,t){var a=r.tab;if(1==r.fmt)return a.indexOf(t);if(2==r.fmt){var n=e._lctf.getInterval(a,t);if(-1!=n)return a[n+2]+(t-a[n])}return -1},e._lctf.readFeatureList=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2;var d=e._lctf.readFeatureTable(r,n+f);d.tag=h.trim(),o.push(d);}return o},e._lctf.readFeatureTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,s>0&&(o.featureParams=n+s);var i=a.readUshort(r,t);t+=2,o.tab=[];for(var h=0;h<i;h++)o.tab.push(a.readUshort(r,t+2*h));return o},e._lctf.readScriptList=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2,o[h.trim()]=e._lctf.readScriptTable(r,n+f);}return o},e._lctf.readScriptTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,o.default=e._lctf.readLangSysTable(r,n+s);var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=a.readASCII(r,t,4);t+=4;var d=a.readUshort(r,t);t+=2,o[f.trim()]=e._lctf.readLangSysTable(r,n+d);}return o},e._lctf.readLangSysTable=function(r,t){var a=e._bin,n={};a.readUshort(r,t),t+=2,n.reqFeature=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,n.features=a.readUshorts(r,t,o),n},e.CFF={},e.CFF.parse=function(r,t,a){var n=e._bin;(r=new Uint8Array(r.buffer,t,a))[t=0],r[++t],r[++t],r[++t],t++;var o=[];t=e.CFF.readIndex(r,t,o);for(var s=[],i=0;i<o.length-1;i++)s.push(n.readASCII(r,t+o[i],o[i+1]-o[i]));t+=o[o.length-1];var h=[];t=e.CFF.readIndex(r,t,h);var f=[];for(i=0;i<h.length-1;i++)f.push(e.CFF.readDict(r,t+h[i],t+h[i+1]));t+=h[h.length-1];var d=f[0],u=[];t=e.CFF.readIndex(r,t,u);var l=[];for(i=0;i<u.length-1;i++)l.push(n.readASCII(r,t+u[i],u[i+1]-u[i]));if(t+=u[u.length-1],e.CFF.readSubrs(r,t,d),d.CharStrings){t=d.CharStrings;u=[];t=e.CFF.readIndex(r,t,u);var v=[];for(i=0;i<u.length-1;i++)v.push(n.readBytes(r,t+u[i],u[i+1]-u[i]));d.CharStrings=v;}if(d.ROS){t=d.FDArray;var c=[];t=e.CFF.readIndex(r,t,c),d.FDArray=[];for(i=0;i<c.length-1;i++){var p=e.CFF.readDict(r,t+c[i],t+c[i+1]);e.CFF._readFDict(r,p,l),d.FDArray.push(p);}t+=c[c.length-1],t=d.FDSelect,d.FDSelect=[];var U=r[t];if(t++,3!=U)throw U;var g=n.readUshort(r,t);t+=2;for(i=0;i<g+1;i++)d.FDSelect.push(n.readUshort(r,t),r[t+2]),t+=3;}return d.Encoding&&(d.Encoding=e.CFF.readEncoding(r,d.Encoding,d.CharStrings.length)),d.charset&&(d.charset=e.CFF.readCharset(r,d.charset,d.CharStrings.length)),e.CFF._readFDict(r,d,l),d},e.CFF._readFDict=function(r,t,a){var n;for(var o in t.Private&&(n=t.Private[1],t.Private=e.CFF.readDict(r,n,n+t.Private[0]),t.Private.Subrs&&e.CFF.readSubrs(r,n+t.Private.Subrs,t.Private)),t)-1!=["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(o)&&(t[o]=a[t[o]-426+35]);},e.CFF.readSubrs=function(r,t,a){var n=e._bin,o=[];t=e.CFF.readIndex(r,t,o);var s,i=o.length;s=i<1240?107:i<33900?1131:32768,a.Bias=s,a.Subrs=[];for(var h=0;h<o.length-1;h++)a.Subrs.push(n.readBytes(r,t+o[h],o[h+1]-o[h]));},e.CFF.tableSE=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,0,111,112,113,114,0,115,116,117,118,119,120,121,122,0,123,0,124,125,126,127,128,129,130,131,0,132,133,0,134,135,136,137,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,138,0,139,0,0,0,0,140,141,142,143,0,0,0,0,0,144,0,0,0,145,0,0,146,147,148,149,0,0,0,0],e.CFF.glyphByUnicode=function(r,e){for(var t=0;t<r.charset.length;t++)if(r.charset[t]==e)return t;return -1},e.CFF.glyphBySE=function(r,t){return t<0||t>255?-1:e.CFF.glyphByUnicode(r,e.CFF.tableSE[t])},e.CFF.readEncoding=function(r,t,a){e._bin;var n=[".notdef"],o=r[t];if(t++,0!=o)throw "error: unknown encoding format: "+o;var s=r[t];t++;for(var i=0;i<s;i++)n.push(r[t+i]);return n},e.CFF.readCharset=function(r,t,a){var n=e._bin,o=[".notdef"],s=r[t];if(t++,0==s)for(var i=0;i<a;i++){var h=n.readUshort(r,t);t+=2,o.push(h);}else {if(1!=s&&2!=s)throw "error: format: "+s;for(;o.length<a;){h=n.readUshort(r,t);t+=2;var f=0;1==s?(f=r[t],t++):(f=n.readUshort(r,t),t+=2);for(i=0;i<=f;i++)o.push(h),h++;}}return o},e.CFF.readIndex=function(r,t,a){var n=e._bin,o=n.readUshort(r,t)+1,s=r[t+=2];if(t++,1==s)for(var i=0;i<o;i++)a.push(r[t+i]);else if(2==s)for(i=0;i<o;i++)a.push(n.readUshort(r,t+2*i));else if(3==s)for(i=0;i<o;i++)a.push(16777215&n.readUint(r,t+3*i-1));else if(1!=o)throw "unsupported offset size: "+s+", count: "+o;return (t+=o*s)-1},e.CFF.getCharString=function(r,t,a){var n=e._bin,o=r[t],s=r[t+1];r[t+2],r[t+3],r[t+4];var i=1,h=null,f=null;o<=20&&(h=o,i=1),12==o&&(h=100*o+s,i=2),21<=o&&o<=27&&(h=o,i=1),28==o&&(f=n.readShort(r,t+1),i=3),29<=o&&o<=31&&(h=o,i=1),32<=o&&o<=246&&(f=o-139,i=1),247<=o&&o<=250&&(f=256*(o-247)+s+108,i=2),251<=o&&o<=254&&(f=256*-(o-251)-s-108,i=2),255==o&&(f=n.readInt(r,t+1)/65535,i=5),a.val=null!=f?f:"o"+h,a.size=i;},e.CFF.readCharString=function(r,t,a){for(var n=t+a,o=e._bin,s=[];t<n;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;i<=20&&(d=i,f=1),12==i&&(d=100*i+h,f=2),19!=i&&20!=i||(d=i,f=2),21<=i&&i<=27&&(d=i,f=1),28==i&&(u=o.readShort(r,t+1),f=3),29<=i&&i<=31&&(d=i,f=1),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i&&(u=o.readInt(r,t+1)/65535,f=5),s.push(null!=u?u:"o"+d),t+=f;}return s},e.CFF.readDict=function(r,t,a){for(var n=e._bin,o={},s=[];t<a;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;if(28==i&&(u=n.readShort(r,t+1),f=3),29==i&&(u=n.readInt(r,t+1),f=5),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i)throw u=n.readInt(r,t+1)/65535,f=5,"unknown number";if(30==i){var l=[];for(f=1;;){var v=r[t+f];f++;var c=v>>4,p=15&v;if(15!=c&&l.push(c),15!=p&&l.push(p),15==p)break}for(var U="",g=[0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"],S=0;S<l.length;S++)U+=g[l[S]];u=parseFloat(U);}if(i<=21)if(d=["version","Notice","FullName","FamilyName","Weight","FontBBox","BlueValues","OtherBlues","FamilyBlues","FamilyOtherBlues","StdHW","StdVW","escape","UniqueID","XUID","charset","Encoding","CharStrings","Private","Subrs","defaultWidthX","nominalWidthX"][i],f=1,12==i)d=["Copyright","isFixedPitch","ItalicAngle","UnderlinePosition","UnderlineThickness","PaintType","CharstringType","FontMatrix","StrokeWidth","BlueScale","BlueShift","BlueFuzz","StemSnapH","StemSnapV","ForceBold",0,0,"LanguageGroup","ExpansionFactor","initialRandomSeed","SyntheticBase","PostScript","BaseFontName","BaseFontBlend",0,0,0,0,0,0,"ROS","CIDFontVersion","CIDFontRevision","CIDFontType","CIDCount","UIDBase","FDArray","FDSelect","FontName"][h],f=2;null!=d?(o[d]=1==s.length?s[0]:s,s=[]):s.push(u),t+=f;}return o},e.cmap={},e.cmap.parse=function(r,t,a){r=new Uint8Array(r.buffer,t,a),t=0;var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2;var i=[];o.tables=[];for(var h=0;h<s;h++){var f=n.readUshort(r,t);t+=2;var d=n.readUshort(r,t);t+=2;var u=n.readUint(r,t);t+=4;var l="p"+f+"e"+d,v=i.indexOf(u);if(-1==v){var c;v=o.tables.length,i.push(u);var p=n.readUshort(r,u);0==p?c=e.cmap.parse0(r,u):4==p?c=e.cmap.parse4(r,u):6==p?c=e.cmap.parse6(r,u):12==p?c=e.cmap.parse12(r,u):console.debug("unknown format: "+p,f,d,u),o.tables.push(c);}if(null!=o[l])throw "multiple tables for one platform+encoding";o[l]=v;}return o},e.cmap.parse0=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,n.map=[];for(var s=0;s<o-6;s++)n.map.push(r[t+s]);return n},e.cmap.parse4=function(r,t){var a=e._bin,n=t,o={};o.format=a.readUshort(r,t),t+=2;var s=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2;var i=a.readUshort(r,t);t+=2;var h=i/2;o.searchRange=a.readUshort(r,t),t+=2,o.entrySelector=a.readUshort(r,t),t+=2,o.rangeShift=a.readUshort(r,t),t+=2,o.endCount=a.readUshorts(r,t,h),t+=2*h,t+=2,o.startCount=a.readUshorts(r,t,h),t+=2*h,o.idDelta=[];for(var f=0;f<h;f++)o.idDelta.push(a.readShort(r,t)),t+=2;for(o.idRangeOffset=a.readUshorts(r,t,h),t+=2*h,o.glyphIdArray=[];t<n+s;)o.glyphIdArray.push(a.readUshort(r,t)),t+=2;return o},e.cmap.parse6=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,n.firstCode=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,n.glyphIdArray=[];for(var s=0;s<o;s++)n.glyphIdArray.push(a.readUshort(r,t)),t+=2;return n},e.cmap.parse12=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,t+=2,a.readUint(r,t),t+=4,a.readUint(r,t),t+=4;var o=a.readUint(r,t);t+=4,n.groups=[];for(var s=0;s<o;s++){var i=t+12*s,h=a.readUint(r,i+0),f=a.readUint(r,i+4),d=a.readUint(r,i+8);n.groups.push([h,f,d]);}return n},e.glyf={},e.glyf.parse=function(r,e,t,a){for(var n=[],o=0;o<a.maxp.numGlyphs;o++)n.push(null);return n},e.glyf._parseGlyf=function(r,t){var a=e._bin,n=r._data,o=e._tabOffset(n,"glyf",r._offset)+r.loca[t];if(r.loca[t]==r.loca[t+1])return null;var s={};if(s.noc=a.readShort(n,o),o+=2,s.xMin=a.readShort(n,o),o+=2,s.yMin=a.readShort(n,o),o+=2,s.xMax=a.readShort(n,o),o+=2,s.yMax=a.readShort(n,o),o+=2,s.xMin>=s.xMax||s.yMin>=s.yMax)return null;if(s.noc>0){s.endPts=[];for(var i=0;i<s.noc;i++)s.endPts.push(a.readUshort(n,o)),o+=2;var h=a.readUshort(n,o);if(o+=2,n.length-o<h)return null;s.instructions=a.readBytes(n,o,h),o+=h;var f=s.endPts[s.noc-1]+1;s.flags=[];for(i=0;i<f;i++){var d=n[o];if(o++,s.flags.push(d),0!=(8&d)){var u=n[o];o++;for(var l=0;l<u;l++)s.flags.push(d),i++;}}s.xs=[];for(i=0;i<f;i++){var v=0!=(2&s.flags[i]),c=0!=(16&s.flags[i]);v?(s.xs.push(c?n[o]:-n[o]),o++):c?s.xs.push(0):(s.xs.push(a.readShort(n,o)),o+=2);}s.ys=[];for(i=0;i<f;i++){v=0!=(4&s.flags[i]),c=0!=(32&s.flags[i]);v?(s.ys.push(c?n[o]:-n[o]),o++):c?s.ys.push(0):(s.ys.push(a.readShort(n,o)),o+=2);}var p=0,U=0;for(i=0;i<f;i++)p+=s.xs[i],U+=s.ys[i],s.xs[i]=p,s.ys[i]=U;}else {var g;s.parts=[];do{g=a.readUshort(n,o),o+=2;var S={m:{a:1,b:0,c:0,d:1,tx:0,ty:0},p1:-1,p2:-1};if(s.parts.push(S),S.glyphIndex=a.readUshort(n,o),o+=2,1&g){var m=a.readShort(n,o);o+=2;var b=a.readShort(n,o);o+=2;}else {m=a.readInt8(n,o);o++;b=a.readInt8(n,o);o++;}2&g?(S.m.tx=m,S.m.ty=b):(S.p1=m,S.p2=b),8&g?(S.m.a=S.m.d=a.readF2dot14(n,o),o+=2):64&g?(S.m.a=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2):128&g&&(S.m.a=a.readF2dot14(n,o),o+=2,S.m.b=a.readF2dot14(n,o),o+=2,S.m.c=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2);}while(32&g);if(256&g){var y=a.readUshort(n,o);o+=2,s.instr=[];for(i=0;i<y;i++)s.instr.push(n[o]),o++;}}return s},e.GPOS={},e.GPOS.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GPOS.subt)},e.GPOS.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1==t||2==t||3==t||7==t||8==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,h+s);}if(1==t&&1==i.fmt){var f=o.readUshort(r,a);a+=2;var d=e._lctf.numOfOnes(f);0!=f&&(i.pos=e.GPOS.readValueRecord(r,a,f));}else if(2==t&&i.fmt>=1&&i.fmt<=2){f=o.readUshort(r,a);a+=2;var u=o.readUshort(r,a);a+=2;d=e._lctf.numOfOnes(f);var l=e._lctf.numOfOnes(u);if(1==i.fmt){i.pairsets=[];var v=o.readUshort(r,a);a+=2;for(var c=0;c<v;c++){var p=s+o.readUshort(r,a);a+=2;var U=o.readUshort(r,p);p+=2;for(var g=[],S=0;S<U;S++){var m=o.readUshort(r,p);p+=2,0!=f&&(x=e.GPOS.readValueRecord(r,p,f),p+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,p,u),p+=2*l),g.push({gid2:m,val1:x,val2:P});}i.pairsets.push(g);}}if(2==i.fmt){var b=o.readUshort(r,a);a+=2;var y=o.readUshort(r,a);a+=2;var F=o.readUshort(r,a);a+=2;var _=o.readUshort(r,a);a+=2,i.classDef1=e._lctf.readClassDef(r,s+b),i.classDef2=e._lctf.readClassDef(r,s+y),i.matrix=[];for(c=0;c<F;c++){var C=[];for(S=0;S<_;S++){var x=null,P=null;0!=f&&(x=e.GPOS.readValueRecord(r,a,f),a+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,a,u),a+=2*l),C.push({val1:x,val2:P});}i.matrix.push(C);}}}else {if(9==t&&1==i.fmt){var I=o.readUshort(r,a);a+=2;var w=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=I;else if(n.ltype!=I)throw "invalid extension substitution";return e.GPOS.subt(r,n.ltype,s+w)}console.debug("unsupported GPOS table LookupType",t,"format",i.fmt);}return i},e.GPOS.readValueRecord=function(r,t,a){var n=e._bin,o=[];return o.push(1&a?n.readShort(r,t):0),t+=1&a?2:0,o.push(2&a?n.readShort(r,t):0),t+=2&a?2:0,o.push(4&a?n.readShort(r,t):0),t+=4&a?2:0,o.push(8&a?n.readShort(r,t):0),t+=8&a?2:0,o},e.GSUB={},e.GSUB.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GSUB.subt)},e.GSUB.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1!=t&&4!=t&&5!=t&&6!=t)return null;if(1==t||4==t||5==t&&i.fmt<=2||6==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,s+h);}if(1==t&&i.fmt>=1&&i.fmt<=2){if(1==i.fmt)i.delta=o.readShort(r,a),a+=2;else if(2==i.fmt){var f=o.readUshort(r,a);a+=2,i.newg=o.readUshorts(r,a,f),a+=2*i.newg.length;}}else if(4==t){i.vals=[];f=o.readUshort(r,a);a+=2;for(var d=0;d<f;d++){var u=o.readUshort(r,a);a+=2,i.vals.push(e.GSUB.readLigatureSet(r,s+u));}}else if(5==t&&2==i.fmt){if(2==i.fmt){var l=o.readUshort(r,a);a+=2,i.cDef=e._lctf.readClassDef(r,s+l),i.scset=[];var v=o.readUshort(r,a);a+=2;for(d=0;d<v;d++){var c=o.readUshort(r,a);a+=2,i.scset.push(0==c?null:e.GSUB.readSubClassSet(r,s+c));}}}else if(6==t&&3==i.fmt){if(3==i.fmt){for(d=0;d<3;d++){f=o.readUshort(r,a);a+=2;for(var p=[],U=0;U<f;U++)p.push(e._lctf.readCoverage(r,s+o.readUshort(r,a+2*U)));a+=2*f,0==d&&(i.backCvg=p),1==d&&(i.inptCvg=p),2==d&&(i.ahedCvg=p);}f=o.readUshort(r,a);a+=2,i.lookupRec=e.GSUB.readSubstLookupRecords(r,a,f);}}else {if(7==t&&1==i.fmt){var g=o.readUshort(r,a);a+=2;var S=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=g;else if(n.ltype!=g)throw "invalid extension substitution";return e.GSUB.subt(r,n.ltype,s+S)}console.debug("unsupported GSUB table LookupType",t,"format",i.fmt);}return i},e.GSUB.readSubClassSet=function(r,t){var a=e._bin.readUshort,n=t,o=[],s=a(r,t);t+=2;for(var i=0;i<s;i++){var h=a(r,t);t+=2,o.push(e.GSUB.readSubClassRule(r,n+h));}return o},e.GSUB.readSubClassRule=function(r,t){var a=e._bin.readUshort,n={},o=a(r,t),s=a(r,t+=2);t+=2,n.input=[];for(var i=0;i<o-1;i++)n.input.push(a(r,t)),t+=2;return n.substLookupRecords=e.GSUB.readSubstLookupRecords(r,t,s),n},e.GSUB.readSubstLookupRecords=function(r,t,a){for(var n=e._bin.readUshort,o=[],s=0;s<a;s++)o.push(n(r,t),n(r,t+2)),t+=4;return o},e.GSUB.readChainSubClassSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readChainSubClassRule(r,n+h));}return o},e.GSUB.readChainSubClassRule=function(r,t){for(var a=e._bin,n={},o=["backtrack","input","lookahead"],s=0;s<o.length;s++){var i=a.readUshort(r,t);t+=2,1==s&&i--,n[o[s]]=a.readUshorts(r,t,i),t+=2*n[o[s]].length;}i=a.readUshort(r,t);return t+=2,n.subst=a.readUshorts(r,t,2*i),t+=2*n.subst.length,n},e.GSUB.readLigatureSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readLigature(r,n+h));}return o},e.GSUB.readLigature=function(r,t){var a=e._bin,n={chain:[]};n.nglyph=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2;for(var s=0;s<o-1;s++)n.chain.push(a.readUshort(r,t)),t+=2;return n},e.head={},e.head.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.fontRevision=n.readFixed(r,t),t+=4,n.readUint(r,t),t+=4,n.readUint(r,t),t+=4,o.flags=n.readUshort(r,t),t+=2,o.unitsPerEm=n.readUshort(r,t),t+=2,o.created=n.readUint64(r,t),t+=8,o.modified=n.readUint64(r,t),t+=8,o.xMin=n.readShort(r,t),t+=2,o.yMin=n.readShort(r,t),t+=2,o.xMax=n.readShort(r,t),t+=2,o.yMax=n.readShort(r,t),t+=2,o.macStyle=n.readUshort(r,t),t+=2,o.lowestRecPPEM=n.readUshort(r,t),t+=2,o.fontDirectionHint=n.readShort(r,t),t+=2,o.indexToLocFormat=n.readShort(r,t),t+=2,o.glyphDataFormat=n.readShort(r,t),t+=2,o},e.hhea={},e.hhea.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.ascender=n.readShort(r,t),t+=2,o.descender=n.readShort(r,t),t+=2,o.lineGap=n.readShort(r,t),t+=2,o.advanceWidthMax=n.readUshort(r,t),t+=2,o.minLeftSideBearing=n.readShort(r,t),t+=2,o.minRightSideBearing=n.readShort(r,t),t+=2,o.xMaxExtent=n.readShort(r,t),t+=2,o.caretSlopeRise=n.readShort(r,t),t+=2,o.caretSlopeRun=n.readShort(r,t),t+=2,o.caretOffset=n.readShort(r,t),t+=2,t+=8,o.metricDataFormat=n.readShort(r,t),t+=2,o.numberOfHMetrics=n.readUshort(r,t),t+=2,o},e.hmtx={},e.hmtx.parse=function(r,t,a,n){for(var o=e._bin,s={aWidth:[],lsBearing:[]},i=0,h=0,f=0;f<n.maxp.numGlyphs;f++)f<n.hhea.numberOfHMetrics&&(i=o.readUshort(r,t),t+=2,h=o.readShort(r,t),t+=2),s.aWidth.push(i),s.lsBearing.push(h);return s},e.kern={},e.kern.parse=function(r,t,a,n){var o=e._bin,s=o.readUshort(r,t);if(t+=2,1==s)return e.kern.parseV1(r,t-2,a,n);var i=o.readUshort(r,t);t+=2;for(var h={glyph1:[],rval:[]},f=0;f<i;f++){t+=2;a=o.readUshort(r,t);t+=2;var d=o.readUshort(r,t);t+=2;var u=d>>>8;if(0!=(u&=15))throw "unknown kern table format: "+u;t=e.kern.readFormat0(r,t,h);}return h},e.kern.parseV1=function(r,t,a,n){var o=e._bin;o.readFixed(r,t),t+=4;var s=o.readUint(r,t);t+=4;for(var i={glyph1:[],rval:[]},h=0;h<s;h++){o.readUint(r,t),t+=4;var f=o.readUshort(r,t);t+=2,o.readUshort(r,t),t+=2;var d=f>>>8;if(0!=(d&=15))throw "unknown kern table format: "+d;t=e.kern.readFormat0(r,t,i);}return i},e.kern.readFormat0=function(r,t,a){var n=e._bin,o=-1,s=n.readUshort(r,t);t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2;for(var i=0;i<s;i++){var h=n.readUshort(r,t);t+=2;var f=n.readUshort(r,t);t+=2;var d=n.readShort(r,t);t+=2,h!=o&&(a.glyph1.push(h),a.rval.push({glyph2:[],vals:[]}));var u=a.rval[a.rval.length-1];u.glyph2.push(f),u.vals.push(d),o=h;}return t},e.loca={},e.loca.parse=function(r,t,a,n){var o=e._bin,s=[],i=n.head.indexToLocFormat,h=n.maxp.numGlyphs+1;if(0==i)for(var f=0;f<h;f++)s.push(o.readUshort(r,t+(f<<1))<<1);if(1==i)for(f=0;f<h;f++)s.push(o.readUint(r,t+(f<<2)));return s},e.maxp={},e.maxp.parse=function(r,t,a){var n=e._bin,o={},s=n.readUint(r,t);return t+=4,o.numGlyphs=n.readUshort(r,t),t+=2,65536==s&&(o.maxPoints=n.readUshort(r,t),t+=2,o.maxContours=n.readUshort(r,t),t+=2,o.maxCompositePoints=n.readUshort(r,t),t+=2,o.maxCompositeContours=n.readUshort(r,t),t+=2,o.maxZones=n.readUshort(r,t),t+=2,o.maxTwilightPoints=n.readUshort(r,t),t+=2,o.maxStorage=n.readUshort(r,t),t+=2,o.maxFunctionDefs=n.readUshort(r,t),t+=2,o.maxInstructionDefs=n.readUshort(r,t),t+=2,o.maxStackElements=n.readUshort(r,t),t+=2,o.maxSizeOfInstructions=n.readUshort(r,t),t+=2,o.maxComponentElements=n.readUshort(r,t),t+=2,o.maxComponentDepth=n.readUshort(r,t),t+=2),o},e.name={},e.name.parse=function(r,t,a){var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2,n.readUshort(r,t);for(var i,h=["copyright","fontFamily","fontSubfamily","ID","fullName","version","postScriptName","trademark","manufacturer","designer","description","urlVendor","urlDesigner","licence","licenceURL","---","typoFamilyName","typoSubfamilyName","compatibleFull","sampleText","postScriptCID","wwsFamilyName","wwsSubfamilyName","lightPalette","darkPalette"],f=t+=2,d=0;d<s;d++){var u=n.readUshort(r,t);t+=2;var l=n.readUshort(r,t);t+=2;var v=n.readUshort(r,t);t+=2;var c=n.readUshort(r,t);t+=2;var p=n.readUshort(r,t);t+=2;var U=n.readUshort(r,t);t+=2;var g,S=h[c],m=f+12*s+U;if(0==u)g=n.readUnicode(r,m,p/2);else if(3==u&&0==l)g=n.readUnicode(r,m,p/2);else if(0==l)g=n.readASCII(r,m,p);else if(1==l)g=n.readUnicode(r,m,p/2);else if(3==l)g=n.readUnicode(r,m,p/2);else {if(1!=u)throw "unknown encoding "+l+", platformID: "+u;g=n.readASCII(r,m,p),console.debug("reading unknown MAC encoding "+l+" as ASCII");}var b="p"+u+","+v.toString(16);null==o[b]&&(o[b]={}),o[b][void 0!==S?S:c]=g,o[b]._lang=v;}for(var y in o)if(null!=o[y].postScriptName&&1033==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&0==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&3084==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName)return o[y];for(var y in o){i=y;break}return console.debug("returning name table with languageID "+o[i]._lang),o[i]},e["OS/2"]={},e["OS/2"].parse=function(r,t,a){var n=e._bin.readUshort(r,t);t+=2;var o={};if(0==n)e["OS/2"].version0(r,t,o);else if(1==n)e["OS/2"].version1(r,t,o);else if(2==n||3==n||4==n)e["OS/2"].version2(r,t,o);else {if(5!=n)throw "unknown OS/2 table version: "+n;e["OS/2"].version5(r,t,o);}return o},e["OS/2"].version0=function(r,t,a){var n=e._bin;return a.xAvgCharWidth=n.readShort(r,t),t+=2,a.usWeightClass=n.readUshort(r,t),t+=2,a.usWidthClass=n.readUshort(r,t),t+=2,a.fsType=n.readUshort(r,t),t+=2,a.ySubscriptXSize=n.readShort(r,t),t+=2,a.ySubscriptYSize=n.readShort(r,t),t+=2,a.ySubscriptXOffset=n.readShort(r,t),t+=2,a.ySubscriptYOffset=n.readShort(r,t),t+=2,a.ySuperscriptXSize=n.readShort(r,t),t+=2,a.ySuperscriptYSize=n.readShort(r,t),t+=2,a.ySuperscriptXOffset=n.readShort(r,t),t+=2,a.ySuperscriptYOffset=n.readShort(r,t),t+=2,a.yStrikeoutSize=n.readShort(r,t),t+=2,a.yStrikeoutPosition=n.readShort(r,t),t+=2,a.sFamilyClass=n.readShort(r,t),t+=2,a.panose=n.readBytes(r,t,10),t+=10,a.ulUnicodeRange1=n.readUint(r,t),t+=4,a.ulUnicodeRange2=n.readUint(r,t),t+=4,a.ulUnicodeRange3=n.readUint(r,t),t+=4,a.ulUnicodeRange4=n.readUint(r,t),t+=4,a.achVendID=[n.readInt8(r,t),n.readInt8(r,t+1),n.readInt8(r,t+2),n.readInt8(r,t+3)],t+=4,a.fsSelection=n.readUshort(r,t),t+=2,a.usFirstCharIndex=n.readUshort(r,t),t+=2,a.usLastCharIndex=n.readUshort(r,t),t+=2,a.sTypoAscender=n.readShort(r,t),t+=2,a.sTypoDescender=n.readShort(r,t),t+=2,a.sTypoLineGap=n.readShort(r,t),t+=2,a.usWinAscent=n.readUshort(r,t),t+=2,a.usWinDescent=n.readUshort(r,t),t+=2},e["OS/2"].version1=function(r,t,a){var n=e._bin;return t=e["OS/2"].version0(r,t,a),a.ulCodePageRange1=n.readUint(r,t),t+=4,a.ulCodePageRange2=n.readUint(r,t),t+=4},e["OS/2"].version2=function(r,t,a){var n=e._bin;return t=e["OS/2"].version1(r,t,a),a.sxHeight=n.readShort(r,t),t+=2,a.sCapHeight=n.readShort(r,t),t+=2,a.usDefault=n.readUshort(r,t),t+=2,a.usBreak=n.readUshort(r,t),t+=2,a.usMaxContext=n.readUshort(r,t),t+=2},e["OS/2"].version5=function(r,t,a){var n=e._bin;return t=e["OS/2"].version2(r,t,a),a.usLowerOpticalPointSize=n.readUshort(r,t),t+=2,a.usUpperOpticalPointSize=n.readUshort(r,t),t+=2},e.post={},e.post.parse=function(r,t,a){var n=e._bin,o={};return o.version=n.readFixed(r,t),t+=4,o.italicAngle=n.readFixed(r,t),t+=4,o.underlinePosition=n.readShort(r,t),t+=2,o.underlineThickness=n.readShort(r,t),t+=2,o},null==e&&(e={}),null==e.U&&(e.U={}),e.U.codeToGlyph=function(r,e){var t=r.cmap,a=-1;if(null!=t.p0e4?a=t.p0e4:null!=t.p3e1?a=t.p3e1:null!=t.p1e0?a=t.p1e0:null!=t.p0e3&&(a=t.p0e3),-1==a)throw "no familiar platform and encoding!";var n=t.tables[a];if(0==n.format)return e>=n.map.length?0:n.map[e];if(4==n.format){for(var o=-1,s=0;s<n.endCount.length;s++)if(e<=n.endCount[s]){o=s;break}if(-1==o)return 0;if(n.startCount[o]>e)return 0;return 65535&(0!=n.idRangeOffset[o]?n.glyphIdArray[e-n.startCount[o]+(n.idRangeOffset[o]>>1)-(n.idRangeOffset.length-o)]:e+n.idDelta[o])}if(12==n.format){if(e>n.groups[n.groups.length-1][1])return 0;for(s=0;s<n.groups.length;s++){var i=n.groups[s];if(i[0]<=e&&e<=i[1])return i[2]+(e-i[0])}return 0}throw "unknown cmap table format "+n.format},e.U.glyphToPath=function(r,t){var a={cmds:[],crds:[]};if(r.SVG&&r.SVG.entries[t]){var n=r.SVG.entries[t];return null==n?a:("string"==typeof n&&(n=e.SVG.toPath(n),r.SVG.entries[t]=n),n)}if(r.CFF){var o={x:0,y:0,stack:[],nStems:0,haveWidth:!1,width:r.CFF.Private?r.CFF.Private.defaultWidthX:0,open:!1},s=r.CFF,i=r.CFF.Private;if(s.ROS){for(var h=0;s.FDSelect[h+2]<=t;)h+=2;i=s.FDArray[s.FDSelect[h+1]].Private;}e.U._drawCFF(r.CFF.CharStrings[t],o,s,i,a);}else r.glyf&&e.U._drawGlyf(t,r,a);return a},e.U._drawGlyf=function(r,t,a){var n=t.glyf[r];null==n&&(n=t.glyf[r]=e.glyf._parseGlyf(t,r)),null!=n&&(n.noc>-1?e.U._simpleGlyph(n,a):e.U._compoGlyph(n,t,a));},e.U._simpleGlyph=function(r,t){for(var a=0;a<r.noc;a++){for(var n=0==a?0:r.endPts[a-1]+1,o=r.endPts[a],s=n;s<=o;s++){var i=s==n?o:s-1,h=s==o?n:s+1,f=1&r.flags[s],d=1&r.flags[i],u=1&r.flags[h],l=r.xs[s],v=r.ys[s];if(s==n)if(f){if(!d){e.U.P.moveTo(t,l,v);continue}e.U.P.moveTo(t,r.xs[i],r.ys[i]);}else d?e.U.P.moveTo(t,r.xs[i],r.ys[i]):e.U.P.moveTo(t,(r.xs[i]+l)/2,(r.ys[i]+v)/2);f?d&&e.U.P.lineTo(t,l,v):u?e.U.P.qcurveTo(t,l,v,r.xs[h],r.ys[h]):e.U.P.qcurveTo(t,l,v,(l+r.xs[h])/2,(v+r.ys[h])/2);}e.U.P.closePath(t);}},e.U._compoGlyph=function(r,t,a){for(var n=0;n<r.parts.length;n++){var o={cmds:[],crds:[]},s=r.parts[n];e.U._drawGlyf(s.glyphIndex,t,o);for(var i=s.m,h=0;h<o.crds.length;h+=2){var f=o.crds[h],d=o.crds[h+1];a.crds.push(f*i.a+d*i.b+i.tx),a.crds.push(f*i.c+d*i.d+i.ty);}for(h=0;h<o.cmds.length;h++)a.cmds.push(o.cmds[h]);}},e.U._getGlyphClass=function(r,t){var a=e._lctf.getInterval(t,r);return -1==a?0:t[a+2]},e.U.getPairAdjustment=function(r,t,a){var n=0;if(r.GPOS)for(var o=r.GPOS,s=o.lookupList,i=o.featureList,h=[],f=0;f<i.length;f++){var d=i[f];if("kern"==d.tag)for(var u=0;u<d.tab.length;u++)if(!h[d.tab[u]]){h[d.tab[u]]=!0;for(var l=s[d.tab[u]],v=0;v<l.tabs.length;v++)if(null!=l.tabs[v]){var c,p=l.tabs[v];if(!p.coverage||-1!=(c=e._lctf.coverageIndex(p.coverage,t)))if(1==l.ltype);else if(2==l.ltype){var U;if(1==p.fmt){var g=p.pairsets[c];for(f=0;f<g.length;f++)g[f].gid2==a&&(U=g[f]);}else if(2==p.fmt){var S=e.U._getGlyphClass(t,p.classDef1),m=e.U._getGlyphClass(a,p.classDef2);U=p.matrix[S][m];}U&&U.val1&&U.val1[2]&&(n+=U.val1[2]),U&&U.val2&&U.val2[0]&&(n+=U.val2[0]);}}}}if(r.kern){var b=r.kern.glyph1.indexOf(t);if(-1!=b){var y=r.kern.rval[b].glyph2.indexOf(a);-1!=y&&(n+=r.kern.rval[b].vals[y]);}}return n},e.U._applySubs=function(r,t,a,n){for(var o=r.length-t-1,s=0;s<a.tabs.length;s++)if(null!=a.tabs[s]){var i,h=a.tabs[s];if(!h.coverage||-1!=(i=e._lctf.coverageIndex(h.coverage,r[t])))if(1==a.ltype)r[t],1==h.fmt?r[t]=r[t]+h.delta:r[t]=h.newg[i];else if(4==a.ltype)for(var f=h.vals[i],d=0;d<f.length;d++){var u=f[d],l=u.chain.length;if(!(l>o)){for(var v=!0,c=0,p=0;p<l;p++){for(;-1==r[t+c+(1+p)];)c++;u.chain[p]!=r[t+c+(1+p)]&&(v=!1);}if(v){r[t]=u.nglyph;for(p=0;p<l+c;p++)r[t+p+1]=-1;break}}}else if(5==a.ltype&&2==h.fmt)for(var U=e._lctf.getInterval(h.cDef,r[t]),g=h.cDef[U+2],S=h.scset[g],m=0;m<S.length;m++){var b=S[m],y=b.input;if(!(y.length>o)){for(v=!0,p=0;p<y.length;p++){var F=e._lctf.getInterval(h.cDef,r[t+1+p]);if(-1==U&&h.cDef[F+2]!=y[p]){v=!1;break}}if(v){var _=b.substLookupRecords;for(d=0;d<_.length;d+=2)_[d],_[d+1];}}}else if(6==a.ltype&&3==h.fmt){if(!e.U._glsCovered(r,h.backCvg,t-h.backCvg.length))continue;if(!e.U._glsCovered(r,h.inptCvg,t))continue;if(!e.U._glsCovered(r,h.ahedCvg,t+h.inptCvg.length))continue;var C=h.lookupRec;for(m=0;m<C.length;m+=2){U=C[m];var x=n[C[m+1]];e.U._applySubs(r,t+U,x,n);}}}},e.U._glsCovered=function(r,t,a){for(var n=0;n<t.length;n++){if(-1==e._lctf.coverageIndex(t[n],r[a+n]))return !1}return !0},e.U.glyphsToPath=function(r,t,a){for(var n={cmds:[],crds:[]},o=0,s=0;s<t.length;s++){var i=t[s];if(-1!=i){for(var h=s<t.length-1&&-1!=t[s+1]?t[s+1]:0,f=e.U.glyphToPath(r,i),d=0;d<f.crds.length;d+=2)n.crds.push(f.crds[d]+o),n.crds.push(f.crds[d+1]);a&&n.cmds.push(a);for(d=0;d<f.cmds.length;d++)n.cmds.push(f.cmds[d]);a&&n.cmds.push("X"),o+=r.hmtx.aWidth[i],s<t.length-1&&(o+=e.U.getPairAdjustment(r,i,h));}}return n},e.U.P={},e.U.P.moveTo=function(r,e,t){r.cmds.push("M"),r.crds.push(e,t);},e.U.P.lineTo=function(r,e,t){r.cmds.push("L"),r.crds.push(e,t);},e.U.P.curveTo=function(r,e,t,a,n,o,s){r.cmds.push("C"),r.crds.push(e,t,a,n,o,s);},e.U.P.qcurveTo=function(r,e,t,a,n){r.cmds.push("Q"),r.crds.push(e,t,a,n);},e.U.P.closePath=function(r){r.cmds.push("Z");},e.U._drawCFF=function(r,t,a,n,o){for(var s=t.stack,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open,u=0,l=t.x,v=t.y,c=0,p=0,U=0,g=0,S=0,m=0,b=0,y=0,F=0,_=0,C={val:0,size:0};u<r.length;){e.CFF.getCharString(r,u,C);var x=C.val;if(u+=C.size,"o1"==x||"o18"==x)s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;else if("o3"==x||"o23"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;}else if("o4"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),d&&e.U.P.closePath(o),v+=s.pop(),e.U.P.moveTo(o,l,v),d=!0;else if("o5"==x)for(;s.length>0;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);else if("o6"==x||"o7"==x)for(var P=s.length,I="o6"==x,w=0;w<P;w++){var O=s.shift();I?l+=O:v+=O,I=!I,e.U.P.lineTo(o,l,v);}else if("o8"==x||"o24"==x){P=s.length;for(var T=0;T+6<=P;)c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v),T+=6;"o24"==x&&(l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v));}else {if("o11"==x)break;if("o1234"==x||"o1235"==x||"o1236"==x||"o1237"==x)"o1234"==x&&(p=v,U=(c=l+s.shift())+s.shift(),_=g=p+s.shift(),m=g,y=v,l=(b=(S=(F=U+s.shift())+s.shift())+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1235"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),l=b+s.shift(),v=y+s.shift(),s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1236"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),_=g=p+s.shift(),m=g,b=(S=(F=U+s.shift())+s.shift())+s.shift(),y=m+s.shift(),l=b+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1237"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),Math.abs(b-l)>Math.abs(y-v)?l=b+s.shift():v=y+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v));else if("o14"==x){if(s.length>0&&!h&&(f=s.shift()+a.nominalWidthX,h=!0),4==s.length){var k=s.shift(),G=s.shift(),D=s.shift(),B=s.shift(),A=e.CFF.glyphBySE(a,D),R=e.CFF.glyphBySE(a,B);e.U._drawCFF(a.CharStrings[A],t,a,n,o),t.x=k,t.y=G,e.U._drawCFF(a.CharStrings[R],t,a,n,o);}d&&(e.U.P.closePath(o),d=!1);}else if("o19"==x||"o20"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0,u+=i+7>>3;}else if("o21"==x)s.length>2&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),v+=s.pop(),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o22"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o25"==x){for(;s.length>6;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);}else if("o26"==x)for(s.length%2&&(l+=s.shift());s.length>0;)c=l,p=v+s.shift(),l=U=c+s.shift(),v=(g=p+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);else if("o27"==x)for(s.length%2&&(v+=s.shift());s.length>0;)p=v,U=(c=l+s.shift())+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g,e.U.P.curveTo(o,c,p,U,g,l,v);else if("o10"==x||"o29"==x){var L="o10"==x?n:a;if(0==s.length)console.debug("error: empty stack");else {var W=s.pop(),M=L.Subrs[W+L.Bias];t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d,e.U._drawCFF(M,t,a,n,o),l=t.x,v=t.y,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open;}}else if("o30"==x||"o31"==x){var N=s.length,V=(T=0,"o31"==x);for(T+=N-(P=-3&N);T<P;)V?(p=v,U=(c=l+s.shift())+s.shift(),v=(g=p+s.shift())+s.shift(),P-T==5?(l=U+s.shift(),T++):l=U,V=!1):(c=l,p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),P-T==5?(v=g+s.shift(),T++):v=g,V=!0),e.U.P.curveTo(o,c,p,U,g,l,v),T+=4;}else {if("o"==(x+"").charAt(0))throw console.debug("Unknown operation: "+x,r),x;s.push(x);}}}t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d;};var t=e,a={Typr:t};return r.Typr=t,r.default=a,Object.defineProperty(r,"__esModule",{value:!0}),r}({}).Typr}
 
-  function convert_streams(bufferIn, tinyInflate) {
-      var dataViewIn = new DataView(bufferIn);
-      var offsetIn = 0;
-
-      function read2() {
-          var uint16 = dataViewIn.getUint16(offsetIn);
-          offsetIn += 2;
-          return uint16;
-      }
-
-      function read4() {
-          var uint32 = dataViewIn.getUint32(offsetIn);
-          offsetIn += 4;
-          return uint32;
-      }
-
-      function write2(uint16) {
-          dataViewOut.setUint16(offsetOut, uint16);
-          offsetOut += 2;
-      }
-
-      function write4(uint32) {
-          dataViewOut.setUint32(offsetOut, uint32);
-          offsetOut += 4;
-      }
-
-      var WOFFHeader = {
-          signature: read4(),
-          flavor: read4(),
-          length: read4(),
-          numTables: read2(),
-          reserved: read2(),
-          totalSfntSize: read4(),
-          majorVersion: read2(),
-          minorVersion: read2(),
-          metaOffset: read4(),
-          metaLength: read4(),
-          metaOrigLength: read4(),
-          privOffset: read4(),
-          privLength: read4()
-      };
-
-      var entrySelector = 0;
-      while (Math.pow(2, entrySelector) <= WOFFHeader.numTables) {
-          entrySelector++;
-      }
-      entrySelector--;
-
-      var searchRange = Math.pow(2, entrySelector) * 16;
-      var rangeShift = WOFFHeader.numTables * 16 - searchRange;
-
-      var offset = 4 + 2 + 2 + 2 + 2;
-      var TableDirectoryEntries = [];
-      for (var i = 0; i < WOFFHeader.numTables; i++) {
-          TableDirectoryEntries.push({
-              tag: read4(),
-              offset: read4(),
-              compLength: read4(),
-              origLength: read4(),
-              origChecksum: read4()
-          });
-          offset += 4 * 4;
-      }
-
-      var arrayOut = new Uint8Array(
-          4 + 2 + 2 + 2 + 2 +
-          TableDirectoryEntries.length * (4 + 4 + 4 + 4) +
-          TableDirectoryEntries.reduce(function(acc, entry) { return acc + entry.origLength + 4; }, 0)
-      );
-      var bufferOut = arrayOut.buffer;
-      var dataViewOut = new DataView(bufferOut);
-      var offsetOut = 0;
-
-      write4(WOFFHeader.flavor);
-      write2(WOFFHeader.numTables);
-      write2(searchRange);
-      write2(entrySelector);
-      write2(rangeShift);
-
-      TableDirectoryEntries.forEach(function(TableDirectoryEntry) {
-          write4(TableDirectoryEntry.tag);
-          write4(TableDirectoryEntry.origChecksum);
-          write4(offset);
-          write4(TableDirectoryEntry.origLength);
-
-          TableDirectoryEntry.outOffset = offset;
-          offset += TableDirectoryEntry.origLength;
-          if ((offset % 4) != 0) {
-              offset += 4 - (offset % 4);
-          }
-      });
-
-      var size;
-
-      TableDirectoryEntries.forEach(function(TableDirectoryEntry) {
-          var compressedData = bufferIn.slice(
-              TableDirectoryEntry.offset,
-              TableDirectoryEntry.offset + TableDirectoryEntry.compLength
-          );
-
-          if (TableDirectoryEntry.compLength != TableDirectoryEntry.origLength) {
-              var uncompressedData = new Uint8Array(TableDirectoryEntry.origLength);
-              tinyInflate(
-                new Uint8Array(compressedData, 2), //skip deflate header
-                uncompressedData
-              );
-          } else {
-              uncompressedData = new Uint8Array(compressedData);
-          }
-
-          arrayOut.set(uncompressedData, TableDirectoryEntry.outOffset);
-          offset = TableDirectoryEntry.outOffset + TableDirectoryEntry.origLength;
-
-          var padding = 0;
-          if ((offset % 4) != 0) {
-              padding = 4 - (offset % 4);
-          }
-          arrayOut.set(
-              new Uint8Array(padding).buffer,
-              TableDirectoryEntry.outOffset + TableDirectoryEntry.origLength
-          );
-
-          size = offset + padding;
-      });
-
-      return bufferOut.slice(0, size);
-  }
-
-  // End woff2otf.js
-
-  return function(buffer) {
-    return convert_streams(buffer, tinyInflate)
-  }
-
-  }
+  /*!
+  Custom bundle of woff2otf (https://github.com/arty-name/woff2otf) with fflate
+  (https://github.com/101arrowz/fflate) for use in Troika text rendering. 
+  Original licenses apply: 
+  - fflate: https://github.com/101arrowz/fflate/blob/master/LICENSE (MIT)
+  - woff2otf.js: https://github.com/arty-name/woff2otf/blob/master/woff2otf.js (Apache2)
+  */
+  function woff2otfFactory(){return function(r){var e=Uint8Array,n=Uint16Array,t=Uint32Array,a=new e([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),f=new e([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),i=new e([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),o=function(r,e){for(var a=new n(31),f=0;f<31;++f)a[f]=e+=1<<r[f-1];var i=new t(a[30]);for(f=1;f<30;++f)for(var o=a[f];o<a[f+1];++o)i[o]=o-a[f]<<5|f;return [a,i]},u=o(a,2),v=u[0],s=u[1];v[28]=258,s[258]=28;for(var l=o(f,0)[0],c=new n(32768),g=0;g<32768;++g){var h=(43690&g)>>>1|(21845&g)<<1;h=(61680&(h=(52428&h)>>>2|(13107&h)<<2))>>>4|(3855&h)<<4,c[g]=((65280&h)>>>8|(255&h)<<8)>>>1;}var w=function(r,e,t){for(var a=r.length,f=0,i=new n(e);f<a;++f)++i[r[f]-1];var o,u=new n(e);for(f=0;f<e;++f)u[f]=u[f-1]+i[f-1]<<1;if(t){o=new n(1<<e);var v=15-e;for(f=0;f<a;++f)if(r[f])for(var s=f<<4|r[f],l=e-r[f],g=u[r[f]-1]++<<l,h=g|(1<<l)-1;g<=h;++g)o[c[g]>>>v]=s;}else for(o=new n(a),f=0;f<a;++f)o[f]=c[u[r[f]-1]++]>>>15-r[f];return o},m=new e(288);for(g=0;g<144;++g)m[g]=8;for(g=144;g<256;++g)m[g]=9;for(g=256;g<280;++g)m[g]=7;for(g=280;g<288;++g)m[g]=8;var b=new e(32);for(g=0;g<32;++g)b[g]=5;var p=w(m,9,1),d=w(b,5,1),L=function(r){for(var e=r[0],n=1;n<r.length;++n)r[n]>e&&(e=r[n]);return e},y=function(r,e,n){var t=e/8>>0;return (r[t]|r[t+1]<<8)>>>(7&e)&n},U=function(r,e){var n=e/8>>0;return (r[n]|r[n+1]<<8|r[n+2]<<16)>>>(7&e)},O=function(r,o,u){var s=r.length,c=!o||u,g=!u||u.i;u||(u={}),o||(o=new e(3*s));var h,m=function(r){var n=o.length;if(r>n){var t=new e(Math.max(2*n,r));t.set(o),o=t;}},b=u.f||0,O=u.p||0,A=u.b||0,k=u.l,x=u.d,E=u.m,T=u.n,F=8*s;do{if(!k){u.f=b=y(r,O,1);var V=y(r,O+1,3);if(O+=3,!V){var M=r[(I=((h=O)/8>>0)+(7&h&&1)+4)-4]|r[I-3]<<8,C=I+M;if(C>s){if(g)throw "unexpected EOF";break}c&&m(A+M),o.set(r.subarray(I,C),A),u.b=A+=M,u.p=O=8*C;continue}if(1==V)k=p,x=d,E=9,T=5;else {if(2!=V)throw "invalid block type";var D=y(r,O,31)+257,S=y(r,O+10,15)+4,_=D+y(r,O+5,31)+1;O+=14;for(var j=new e(_),z=new e(19),q=0;q<S;++q)z[i[q]]=y(r,O+3*q,7);O+=3*S;var B=L(z),G=(1<<B)-1;if(!g&&O+_*(B+7)>F)break;var H=w(z,B,1);for(q=0;q<_;){var I,J=H[y(r,O,G)];if(O+=15&J,(I=J>>>4)<16)j[q++]=I;else {var K=0,N=0;for(16==I?(N=3+y(r,O,3),O+=2,K=j[q-1]):17==I?(N=3+y(r,O,7),O+=3):18==I&&(N=11+y(r,O,127),O+=7);N--;)j[q++]=K;}}var P=j.subarray(0,D),Q=j.subarray(D);E=L(P),T=L(Q),k=w(P,E,1),x=w(Q,T,1);}if(O>F)throw "unexpected EOF"}c&&m(A+131072);for(var R=(1<<E)-1,W=(1<<T)-1,X=E+T+18;g||O+X<F;){var Y=(K=k[U(r,O)&R])>>>4;if((O+=15&K)>F)throw "unexpected EOF";if(!K)throw "invalid length/literal";if(Y<256)o[A++]=Y;else {if(256==Y){k=null;break}var Z=Y-254;if(Y>264){var $=a[q=Y-257];Z=y(r,O,(1<<$)-1)+v[q],O+=$;}var rr=x[U(r,O)&W],er=rr>>>4;if(!rr)throw "invalid distance";O+=15&rr;Q=l[er];if(er>3){$=f[er];Q+=U(r,O)&(1<<$)-1,O+=$;}if(O>F)throw "unexpected EOF";c&&m(A+131072);for(var nr=A+Z;A<nr;A+=4)o[A]=o[A-Q],o[A+1]=o[A+1-Q],o[A+2]=o[A+2-Q],o[A+3]=o[A+3-Q];A=nr;}}u.l=k,u.p=O,u.b=A,k&&(b=1,u.m=E,u.d=x,u.n=T);}while(!b);return A==o.length?o:function(r,a,f){(null==a||a<0)&&(a=0),(null==f||f>r.length)&&(f=r.length);var i=new(r instanceof n?n:r instanceof t?t:e)(f-a);return i.set(r.subarray(a,f)),i}(o,0,A)};return r.convert_streams=function(r){var e=new DataView(r),n=0;function t(){var r=e.getUint16(n);return n+=2,r}function a(){var r=e.getUint32(n);return n+=4,r}function f(r){b.setUint16(p,r),p+=2;}function i(r){b.setUint32(p,r),p+=4;}for(var o={signature:a(),flavor:a(),length:a(),numTables:t(),reserved:t(),totalSfntSize:a(),majorVersion:t(),minorVersion:t(),metaOffset:a(),metaLength:a(),metaOrigLength:a(),privOffset:a(),privLength:a()},u=0;Math.pow(2,u)<=o.numTables;)u++;u--;for(var v=16*Math.pow(2,u),s=16*o.numTables-v,l=12,c=[],g=0;g<o.numTables;g++)c.push({tag:a(),offset:a(),compLength:a(),origLength:a(),origChecksum:a()}),l+=16;var h,w=new Uint8Array(12+16*c.length+c.reduce((function(r,e){return r+e.origLength+4}),0)),m=w.buffer,b=new DataView(m),p=0;return i(o.flavor),f(o.numTables),f(v),f(u),f(s),c.forEach((function(r){i(r.tag),i(r.origChecksum),i(l),i(r.origLength),r.outOffset=l,(l+=r.origLength)%4!=0&&(l+=4-l%4);})),c.forEach((function(e){var n,t=r.slice(e.offset,e.offset+e.compLength);if(e.compLength!=e.origLength){var a=new Uint8Array(e.origLength);n=new Uint8Array(t,2),O(n,a);}else a=new Uint8Array(t);w.set(a,e.outOffset);var f=0;(l=e.outOffset+e.origLength)%4!=0&&(f=4-l%4),w.set(new Uint8Array(f).buffer,e.outOffset+e.origLength),h=l+f;})),m.slice(0,h)},r}({}).convert_streams}
 
   /**
    * An adapter that allows Typr.js to be used as if it were (a subset of) the OpenType.js API.
@@ -5174,6 +3045,131 @@ void main() {
       Z: 0
     };
 
+    // {joinType: "skip+step,..."}
+    const joiningTypeRawData = {"C":"18g,ca,368,1kz","D":"17k,6,2,2+4,5+c,2+6,2+1,10+1,9+f,j+11,2+1,a,2,2+1,15+2,3,j+2,6+3,2+8,2,2,2+1,w+a,4+e,3+3,2,3+2,3+5,23+w,2f+4,3,2+9,2,b,2+3,3,1k+9,6+1,3+1,2+2,2+d,30g,p+y,1,1+1g,f+x,2,sd2+1d,jf3+4,f+3,2+4,2+2,b+3,42,2,4+2,2+1,2,3,t+1,9f+w,2,el+2,2+g,d+2,2l,2+1,5,3+1,2+1,2,3,6,16wm+1v","R":"17m+3,2,2,6+3,m,15+2,2+2,h+h,13,3+8,2,2,3+1,2,p+1,x,5+4,5,a,2,2,3,u,c+2,g+1,5,2+1,4+1,5j,6+1,2,b,2+2,f,2+1,1s+2,2,3+1,7,1ez0,2,2+1,4+4,b,4,3,b,42,2+2,4,3,2+1,2,o+3,ae,ep,x,2o+2,3+1,3,5+1,6","L":"x9u,jff,a,fd,jv","T":"4t,gj+33,7o+4,1+1,7c+18,2,2+1,2+1,2,21+a,2,1b+k,h,2u+6,3+5,3+1,2+3,y,2,v+q,2k+a,1n+8,a,p+3,2+8,2+2,2+4,18+2,3c+e,2+v,1k,2,5+7,5,4+6,b+1,u,1n,5+3,9,l+1,r,3+1,1m,5+1,5+1,3+2,4,v+1,4,c+1,1m,5+4,2+1,5,l+1,n+5,2,1n,3,2+3,9,8+1,c+1,v,1q,d,1f,4,1m+2,6+2,2+3,8+1,c+1,u,1n,3,7,6+1,l+1,t+1,1m+1,5+3,9,l+1,u,21,8+2,2,2j,3+6,d+7,2r,3+8,c+5,23+1,s,2,2,1k+d,2+4,2+1,6+a,2+z,a,2v+3,2+5,2+1,3+1,q+1,5+2,h+3,e,3+1,7,g,jk+2,qb+2,u+2,u+1,v+1,1t+1,2+6,9,3+a,a,1a+2,3c+1,z,3b+2,5+1,a,7+2,64+1,3,1n,2+6,2,2,3+7,7+9,3,1d+d,1,1+1,1s+3,1d,2+4,2,6,15+8,d+1,x+3,3+1,2+2,1l,2+1,4,2+2,1n+7,3+1,49+2,2+c,2+6,5,7,4+1,5j+1l,2+4,ek,3+1,r+4,1e+4,6+5,2p+c,1+3,1,1+2,1+b,2db+2,3y,2p+v,ff+3,30+1,n9x,1+2,2+9,x+1,29+1,7l,4,5,q+1,6,48+1,r+h,e,13+7,q+a,1b+2,1d,3+3,3+1,14,1w+5,3+1,3+1,d,9,1c,1g,2+2,3+1,6+1,2,17+1,9,6n,3,5,fn5,ki+f,h+f,5s,6y+2,ea,6b,46+4,1af+2,2+1,6+3,15+2,5,4m+1,fy+3,as+1,4a+a,4x,1j+e,1l+2,1e+3,3+1,1y+2,11+4,2+7,1r,d+1,1h+8,b+3,3,2o+2,3,2+1,7,4h,4+7,m+1,1m+1,4,12+6,4+4,5g+7,3+2,2,o,2d+5,2,5+1,2+1,6n+3,7+1,2+1,s+1,2e+7,3,2+1,2z,2,3+5,2,2u+2,3+3,2+4,78+8,2+1,75+1,2,5,41+3,3+1,5,x+9,15+5,3+3,9,a+5,3+2,1b+c,2+1,bb+6,2+5,2,2b+l,3+6,2+1,2+1,3f+5,4,2+1,2+6,2,21+1,4,2,9o+1,470+8,at4+4,1o+6,t5,1s+3,2a,f5l+1,2+3,43o+2,a+7,1+7,3+6,v+3,45+2,1j0+1i,5+1d,9,f,n+4,2+e,11t+6,2+g,3+6,2+1,2+4,7a+6,c6+3,15t+6,32+6,1,gzau,v+2n,3l+6n"};
+
+    const JT_LEFT = 1, //indicates that a character joins with the subsequent character, but does not join with the preceding character.
+      JT_RIGHT = 2, //indicates that a character joins with the preceding character, but does not join with the subsequent character.
+      JT_DUAL = 4, //indicates that a character joins with the preceding character and joins with the subsequent character.
+      JT_TRANSPARENT = 8, //indicates that the character does not join with adjacent characters and that the character must be skipped over when the shaping engine is evaluating the joining positions in a sequence of characters. When a JT_TRANSPARENT character is encountered in a sequence, the JOINING_TYPE of the preceding character passes through. Diacritical marks are frequently assigned this value.
+      JT_JOIN_CAUSING = 16, //indicates that the character forces the use of joining forms with the preceding and subsequent characters. Kashidas and the Zero Width Joiner (U+200D) are both JOIN_CAUSING characters.
+      JT_NON_JOINING = 32; //indicates that a character does not join with the preceding or with the subsequent character.,
+
+    let joiningTypeMap;
+    function getCharJoiningType(ch) {
+      if (!joiningTypeMap) {
+        const m = {
+          R: JT_RIGHT,
+          L: JT_LEFT,
+          D: JT_DUAL,
+          C: JT_JOIN_CAUSING,
+          U: JT_NON_JOINING,
+          T: JT_TRANSPARENT
+        };
+        joiningTypeMap = new Map();
+        for (let type in joiningTypeRawData) {
+          let lastCode = 0;
+          joiningTypeRawData[type].split(',').forEach(range => {
+            let [skip, step] = range.split('+');
+            skip = parseInt(skip,36);
+            step = step ? parseInt(step, 36) : 0;
+            joiningTypeMap.set(lastCode += skip, m[type]);
+            for (let i = step; i--;) {
+              joiningTypeMap.set(++lastCode, m[type]);
+            }
+          });
+        }
+      }
+      return joiningTypeMap.get(ch) || JT_NON_JOINING
+    }
+
+    const ISOL = 1, INIT = 2, FINA = 3, MEDI = 4;
+    const formsToFeatures = [null, 'isol', 'init', 'fina', 'medi'];
+
+    function detectJoiningForms(str) {
+      // This implements the algorithm described here:
+      // https://github.com/n8willis/opentype-shaping-documents/blob/master/opentype-shaping-arabic-general.md
+      const joiningForms = new Uint8Array(str.length);
+      let prevJoiningType = JT_NON_JOINING;
+      let prevForm = ISOL;
+      let prevIndex = -1;
+      for (let i = 0; i < str.length; i++) {
+        const code = str.codePointAt(i);
+        let joiningType = getCharJoiningType(code) | 0;
+        let form = ISOL;
+        if (joiningType & JT_TRANSPARENT) {
+          continue
+        }
+        if (prevJoiningType & (JT_LEFT | JT_DUAL | JT_JOIN_CAUSING)) {
+          if (joiningType & (JT_RIGHT | JT_DUAL | JT_JOIN_CAUSING)) {
+            form = FINA;
+            // isol->init, fina->medi
+            if (prevForm === ISOL || prevForm === FINA) {
+              joiningForms[prevIndex]++;
+            }
+          }
+          else if (joiningType & (JT_LEFT | JT_NON_JOINING)) {
+            // medi->fina, init->isol
+            if (prevForm === INIT || prevForm === MEDI) {
+              joiningForms[prevIndex]--;
+            }
+          }
+        }
+        else if (prevJoiningType & (JT_RIGHT | JT_NON_JOINING)) {
+          // medi->fina, init->isol
+          if (prevForm === INIT || prevForm === MEDI) {
+            joiningForms[prevIndex]--;
+          }
+        }
+        prevForm = joiningForms[i] = form;
+        prevJoiningType = joiningType;
+        prevIndex = i;
+        if (code > 0xffff) i++;
+      }
+      // console.log(str.split('').map(ch => ch.codePointAt(0).toString(16)))
+      // console.log(str.split('').map(ch => getCharJoiningType(ch.codePointAt(0))))
+      // console.log(Array.from(joiningForms).map(f => formsToFeatures[f] || 'none'))
+      return joiningForms
+    }
+
+    function stringToGlyphs (font, str) {
+      const glyphIds = [];
+      for (let i = 0; i < str.length; i++) {
+        const cc = str.codePointAt(i);
+        if (cc > 0xffff) i++;
+        glyphIds.push(Typr.U.codeToGlyph(font, cc));
+      }
+
+      const gsub = font['GSUB'];
+      if (gsub) {
+        const {lookupList, featureList} = gsub;
+        let joiningForms;
+        const supportedFeatures = /^(rlig|liga|mset|isol|init|fina|medi|half|pres|blws)$/;
+        const usedLookups = [];
+        featureList.forEach(feature => {
+          if (supportedFeatures.test(feature.tag)) {
+            for (let ti = 0; ti < feature.tab.length; ti++) {
+              if (usedLookups[feature.tab[ti]]) continue
+              usedLookups[feature.tab[ti]] = true;
+              const tab = lookupList[feature.tab[ti]];
+              const isJoiningFeature = /^(isol|init|fina|medi)$/.test(feature.tag);
+              if (isJoiningFeature && !joiningForms) { //lazy
+                joiningForms = detectJoiningForms(str);
+              }
+              for (let ci = 0; ci < glyphIds.length; ci++) {
+                if (!joiningForms || !isJoiningFeature || formsToFeatures[joiningForms[ci]] === feature.tag) {
+                  Typr.U._applySubs(glyphIds, ci, tab, lookupList);
+                }
+              }
+            }
+          }
+        });
+      }
+
+      return glyphIds
+    }
+
+
     function wrapFontObj(typrFont) {
       const glyphMap = Object.create(null);
 
@@ -5185,9 +3181,10 @@ void main() {
           let glyphX = 0;
           const fontScale = 1 / fontObj.unitsPerEm * fontSize;
 
-          const glyphIndices = Typr.U.stringToGlyphs(typrFont, text);
+          const glyphIndices = stringToGlyphs(typrFont, text);
           let charIndex = 0;
-          glyphIndices.forEach(glyphIndex => {
+          let prevGlyphIndex = -1;
+          glyphIndices.forEach((glyphIndex, i) => {
             // Typr returns a glyph index per string codepoint, with -1s in place of those that
             // were omitted due to ligature substitution. So we can track original index in the
             // string via simple increment, and skip everything else when seeing a -1.
@@ -5238,6 +3235,11 @@ void main() {
                 };
               }
 
+              // Kerning
+              if (prevGlyphIndex !== -1) {
+                glyphX += Typr.U.getPairAdjustment(typrFont, prevGlyphIndex, glyphIndex) * fontScale;
+              }
+
               callback.call(null, glyphObj, glyphX, charIndex);
 
               if (glyphObj.advanceWidth) {
@@ -5246,6 +3248,8 @@ void main() {
               if (letterSpacing) {
                 glyphX += letterSpacing * fontSize;
               }
+
+              prevGlyphIndex = glyphIndex;
             }
             charIndex += (text.codePointAt(charIndex) > 0xffff ? 2 : 1);
           });
@@ -5280,7 +3284,7 @@ void main() {
     }
   });
 
-  //import fontParser from './FontParser_OpenType.js'
+  // import fontParser from './worker/FontParser_OpenType.js'
 
 
   const CONFIG = {
@@ -5322,10 +3326,11 @@ void main() {
    * @property {Array<number>} blockBounds - The total [minX, minY, maxX, maxY] rect of the whole text block;
    *           this can include extra vertical space beyond the visible glyphs due to lineHeight, and is
    *           equivalent to the dimensions of a block-level text element in CSS.
-   * @property {Array<number>} visibleBounds -
+   * @property {Array<number>} visibleBounds - The total [minX, minY, maxX, maxY] rect of the whole text block;
+   *           unlike `blockBounds` this is tightly wrapped to the visible glyph paths.
    * @property {Array<number>} totalBounds - DEPRECATED; use blockBounds instead.
    * @property {Array<number>} totalBlockSize - DEPRECATED; use blockBounds instead
-   * @property {Array<number>} chunkedBounds - List of bounding rects for each consecutive set of N glyphs,
+   * @property {Array<object>} chunkedBounds - List of bounding rects for each consecutive set of N glyphs,
    *           in the format `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`.
    * @property {object} timings - Timing info for various parts of the rendering logic including SDF
    *           generation, layout, etc.
@@ -5344,7 +3349,7 @@ void main() {
    * @param {getTextRenderInfo~callback} callback
    */
   function getTextRenderInfo(args, callback) {
-    args = assign$1({}, args);
+    args = assign({}, args);
 
     // Apply default font here to avoid a 'null' atlas, and convert relative
     // URLs to absolute so they can be resolved in the worker
@@ -5380,10 +3385,10 @@ void main() {
     if (!atlas) {
       atlas = atlases[atlasKey] = {
         sdfTexture: new THREE.DataTexture(
-          new Uint8Array(sdfGlyphSize * textureWidth),
+          new Uint8Array(sdfGlyphSize * textureWidth * 4),
           textureWidth,
           sdfGlyphSize,
-          THREE.LuminanceFormat,
+          THREE.RGBAFormat,
           undefined,
           undefined,
           undefined,
@@ -5411,14 +3416,18 @@ void main() {
           }
 
           // Insert the new glyph's data into the full texture image at the correct offsets
+          // Glyphs are packed sequentially into the R,G,B,A channels of a square, advancing
+          // to the next square every 4 glyphs.
+          const squareIndex = Math.floor(atlasIndex / 4);
           const cols = texImg.width / sdfGlyphSize;
-          const baseStartIndex = texImg.width * sdfGlyphSize * Math.floor(atlasIndex / cols) //full rows
-            + (atlasIndex % cols) * sdfGlyphSize; //partial row
+          const baseStartIndex = Math.floor(squareIndex / cols) * texImg.width * sdfGlyphSize * 4 //full rows
+            + (squareIndex % cols) * sdfGlyphSize * 4 //partial row
+            + (atlasIndex % 4); //color channel
           for (let y = 0; y < sdfGlyphSize; y++) {
             const srcStartIndex = y * sdfGlyphSize;
-            const rowStartIndex = baseStartIndex + (y * texImg.width);
+            const rowStartIndex = baseStartIndex + (y * texImg.width * 4);
             for (let x = 0; x < sdfGlyphSize; x++) {
-              texImg.data[rowStartIndex + x] = textureData[srcStartIndex + x];
+              texImg.data[rowStartIndex + x * 4] = textureData[srcStartIndex + x];
             }
           }
         });
@@ -5459,7 +3468,7 @@ void main() {
 
 
   // Local assign impl so we don't have to import troika-core
-  function assign$1(toObj, fromObj) {
+  function assign(toObj, fromObj) {
     for (let key in fromObj) {
       if (fromObj.hasOwnProperty(key)) {
         toObj[key] = fromObj[key];
@@ -5486,12 +3495,13 @@ void main() {
       workerModule,
       createGlyphSegmentsIndex,
       createSDFGenerator,
-      createFontProcessor
+      createFontProcessor,
+      bidiFactory
     ],
-    init(config, fontParser, createGlyphSegmentsIndex, createSDFGenerator, createFontProcessor) {
+    init(config, fontParser, createGlyphSegmentsIndex, createSDFGenerator, createFontProcessor, bidiFactory) {
       const {sdfExponent, sdfMargin, defaultFontURL} = config;
       const sdfGenerator = createSDFGenerator(createGlyphSegmentsIndex, { sdfExponent, sdfMargin });
-      return createFontProcessor(fontParser, sdfGenerator, { defaultFontURL })
+      return createFontProcessor(fontParser, sdfGenerator, bidiFactory(), { defaultFontURL })
     }
   });
 
@@ -5533,7 +3543,7 @@ void main() {
       }
       return geom
     }
-    const tempVec3 = new THREE.Vector3();
+    new THREE.Vector3();
 
     const glyphBoundsAttrName = 'aTroikaGlyphBounds';
     const glyphIndexAttrName = 'aTroikaGlyphIndex';
@@ -5574,6 +3584,7 @@ void main() {
         super();
 
         this.detail = 1;
+        this.curveRadius = 0;
 
         // Define groups for rendering text outline as a separate pass; these will only
         // be used when the `material` getter returns an array, i.e. outlineWidth > 0.
@@ -5582,17 +3593,17 @@ void main() {
           {start: 0, count: Infinity, materialIndex: 1}
         ];
 
-        // Preallocate zero-radius bounding sphere
+        // Preallocate empty bounding objects
         this.boundingSphere = new THREE.Sphere();
         this.boundingBox = new THREE.Box3();
       }
 
       computeBoundingSphere () {
-        // No-op; we'll sync the boundingSphere proactively in `updateGlyphs`.
+        // No-op; we'll sync the boundingSphere proactively when needed.
       }
 
       computeBoundingBox() {
-        // No-op; we'll sync the boundingBox proactively in `updateGlyphs`.
+        // No-op; we'll sync the boundingBox proactively when needed.
       }
 
       set detail(detail) {
@@ -5612,6 +3623,16 @@ void main() {
         return this._detail
       }
 
+      set curveRadius(r) {
+        if (r !== this._curveRadius) {
+          this._curveRadius = r;
+          this._updateBounds();
+        }
+      }
+      get curveRadius() {
+        return this._curveRadius
+      }
+
       /**
        * Update the geometry for a new set of glyphs.
        * @param {Float32Array} glyphBounds - An array holding the planar bounds for all glyphs
@@ -5629,22 +3650,37 @@ void main() {
         updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
         updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
         updateBufferAttr(this, glyphColorAttrName, glyphColors, 3);
+        this._blockBounds = blockBounds;
         this._chunkedBounds = chunkedBounds;
         setInstanceCount(this, glyphAtlasIndices.length);
+        this._updateBounds();
+      }
 
-        // Update the boundingSphere based on the total bounds
-        const sphere = this.boundingSphere;
-        sphere.center.set(
-          (blockBounds[0] + blockBounds[2]) / 2,
-          (blockBounds[1] + blockBounds[3]) / 2,
-          0
-        );
-        sphere.radius = sphere.center.distanceTo(tempVec3.set(blockBounds[0], blockBounds[1], 0));
-
-        // Update the boundingBox based on the total bounds
-        const box = this.boundingBox;
-        box.min.set(blockBounds[0], blockBounds[1], 0);
-        box.max.set(blockBounds[2], blockBounds[3], 0);
+      _updateBounds() {
+        const bounds = this._blockBounds;
+        if (bounds) {
+          const { curveRadius, boundingBox: bbox } = this;
+          if (curveRadius) {
+            const { PI, floor, min, max, sin, cos } = Math;
+            const halfPi = PI / 2;
+            const twoPi = PI * 2;
+            const absR = Math.abs(curveRadius);
+            const leftAngle = bounds[0] / absR;
+            const rightAngle = bounds[2] / absR;
+            const minX = floor((leftAngle + halfPi) / twoPi) !== floor((rightAngle + halfPi) / twoPi)
+              ? -absR : min(sin(leftAngle) * absR, sin(rightAngle) * absR);
+            const maxX = floor((leftAngle - halfPi) / twoPi) !== floor((rightAngle - halfPi) / twoPi)
+              ? absR : max(sin(leftAngle) * absR, sin(rightAngle) * absR);
+            const maxZ = floor((leftAngle + PI) / twoPi) !== floor((rightAngle + PI) / twoPi)
+              ? absR * 2 : max(absR - cos(leftAngle) * absR, absR - cos(rightAngle) * absR);
+            bbox.min.set(minX, bounds[1], curveRadius < 0 ? -maxZ : 0);
+            bbox.max.set(maxX, bounds[3], curveRadius < 0 ? 0 : maxZ);
+          } else {
+            bbox.min.set(bounds[0], bounds[1], 0);
+            bbox.max.set(bounds[2], bounds[3], 0);
+          }
+          bbox.getBoundingSphere(this.boundingSphere);
+        }
       }
 
       /**
@@ -5726,11 +3762,15 @@ uniform vec4 uTroikaClipRect;
 uniform mat3 uTroikaOrient;
 uniform bool uTroikaUseGlyphColors;
 uniform float uTroikaDistanceOffset;
+uniform float uTroikaBlurRadius;
+uniform vec2 uTroikaPositionOffset;
+uniform float uTroikaCurveRadius;
 attribute vec4 aTroikaGlyphBounds;
 attribute float aTroikaGlyphIndex;
 attribute vec3 aTroikaGlyphColor;
 varying vec2 vTroikaGlyphUV;
 varying vec4 vTroikaTextureUVBounds;
+varying float vTroikaTextureChannel;
 varying vec3 vTroikaGlyphColor;
 varying vec2 vTroikaGlyphDimensions;
 `;
@@ -5738,17 +3778,31 @@ varying vec2 vTroikaGlyphDimensions;
   // language=GLSL prefix="void main() {" suffix="}"
   const VERTEX_TRANSFORM = `
 vec4 bounds = aTroikaGlyphBounds;
-vec4 outlineBounds = vec4(bounds.xy - uTroikaDistanceOffset, bounds.zw + uTroikaDistanceOffset);
+bounds.xz += uTroikaPositionOffset.x;
+bounds.yw -= uTroikaPositionOffset.y;
+
+vec4 outlineBounds = vec4(
+  bounds.xy - uTroikaDistanceOffset - uTroikaBlurRadius,
+  bounds.zw + uTroikaDistanceOffset + uTroikaBlurRadius
+);
 vec4 clippedBounds = vec4(
   clamp(outlineBounds.xy, uTroikaClipRect.xy, uTroikaClipRect.zw),
   clamp(outlineBounds.zw, uTroikaClipRect.xy, uTroikaClipRect.zw)
 );
+
 vec2 clippedXY = (mix(clippedBounds.xy, clippedBounds.zw, position.xy) - bounds.xy) / (bounds.zw - bounds.xy);
 
 position.xy = mix(bounds.xy, bounds.zw, clippedXY);
 
 uv = (position.xy - uTroikaTotalBounds.xy) / (uTroikaTotalBounds.zw - uTroikaTotalBounds.xy);
 
+float rad = uTroikaCurveRadius;
+if (rad != 0.0) {
+  float angle = position.x / rad;
+  position.xz = vec2(sin(angle) * rad, rad - cos(angle) * rad);
+  normal.xz = vec2(sin(angle), cos(angle));
+}
+  
 position = uTroikaOrient * position;
 normal = uTroikaOrient * normal;
 
@@ -5760,12 +3814,13 @@ ${''/* NOTE: it seems important to calculate the glyph's bounding texture UVs he
   on some glyphs (those in the leftmost texture column) on some systems. The exact reason
   isn't understood but doing this here, then mix()-ing in the fragment shader, seems to work. */}
 float txCols = uTroikaSDFTextureSize.x / uTroikaSDFGlyphSize;
-vec2 txUvPerGlyph = uTroikaSDFGlyphSize / uTroikaSDFTextureSize;
-vec2 txStartUV = txUvPerGlyph * vec2(
-  mod(aTroikaGlyphIndex, txCols),
-  floor(aTroikaGlyphIndex / txCols)
+vec2 txUvPerSquare = uTroikaSDFGlyphSize / uTroikaSDFTextureSize;
+vec2 txStartUV = txUvPerSquare * vec2(
+  mod(floor(aTroikaGlyphIndex / 4.0), txCols),
+  floor(floor(aTroikaGlyphIndex / 4.0) / txCols)
 );
-vTroikaTextureUVBounds = vec4(txStartUV, vec2(txStartUV) + txUvPerGlyph);
+vTroikaTextureUVBounds = vec4(txStartUV, vec2(txStartUV) + txUvPerSquare);
+vTroikaTextureChannel = mod(aTroikaGlyphIndex, 4.0);
 `;
 
   // language=GLSL
@@ -5775,9 +3830,16 @@ uniform vec2 uTroikaSDFTextureSize;
 uniform float uTroikaSDFGlyphSize;
 uniform float uTroikaSDFExponent;
 uniform float uTroikaDistanceOffset;
+uniform float uTroikaFillOpacity;
+uniform float uTroikaOutlineOpacity;
+uniform float uTroikaBlurRadius;
+uniform vec3 uTroikaStrokeColor;
+uniform float uTroikaStrokeWidth;
+uniform float uTroikaStrokeOpacity;
 uniform bool uTroikaSDFDebug;
 varying vec2 vTroikaGlyphUV;
 varying vec4 vTroikaTextureUVBounds;
+varying float vTroikaTextureChannel;
 varying vec2 vTroikaGlyphDimensions;
 
 float troikaSdfValueToSignedDistance(float alpha) {
@@ -5794,17 +3856,32 @@ float troikaSdfValueToSignedDistance(float alpha) {
 
 float troikaGlyphUvToSdfValue(vec2 glyphUV) {
   vec2 textureUV = mix(vTroikaTextureUVBounds.xy, vTroikaTextureUVBounds.zw, glyphUV);
-  return texture2D(uTroikaSDFTexture, textureUV).r;
+  vec4 rgba = texture2D(uTroikaSDFTexture, textureUV);
+  float ch = floor(vTroikaTextureChannel + 0.5); //NOTE: can't use round() in WebGL1
+  return ch == 0.0 ? rgba.r : ch == 1.0 ? rgba.g : ch == 2.0 ? rgba.b : rgba.a;
 }
 
 float troikaGlyphUvToDistance(vec2 uv) {
   return troikaSdfValueToSignedDistance(troikaGlyphUvToSdfValue(uv));
 }
 
-float troikaGetTextAlpha(float distanceOffset) {
+float troikaGetAADist() {
+  ${''/*
+    When the standard derivatives extension is available, we choose an antialiasing alpha threshold based
+    on the potential change in the SDF's alpha from this fragment to its neighbor. This strategy maximizes 
+    readability and edge crispness at all sizes and screen resolutions.
+  */}
+  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300
+  return length(fwidth(vTroikaGlyphUV * vTroikaGlyphDimensions)) * 0.5;
+  #else
+  return vTroikaGlyphDimensions.x / 64.0;
+  #endif
+}
+
+float troikaGetFragDistValue() {
   vec2 clampedGlyphUV = clamp(vTroikaGlyphUV, 0.5 / uTroikaSDFGlyphSize, 1.0 - 0.5 / uTroikaSDFGlyphSize);
   float distance = troikaGlyphUvToDistance(clampedGlyphUV);
-    
+ 
   // Extrapolate distance when outside bounds:
   distance += clampedGlyphUV == vTroikaGlyphUV ? 0.0 : 
     length((vTroikaGlyphUV - clampedGlyphUV) * vTroikaGlyphDimensions);
@@ -5831,43 +3908,48 @@ float troikaGetTextAlpha(float distanceOffset) {
   float gradientAngle2 = min(asin(abs(neighbor2Distance - distance) / distToNeighbor), PI / 2.0);
   distance += (cos(gradientAngle1) + cos(gradientAngle2)) / 2.0 * distToUnclamped;
   */}
-  
+
+  return distance;
+}
+
+float troikaGetEdgeAlpha(float distance, float distanceOffset, float aaDist) {
   #if defined(IS_DEPTH_MATERIAL) || defined(IS_DISTANCE_MATERIAL)
   float alpha = step(-distanceOffset, -distance);
   #else
-  ${''/*
-    When the standard derivatives extension is available, we choose an antialiasing alpha threshold based
-    on the potential change in the SDF's alpha from this fragment to its neighbor. This strategy maximizes 
-    readability and edge crispness at all sizes and screen resolutions.
-  */}
-  #if defined(GL_OES_standard_derivatives) || __VERSION__ >= 300
-  float aaDist = length(fwidth(vTroikaGlyphUV * vTroikaGlyphDimensions)) * 0.5;
-  #else
-  float aaDist = vTroikaGlyphDimensions.x / 64.0;
-  #endif
-  
+
   float alpha = smoothstep(
     distanceOffset + aaDist,
     distanceOffset - aaDist,
     distance
   );
   #endif
-  
+
   return alpha;
 }
 `;
 
   // language=GLSL prefix="void main() {" suffix="}"
   const FRAGMENT_TRANSFORM = `
-float alpha = uTroikaSDFDebug ?
+float aaDist = troikaGetAADist();
+float distance = troikaGetFragDistValue();
+float edgeAlpha = uTroikaSDFDebug ?
   troikaGlyphUvToSdfValue(vTroikaGlyphUV) :
-  troikaGetTextAlpha(uTroikaDistanceOffset);
+  troikaGetEdgeAlpha(distance, uTroikaDistanceOffset, max(aaDist, uTroikaBlurRadius));
 
 #if !defined(IS_DEPTH_MATERIAL) && !defined(IS_DISTANCE_MATERIAL)
-gl_FragColor.a *= alpha;
+vec4 fillRGBA = gl_FragColor;
+fillRGBA.a *= uTroikaFillOpacity;
+vec4 strokeRGBA = uTroikaStrokeWidth == 0.0 ? fillRGBA : vec4(uTroikaStrokeColor, uTroikaStrokeOpacity);
+if (fillRGBA.a == 0.0) fillRGBA.rgb = strokeRGBA.rgb;
+gl_FragColor = mix(fillRGBA, strokeRGBA, smoothstep(
+  -uTroikaStrokeWidth - aaDist,
+  -uTroikaStrokeWidth + aaDist,
+  distance
+));
+gl_FragColor.a *= edgeAlpha;
 #endif
-  
-if (alpha == 0.0) {
+
+if (edgeAlpha == 0.0) {
   discard;
 }
 `;
@@ -5890,6 +3972,14 @@ if (alpha == 0.0) {
         uTroikaTotalBounds: {value: new THREE.Vector4(0,0,0,0)},
         uTroikaClipRect: {value: new THREE.Vector4(0,0,0,0)},
         uTroikaDistanceOffset: {value: 0},
+        uTroikaOutlineOpacity: {value: 0},
+        uTroikaFillOpacity: {value: 1},
+        uTroikaPositionOffset: {value: new THREE.Vector2()},
+        uTroikaCurveRadius: {value: 0},
+        uTroikaBlurRadius: {value: 0},
+        uTroikaStrokeWidth: {value: 0},
+        uTroikaStrokeColor: {value: new THREE.Color()},
+        uTroikaStrokeOpacity: {value: 1},
         uTroikaOrient: {value: new THREE.Matrix3()},
         uTroikaUseGlyphColors: {value: true},
         uTroikaSDFDebug: {value: false}
@@ -5945,6 +4035,7 @@ if (alpha == 0.0) {
       side: THREE.DoubleSide,
       transparent: true
     });
+    const defaultStrokeColor = 0x808080;
 
     const tempMat4 = new THREE.Matrix4();
     const tempVec3a = new THREE.Vector3();
@@ -5957,10 +4048,22 @@ if (alpha == 0.0) {
       return Array.isArray(o) ? o[0] : o
     }
 
-    const raycastMesh = new THREE.Mesh(
-      new THREE.PlaneBufferGeometry(1, 1).translate(0.5, 0.5, 0),
-      defaultMaterial
-    );
+    let getFlatRaycastMesh = () => {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneBufferGeometry(1, 1),
+        defaultMaterial
+      );
+      getFlatRaycastMesh = () => mesh;
+      return mesh
+    };
+    let getCurvedRaycastMesh = () => {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneBufferGeometry(1, 1, 32, 1),
+        defaultMaterial
+      );
+      getCurvedRaycastMesh = () => mesh;
+      return mesh
+    };
 
     const syncStartEvent = {type: 'syncstart'};
     const syncCompleteEvent = {type: 'synccomplete'};
@@ -5973,6 +4076,7 @@ if (alpha == 0.0) {
       'maxWidth',
       'overflowWrap',
       'text',
+      'direction',
       'textAlign',
       'textIndent',
       'whiteSpace',
@@ -5987,6 +4091,7 @@ if (alpha == 0.0) {
       'color',
       'depthOffset',
       'clipRect',
+      'curveRadius',
       'orientation',
       'glyphGeometryDetail'
     );
@@ -6039,6 +4144,25 @@ if (alpha == 0.0) {
          * 'top', 'top-baseline', 'middle', 'bottom-baseline', or 'bottom'.
          */
         this.anchorY = 0;
+
+        /**
+         * @member {number} curveRadius
+         * Defines a cylindrical radius along which the text's plane will be curved. Positive numbers put
+         * the cylinder's centerline (oriented vertically) that distance in front of the text, for a concave
+         * curvature, while negative numbers put it behind the text for a convex curvature. The centerline
+         * will be aligned with the text's local origin; you can use `anchorX` to offset it.
+         *
+         * Since each glyph is by default rendered with a simple quad, each glyph remains a flat plane
+         * internally. You can use `glyphGeometryDetail` to add more vertices for curvature inside glyphs.
+         */
+        this.curveRadius = 0;
+
+        /**
+         * @member {string} direction
+         * Sets the base direction for the text. The default value of "auto" will choose a direction based
+         * on the text's content according to the bidi spec. A value of "ltr" or "rtl" will force the direction.
+         */
+        this.direction = 'auto';
 
         /**
          * @member {string} font
@@ -6143,18 +4267,88 @@ if (alpha == 0.0) {
         /**
          * @member {number|string} outlineWidth
          * WARNING: This API is experimental and may change.
-         * The width of an outline drawn around each text glyph using the `outlineColor`. Can be
-         * specified as either an absolute number in local units, or as a percentage string e.g.
-         * `"12%"` which is treated as a percentage of the `fontSize`. Defaults to `0`.
+         * The width of an outline/halo to be drawn around each text glyph using the `outlineColor` and `outlineOpacity`.
+         * Can be specified as either an absolute number in local units, or as a percentage string e.g.
+         * `"12%"` which is treated as a percentage of the `fontSize`. Defaults to `0`, which means
+         * no outline will be drawn unless an `outlineOffsetX/Y` or `outlineBlur` is set.
          */
         this.outlineWidth = 0;
 
         /**
          * @member {string|number|THREE.Color} outlineColor
          * WARNING: This API is experimental and may change.
-         * The color of the text outline, if `outlineWidth` is greater than zero. Defaults to black.
+         * The color of the text outline, if `outlineWidth`/`outlineBlur`/`outlineOffsetX/Y` are set.
+         * Defaults to black.
          */
-        this.outlineColor = 0;
+        this.outlineColor = 0x000000;
+
+        /**
+         * @member {number} outlineOpacity
+         * WARNING: This API is experimental and may change.
+         * The opacity of the outline, if `outlineWidth`/`outlineBlur`/`outlineOffsetX/Y` are set.
+         * Defaults to `1`.
+         */
+        this.outlineOpacity = 1;
+
+        /**
+         * @member {number|string} outlineBlur
+         * WARNING: This API is experimental and may change.
+         * A blur radius applied to the outer edge of the text's outline. If the `outlineWidth` is
+         * zero, the blur will be applied at the glyph edge, like CSS's `text-shadow` blur radius.
+         * Can be specified as either an absolute number in local units, or as a percentage string e.g.
+         * `"12%"` which is treated as a percentage of the `fontSize`. Defaults to `0`.
+         */
+        this.outlineBlur = 0;
+
+        /**
+         * @member {number|string} outlineOffsetX
+         * WARNING: This API is experimental and may change.
+         * A horizontal offset for the text outline.
+         * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
+         * which is treated as a percentage of the `fontSize`. Defaults to `0`.
+         */
+        this.outlineOffsetX = 0;
+
+        /**
+         * @member {number|string} outlineOffsetY
+         * WARNING: This API is experimental and may change.
+         * A vertical offset for the text outline.
+         * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
+         * which is treated as a percentage of the `fontSize`. Defaults to `0`.
+         */
+        this.outlineOffsetY = 0;
+
+        /**
+         * @member {number|string} strokeWidth
+         * WARNING: This API is experimental and may change.
+         * The width of an inner stroke drawn inside each text glyph using the `strokeColor` and `strokeOpacity`.
+         * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
+         * which is treated as a percentage of the `fontSize`. Defaults to `0`.
+         */
+        this.strokeWidth = 0;
+
+        /**
+         * @member {string|number|THREE.Color} strokeColor
+         * WARNING: This API is experimental and may change.
+         * The color of the text stroke, if `strokeWidth` is greater than zero. Defaults to gray.
+         */
+        this.strokeColor = defaultStrokeColor;
+
+        /**
+         * @member {number} strokeOpacity
+         * WARNING: This API is experimental and may change.
+         * The opacity of the stroke, if `strokeWidth` is greater than zero. Defaults to `1`.
+         */
+        this.strokeOpacity = 1;
+
+        /**
+         * @member {number} fillOpacity
+         * WARNING: This API is experimental and may change.
+         * The opacity of the glyph's fill from 0 to 1. This behaves like the material's `opacity` but allows
+         * giving the fill a different opacity than the `strokeOpacity`. A fillOpacity of `0` makes the
+         * interior of the glyph invisible, leaving just the `strokeWidth`. Defaults to `1`.
+         */
+        this.fillOpacity = 1;
 
         /**
          * @member {number} depthOffset
@@ -6228,6 +4422,7 @@ if (alpha == 0.0) {
               letterSpacing: this.letterSpacing || 0,
               lineHeight: this.lineHeight || 'normal',
               maxWidth: this.maxWidth,
+              direction: this.direction || 'auto',
               textAlign: this.textAlign,
               textIndent: this.textIndent,
               whiteSpace: this.whiteSpace,
@@ -6321,11 +4516,11 @@ if (alpha == 0.0) {
             derivedMaterial.dispose();
           });
         }
-        // If text outline is present, render it as a preliminary draw using Three's multi-material
+        // If text outline is configured, render it as a preliminary draw using Three's multi-material
         // feature (see GlyphsGeometry which sets up `groups` for this purpose) Doing it with multi
         // materials ensures the layers are always rendered consecutively in a consistent order.
         // Each layer will trigger onBeforeRender with the appropriate material.
-        if (this.outlineWidth) {
+        if (this.outlineWidth || this.outlineBlur || this.outlineOffsetX || this.outlineOffsetY) {
           let outlineMaterial = derivedMaterial._outlineMtl;
           if (!outlineMaterial) {
             outlineMaterial = derivedMaterial._outlineMtl = Object.create(derivedMaterial, {
@@ -6334,13 +4529,18 @@ if (alpha == 0.0) {
             outlineMaterial.isTextOutlineMaterial = true;
             outlineMaterial.depthWrite = false;
             outlineMaterial.map = null; //???
+            derivedMaterial.addEventListener('dispose', function onDispose() {
+              derivedMaterial.removeEventListener('dispose', onDispose);
+              outlineMaterial.dispose();
+            });
           }
-          derivedMaterial = [
+          return [
             outlineMaterial,
             derivedMaterial
-          ];
+          ]
+        } else {
+          return derivedMaterial
         }
-        return derivedMaterial
       }
       set material(baseMaterial) {
         if (baseMaterial && baseMaterial.isTroikaTextMaterial) { //prevent double-derivation
@@ -6356,6 +4556,13 @@ if (alpha == 0.0) {
       }
       set glyphGeometryDetail(detail) {
         this.geometry.detail = detail;
+      }
+
+      get curveRadius() {
+        return this.geometry.curveRadius
+      }
+      set curveRadius(r) {
+        this.geometry.curveRadius = r;
       }
 
       // Create and update material for shadows upon request:
@@ -6377,19 +4584,42 @@ if (alpha == 0.0) {
           uniforms.uTroikaSDFGlyphSize.value = textInfo.sdfGlyphSize;
           uniforms.uTroikaSDFExponent.value = textInfo.sdfExponent;
           uniforms.uTroikaTotalBounds.value.fromArray(blockBounds);
-          uniforms.uTroikaUseGlyphColors.value = !!textInfo.glyphColors;
+          uniforms.uTroikaUseGlyphColors.value = !isOutline && !!textInfo.glyphColors;
 
           let distanceOffset = 0;
+          let blurRadius = 0;
+          let strokeWidth = 0;
+          let fillOpacity;
+          let strokeOpacity;
+          let strokeColor;
+          let offsetX = 0;
+          let offsetY = 0;
+
           if (isOutline) {
-            let {outlineWidth} = this;
-            if (typeof outlineWidth === 'string') {
-              let match = outlineWidth.match(/^([\d.]+)%$/);
-              let pct = match ? parseFloat(match[1]) : NaN;
-              outlineWidth = (isNaN(pct) ? 0 : pct / 100) * this.fontSize;
+            let {outlineWidth, outlineOffsetX, outlineOffsetY, outlineBlur, outlineOpacity} = this;
+            distanceOffset = this._parsePercent(outlineWidth) || 0;
+            blurRadius = Math.max(0, this._parsePercent(outlineBlur) || 0);
+            fillOpacity = outlineOpacity;
+            offsetX = this._parsePercent(outlineOffsetX) || 0;
+            offsetY = this._parsePercent(outlineOffsetY) || 0;
+          } else {
+            strokeWidth = Math.max(0, this._parsePercent(this.strokeWidth) || 0);
+            if (strokeWidth) {
+              strokeColor = this.strokeColor;
+              uniforms.uTroikaStrokeColor.value.set(strokeColor == null ? defaultStrokeColor : strokeColor);
+              strokeOpacity = this.strokeOpacity;
+              if (strokeOpacity == null) strokeOpacity = 1;
             }
-            distanceOffset = outlineWidth;
+            fillOpacity = this.fillOpacity;
           }
+
           uniforms.uTroikaDistanceOffset.value = distanceOffset;
+          uniforms.uTroikaPositionOffset.value.set(offsetX, offsetY);
+          uniforms.uTroikaBlurRadius.value = blurRadius;
+          uniforms.uTroikaStrokeWidth.value = strokeWidth;
+          uniforms.uTroikaStrokeOpacity.value = strokeOpacity;
+          uniforms.uTroikaFillOpacity.value = fillOpacity == null ? 1 : fillOpacity;
+          uniforms.uTroikaCurveRadius.value = this.curveRadius || 0;
 
           let clipRect = this.clipRect;
           if (clipRect && Array.isArray(clipRect) && clipRect.length === 4) {
@@ -6413,6 +4643,7 @@ if (alpha == 0.0) {
         // Shortcut for setting material color via `color` prop on the mesh; this is
         // applied only to the derived material to avoid mutating a shared base material.
         const color = isOutline ? (this.outlineColor || 0) : this.color;
+
         if (color == null) {
           delete material.color; //inherit from base
         } else {
@@ -6441,23 +4672,60 @@ if (alpha == 0.0) {
         }
       }
 
+      _parsePercent(value) {
+        if (typeof value === 'string') {
+          let match = value.match(/^(-?[\d.]+)%$/);
+          let pct = match ? parseFloat(match[1]) : NaN;
+          value = (isNaN(pct) ? 0 : pct / 100) * this.fontSize;
+        }
+        return value
+      }
+
+      /**
+       * Translate a point in local space to an x/y in the text plane.
+       */
+      localPositionToTextCoords(position, target = new THREE.Vector2()) {
+        target.copy(position); //simple non-curved case is 1:1
+        const r = this.curveRadius;
+        if (r) { //flatten the curve
+          target.x = Math.atan2(position.x, Math.abs(r) - Math.abs(position.z)) * Math.abs(r);
+        }
+        return target
+      }
+
+      /**
+       * Translate a point in world space to an x/y in the text plane.
+       */
+      worldPositionToTextCoords(position, target = new THREE.Vector2()) {
+        tempVec3a.copy(position);
+        return this.localPositionToTextCoords(this.worldToLocal(tempVec3a), target)
+      }
+
       /**
        * @override Custom raycasting to test against the whole text block's max rectangular bounds
        * TODO is there any reason to make this more granular, like within individual line or glyph rects?
        */
       raycast(raycaster, intersects) {
-        const textInfo = this.textRenderInfo;
-        if (textInfo) {
-          const bounds = textInfo.blockBounds;
-          raycastMesh.matrixWorld.multiplyMatrices(
-            this.matrixWorld,
-            tempMat4.set(
-              bounds[2] - bounds[0], 0, 0, bounds[0],
-              0, bounds[3] - bounds[1], 0, bounds[1],
-              0, 0, 1, 0,
-              0, 0, 0, 1
-            )
-          );
+        const {textRenderInfo, curveRadius} = this;
+        if (textRenderInfo) {
+          const bounds = textRenderInfo.blockBounds;
+          const raycastMesh = curveRadius ? getCurvedRaycastMesh() : getFlatRaycastMesh();
+          const geom = raycastMesh.geometry;
+          const {position, uv} = geom.attributes;
+          for (let i = 0; i < uv.count; i++) {
+            let x = bounds[0] + (uv.getX(i) * (bounds[2] - bounds[0]));
+            const y = bounds[1] + (uv.getY(i) * (bounds[3] - bounds[1]));
+            let z = 0;
+            if (curveRadius) {
+              z = curveRadius - Math.cos(x / curveRadius) * curveRadius;
+              x = Math.sin(x / curveRadius) * curveRadius;
+            }
+            position.setXYZ(i, x, y, z);
+          }
+          geom.boundingSphere = this.geometry.boundingSphere;
+          geom.boundingBox = this.geometry.boundingBox;
+          raycastMesh.matrixWorld = this.matrixWorld;
+          raycastMesh.material.side = this.material.side;
           tempArray.length = 0;
           raycastMesh.raycast(raycaster, tempArray);
           for (let i = 0; i < tempArray.length; i++) {
@@ -6468,7 +4736,11 @@ if (alpha == 0.0) {
       }
 
       copy(source) {
+        // Prevent copying the geometry reference so we don't end up sharing attributes between instances
+        const geom = this.geometry;
         super.copy(source);
+        this.geometry = geom;
+
         COPYABLE_PROPS.forEach(prop => {
           this[prop] = source[prop];
         });
@@ -6524,6 +4796,21 @@ if (alpha == 0.0) {
 
   var COMPONENT_NAME = 'troika-text';
 
+  function numberOrPercent(defaultValue) {
+    return {
+      default: defaultValue,
+      parse: function(value) {
+        if (typeof value === 'string' && value.indexOf('%') > 0) {
+          return value
+        }
+        value = +value;
+        return isNaN(value) ? 0 : value
+      },
+      stringify: function(value) {
+        return '' + value
+      }
+    }
+  }
 
   aframe__default['default'].registerComponent(COMPONENT_NAME, {
     schema: {
@@ -6550,27 +4837,25 @@ if (alpha == 0.0) {
         }
       },
       color: {type: 'color', default: '#FFF'},
+      curveRadius: {type: 'number', default: 0},
       depthOffset: {type: 'number', default: 0},
+      direction: {type: 'string', default: 'auto', oneOf: ['auto', 'ltr', 'rtl']},
+      fillOpacity: {type: 'number', default: 1},
       font: {type: 'string'},
       fontSize: {type: 'number', default: 0.2},
       letterSpacing: {type: 'number', default: 0},
       lineHeight: {type: 'number'},
       maxWidth: {type: 'number', default: Infinity},
+      outlineBlur: numberOrPercent(0),
       outlineColor: {type: 'color', default: '#000'},
-      outlineWidth: {
-        default: 0,
-        parse: function(value) {
-          if (typeof value === 'string' && value.indexOf('%') > 0) {
-            return value
-          }
-          value = +value;
-          return isNaN(value) ? 0 : value
-        },
-        stringify: function(value) {
-          return '' + value
-        }
-      },
+      outlineOffsetX: numberOrPercent(0),
+      outlineOffsetY: numberOrPercent(0),
+      outlineOpacity: {type: 'number', default: 1},
+      outlineWidth: numberOrPercent(0),
       overflowWrap: {type: 'string', default: 'normal', oneOf: ['normal', 'break-word']},
+      strokeColor: {type: 'color', default: 'grey'},
+      strokeOpacity: {type: 'number', default: 1},
+      strokeWidth: numberOrPercent(0),
       textIndent: {type: 'number', default: 0},
       value: {type: 'string'},
       whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']}
@@ -6622,14 +4907,24 @@ if (alpha == 0.0) {
       mesh.anchorY = baselineMapping[data.baseline] || 'middle';
       mesh.color = data.color;
       mesh.clipRect = data.clipRect;
+      mesh.curveRadius = data.curveRadius;
       mesh.depthOffset = data.depthOffset || 0;
+      mesh.direction = data.direction;
+      mesh.fillOpacity = data.fillOpacity;
       mesh.font = data.font; //TODO allow aframe stock font names
       mesh.fontSize = data.fontSize;
       mesh.letterSpacing = data.letterSpacing || 0;
       mesh.lineHeight = data.lineHeight || 'normal';
+      mesh.outlineBlur = data.outlineBlur;
       mesh.outlineColor = data.outlineColor;
+      mesh.outlineOffsetX = data.outlineOffsetX;
+      mesh.outlineOffsetY = data.outlineOffsetY;
+      mesh.outlineOpacity = data.outlineOpacity;
       mesh.outlineWidth = data.outlineWidth;
       mesh.overflowWrap = data.overflowWrap;
+      mesh.strokeColor = data.strokeColor;
+      mesh.strokeOpacity = data.strokeOpacity;
+      mesh.strokeWidth = data.strokeWidth;
       mesh.textIndent = data.textIndent;
       mesh.whiteSpace = data.whiteSpace;
       mesh.maxWidth = data.maxWidth;
