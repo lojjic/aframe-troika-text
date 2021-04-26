@@ -1,6 +1,6 @@
 {
   "name": "aframe-troika-text",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "An A-Frame component to render text using the Troika 3D text renderer ",
   "main": "dist/aframe-troika-text.js",
   "author": "Jason Johnston",
