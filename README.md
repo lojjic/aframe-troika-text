@@ -13,6 +13,8 @@ It has similar performance and quality to A-Frame's built-in SDF `text` componen
 
 * Rather than using a fully custom shader, it patches the built-in Three.js material shaders as needed, so you don't lose all the nice standard shader features like lighting and fog.
 
+* Support for right-to-left/bidirectional language layout and shaping of Arabic text.
+
 
 ### API
 
