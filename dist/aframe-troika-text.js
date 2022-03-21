@@ -456,11 +456,8 @@
   var _messageId = 0;
   var _allowInitAsString = false;
   var workers = Object.create(null);
-  var openRequests = /*#__PURE__*/(function () {
-    var obj = Object.create(null);
-    obj._count = 0;
-    return obj
-  })();
+  var registeredModules = Object.create(null); //workerId -> Set<unregisterFn>
+  var openRequests = Object.create(null);
 
 
   /**
@@ -521,6 +518,11 @@
       // Register this module if needed
       if (!registrationThenable) {
         registrationThenable = callWorker(workerId,'registerModule', moduleFunc.workerModuleData);
+        var unregister = function () {
+          registrationThenable = null;
+          registeredModules[workerId].delete(unregister);
+        }
+        ;(registeredModules[workerId] || (registeredModules[workerId] = new Set())).add(unregister);
       }
 
       // Invoke the module, returning a thenable
@@ -543,6 +545,26 @@
       getTransferables: getTransferables && stringifyFunction(getTransferables)
     };
     return moduleFunc
+  }
+
+  /**
+   * Terminate an active Worker by a workerId that was passed to defineWorkerModule.
+   * This only terminates the Worker itself; the worker module will remain available
+   * and if you call it again its Worker will be respawned.
+   * @param {string} workerId
+   */
+  function terminateWorker(workerId) {
+    // Unregister all modules that were registered in that worker
+    if (registeredModules[workerId]) {
+      registeredModules[workerId].forEach(function (unregister) {
+        unregister();
+      });
+    }
+    // Terminate the Worker object
+    if (workers[workerId]) {
+      workers[workerId].terminate();
+      delete workers[workerId];
+    }
   }
 
   /**
@@ -584,7 +606,6 @@
           throw new Error('WorkerModule response with empty or unknown messageId')
         }
         delete openRequests[msgId];
-        openRequests._count--;
         callback(response);
       };
     }
@@ -602,10 +623,6 @@
         thenable.reject(new Error(("Error in worker " + action + " call: " + (response.error))));
       }
     };
-    openRequests._count++;
-    if (openRequests._count > 1000) { //detect leaks
-      console.warn('Large number of open WorkerModule requests, some may not be returning');
-    }
     getWorker(workerId).postMessage({
       messageId: messageId,
       action: action,
@@ -626,6 +643,827 @@
       return Thenable
     }
   });
+
+  function SDFGenerator() {
+  var exports = (function (exports) {
+
+    /**
+     * Find the point on a quadratic bezier curve at t where t is in the range [0, 1]
+     */
+    function pointOnQuadraticBezier (x0, y0, x1, y1, x2, y2, t, pointOut) {
+      var t2 = 1 - t;
+      pointOut.x = t2 * t2 * x0 + 2 * t2 * t * x1 + t * t * x2;
+      pointOut.y = t2 * t2 * y0 + 2 * t2 * t * y1 + t * t * y2;
+    }
+
+    /**
+     * Find the point on a cubic bezier curve at t where t is in the range [0, 1]
+     */
+    function pointOnCubicBezier (x0, y0, x1, y1, x2, y2, x3, y3, t, pointOut) {
+      var t2 = 1 - t;
+      pointOut.x = t2 * t2 * t2 * x0 + 3 * t2 * t2 * t * x1 + 3 * t2 * t * t * x2 + t * t * t * x3;
+      pointOut.y = t2 * t2 * t2 * y0 + 3 * t2 * t2 * t * y1 + 3 * t2 * t * t * y2 + t * t * t * y3;
+    }
+
+    /**
+     * Parse a path string into its constituent line/curve commands, invoking a callback for each.
+     * @param {string} pathString - An SVG-like path string to parse; should only contain commands: M/L/Q/C/Z
+     * @param {function(
+     *   command: 'L'|'Q'|'C',
+     *   startX: number,
+     *   startY: number,
+     *   endX: number,
+     *   endY: number,
+     *   ctrl1X?: number,
+     *   ctrl1Y?: number,
+     *   ctrl2X?: number,
+     *   ctrl2Y?: number
+     * )} commandCallback - A callback function that will be called once for each parsed path command, passing the
+     *                      command identifier (only L/Q/C commands) and its numeric arguments.
+     */
+    function forEachPathCommand(pathString, commandCallback) {
+      var segmentRE = /([MLQCZ])([^MLQCZ]*)/g;
+      var match, firstX, firstY, prevX, prevY;
+      while ((match = segmentRE.exec(pathString))) {
+        var args = match[2]
+          .replace(/^\s*|\s*$/g, '')
+          .split(/[,\s]+/)
+          .map(function (v) { return parseFloat(v); });
+        switch (match[1]) {
+          case 'M':
+            prevX = firstX = args[0];
+            prevY = firstY = args[1];
+            break
+          case 'L':
+            if (args[0] !== prevX || args[1] !== prevY) { // yup, some fonts have zero-length line commands
+              commandCallback('L', prevX, prevY, (prevX = args[0]), (prevY = args[1]));
+            }
+            break
+          case 'Q': {
+            commandCallback('Q', prevX, prevY, (prevX = args[2]), (prevY = args[3]), args[0], args[1]);
+            break
+          }
+          case 'C': {
+            commandCallback('C', prevX, prevY, (prevX = args[4]), (prevY = args[5]), args[0], args[1], args[2], args[3]);
+            break
+          }
+          case 'Z':
+            if (prevX !== firstX || prevY !== firstY) {
+              commandCallback('L', prevX, prevY, firstX, firstY);
+            }
+            break
+        }
+      }
+    }
+
+    /**
+     * Convert a path string to a series of straight line segments
+     * @param {string} pathString - An SVG-like path string to parse; should only contain commands: M/L/Q/C/Z
+     * @param {function(x1:number, y1:number, x2:number, y2:number)} segmentCallback - A callback
+     *        function that will be called once for every line segment
+     * @param {number} [curvePoints] - How many straight line segments to use when approximating a
+     *        bezier curve in the path. Defaults to 16.
+     */
+    function pathToLineSegments (pathString, segmentCallback, curvePoints) {
+      if ( curvePoints === void 0 ) curvePoints = 16;
+
+      var tempPoint = { x: 0, y: 0 };
+      forEachPathCommand(pathString, function (command, startX, startY, endX, endY, ctrl1X, ctrl1Y, ctrl2X, ctrl2Y) {
+        switch (command) {
+          case 'L':
+            segmentCallback(startX, startY, endX, endY);
+            break
+          case 'Q': {
+            var prevCurveX = startX;
+            var prevCurveY = startY;
+            for (var i = 1; i < curvePoints; i++) {
+              pointOnQuadraticBezier(
+                startX, startY,
+                ctrl1X, ctrl1Y,
+                endX, endY,
+                i / (curvePoints - 1),
+                tempPoint
+              );
+              segmentCallback(prevCurveX, prevCurveY, tempPoint.x, tempPoint.y);
+              prevCurveX = tempPoint.x;
+              prevCurveY = tempPoint.y;
+            }
+            break
+          }
+          case 'C': {
+            var prevCurveX$1 = startX;
+            var prevCurveY$1 = startY;
+            for (var i$1 = 1; i$1 < curvePoints; i$1++) {
+              pointOnCubicBezier(
+                startX, startY,
+                ctrl1X, ctrl1Y,
+                ctrl2X, ctrl2Y,
+                endX, endY,
+                i$1 / (curvePoints - 1),
+                tempPoint
+              );
+              segmentCallback(prevCurveX$1, prevCurveY$1, tempPoint.x, tempPoint.y);
+              prevCurveX$1 = tempPoint.x;
+              prevCurveY$1 = tempPoint.y;
+            }
+            break
+          }
+        }
+      });
+    }
+
+    var viewportQuadVertex = "precision highp float;attribute vec2 aUV;varying vec2 vUV;void main(){vUV=aUV;gl_Position=vec4(mix(vec2(-1.0),vec2(1.0),aUV),0.0,1.0);}";
+
+    var copyTexFragment = "precision highp float;uniform sampler2D tex;varying vec2 vUV;void main(){gl_FragColor=texture2D(tex,vUV);}";
+
+    var cache = new WeakMap();
+
+    var glContextParams = {
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: true,
+      antialias: false,
+      depth: false,
+    };
+
+    /**
+     * This is a little helper library for WebGL. It assists with state management for a GL context.
+     * It's pretty tightly wrapped to the needs of this package, not very general-purpose.
+     *
+     * @param { WebGLRenderingContext | HTMLCanvasElement | OffscreenCanvas } glOrCanvas - the GL context to wrap
+     * @param { ({gl, getExtension, withProgram, withTexture, withTextureFramebuffer, handleContextLoss}) => void } callback
+     */
+    function withWebGLContext (glOrCanvas, callback) {
+      var gl = glOrCanvas.getContext ? glOrCanvas.getContext('webgl', glContextParams) : glOrCanvas;
+      var wrapper = cache.get(gl);
+      if (!wrapper) {
+        var isWebGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
+        var extensions = {};
+        var programs = {};
+        var textures = {};
+        var textureUnit = -1;
+        var framebufferStack = [];
+
+        gl.canvas.addEventListener('webglcontextlost', function (e) {
+          handleContextLoss();
+          e.preventDefault();
+        }, false);
+
+        function getExtension (name) {
+          var ext = extensions[name];
+          if (!ext) {
+            ext = extensions[name] = gl.getExtension(name);
+            if (!ext) {
+              throw new Error((name + " not supported"))
+            }
+          }
+          return ext
+        }
+
+        function compileShader (src, type) {
+          var shader = gl.createShader(type);
+          gl.shaderSource(shader, src);
+          gl.compileShader(shader);
+          // const status = gl.getShaderParameter(shader, gl.COMPILE_STATUS)
+          // if (!status && !gl.isContextLost()) {
+          //   throw new Error(gl.getShaderInfoLog(shader).trim())
+          // }
+          return shader
+        }
+
+        function withProgram (name, vert, frag, func) {
+          if (!programs[name]) {
+            var attributes = {};
+            var uniforms = {};
+            var program = gl.createProgram();
+            gl.attachShader(program, compileShader(vert, gl.VERTEX_SHADER));
+            gl.attachShader(program, compileShader(frag, gl.FRAGMENT_SHADER));
+            gl.linkProgram(program);
+
+            programs[name] = {
+              program: program,
+              transaction: function transaction (func) {
+                gl.useProgram(program);
+                func({
+                  setUniform: function setUniform (type, name) {
+                    var values = [], len = arguments.length - 2;
+                    while ( len-- > 0 ) values[ len ] = arguments[ len + 2 ];
+
+                    var uniformLoc = uniforms[name] || (uniforms[name] = gl.getUniformLocation(program, name));
+                    gl[("uniform" + type)].apply(gl, [ uniformLoc ].concat( values ));
+                  },
+
+                  setAttribute: function setAttribute (name, size, usage, instancingDivisor, data) {
+                    var attr = attributes[name];
+                    if (!attr) {
+                      attr = attributes[name] = {
+                        buf: gl.createBuffer(), // TODO should we destroy our buffers?
+                        loc: gl.getAttribLocation(program, name),
+                        data: null
+                      };
+                    }
+                    gl.bindBuffer(gl.ARRAY_BUFFER, attr.buf);
+                    gl.vertexAttribPointer(attr.loc, size, gl.FLOAT, false, 0, 0);
+                    gl.enableVertexAttribArray(attr.loc);
+                    if (isWebGL2) {
+                      gl.vertexAttribDivisor(attr.loc, instancingDivisor);
+                    } else {
+                      getExtension('ANGLE_instanced_arrays').vertexAttribDivisorANGLE(attr.loc, instancingDivisor);
+                    }
+                    if (data !== attr.data) {
+                      gl.bufferData(gl.ARRAY_BUFFER, data, usage);
+                      attr.data = data;
+                    }
+                  }
+                });
+              }
+            };
+          }
+
+          programs[name].transaction(func);
+        }
+
+        function withTexture (name, func) {
+          textureUnit++;
+          try {
+            gl.activeTexture(gl.TEXTURE0 + textureUnit);
+            var texture = textures[name];
+            if (!texture) {
+              texture = textures[name] = gl.createTexture();
+              gl.bindTexture(gl.TEXTURE_2D, texture);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            }
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            func(texture, textureUnit);
+          } finally {
+            textureUnit--;
+          }
+        }
+
+        function withTextureFramebuffer (texture, textureUnit, func) {
+          var framebuffer = gl.createFramebuffer();
+          framebufferStack.push(framebuffer);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+          gl.activeTexture(gl.TEXTURE0 + textureUnit);
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+          try {
+            func(framebuffer);
+          } finally {
+            gl.deleteFramebuffer(framebuffer);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebufferStack[--framebufferStack.length - 1] || null);
+          }
+        }
+
+        function handleContextLoss () {
+          extensions = {};
+          programs = {};
+          textures = {};
+          textureUnit = -1;
+          framebufferStack.length = 0;
+        }
+
+        cache.set(gl, wrapper = {
+          gl: gl,
+          isWebGL2: isWebGL2,
+          getExtension: getExtension,
+          withProgram: withProgram,
+          withTexture: withTexture,
+          withTextureFramebuffer: withTextureFramebuffer,
+          handleContextLoss: handleContextLoss,
+        });
+      }
+      callback(wrapper);
+    }
+
+
+    function renderImageData(glOrCanvas, imageData, x, y, width, height, channels, framebuffer) {
+      if ( channels === void 0 ) channels = 15;
+      if ( framebuffer === void 0 ) framebuffer = null;
+
+      withWebGLContext(glOrCanvas, function (ref) {
+        var gl = ref.gl;
+        var withProgram = ref.withProgram;
+        var withTexture = ref.withTexture;
+
+        withTexture('copy', function (tex, texUnit) {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, imageData);
+          withProgram('copy', viewportQuadVertex, copyTexFragment, function (ref) {
+            var setUniform = ref.setUniform;
+            var setAttribute = ref.setAttribute;
+
+            setAttribute('aUV', 2, gl.STATIC_DRAW, 0, new Float32Array([0, 0, 2, 0, 0, 2]));
+            setUniform('1i', 'image', texUnit);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer || null);
+            gl.disable(gl.BLEND);
+            gl.colorMask(channels & 8, channels & 4, channels & 2, channels & 1);
+            gl.viewport(x, y, width, height);
+            gl.scissor(x, y, width, height);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          });
+        });
+      });
+    }
+
+    /**
+     * Resizing a canvas clears its contents; this utility copies the previous contents over.
+     * @param canvas
+     * @param newWidth
+     * @param newHeight
+     */
+    function resizeWebGLCanvasWithoutClearing(canvas, newWidth, newHeight) {
+      var width = canvas.width;
+      var height = canvas.height;
+      withWebGLContext(canvas, function (ref) {
+        var gl = ref.gl;
+
+        var data = new Uint8Array(width * height * 4);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        renderImageData(gl, data, 0, 0, width, height);
+      });
+    }
+
+    var webglUtils = /*#__PURE__*/Object.freeze({
+      __proto__: null,
+      withWebGLContext: withWebGLContext,
+      renderImageData: renderImageData,
+      resizeWebGLCanvasWithoutClearing: resizeWebGLCanvasWithoutClearing
+    });
+
+    function generate$2 (sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent) {
+      if ( sdfExponent === void 0 ) sdfExponent = 1;
+
+      var textureData = new Uint8Array(sdfWidth * sdfHeight);
+
+      var viewBoxWidth = viewBox[2] - viewBox[0];
+      var viewBoxHeight = viewBox[3] - viewBox[1];
+
+      // Decompose all paths into straight line segments and add them to an index
+      var segments = [];
+      pathToLineSegments(path, function (x1, y1, x2, y2) {
+        segments.push({
+          x1: x1, y1: y1, x2: x2, y2: y2,
+          minX: Math.min(x1, x2),
+          minY: Math.min(y1, y2),
+          maxX: Math.max(x1, x2),
+          maxY: Math.max(y1, y2)
+        });
+      });
+
+      // Sort segments by maxX, this will let us short-circuit some loops below
+      segments.sort(function (a, b) { return a.maxX - b.maxX; });
+
+      // For each target SDF texel, find the distance from its center to its nearest line segment,
+      // map that distance to an alpha value, and write that alpha to the texel
+      for (var sdfX = 0; sdfX < sdfWidth; sdfX++) {
+        for (var sdfY = 0; sdfY < sdfHeight; sdfY++) {
+          var signedDist = findNearestSignedDistance(
+            viewBox[0] + viewBoxWidth * (sdfX + 0.5) / sdfWidth,
+            viewBox[1] + viewBoxHeight * (sdfY + 0.5) / sdfHeight
+          );
+
+          // Use an exponential scale to ensure the texels very near the glyph path have adequate
+          // precision, while allowing the distance field to cover the entire texture, given that
+          // there are only 8 bits available. Formula visualized: https://www.desmos.com/calculator/uiaq5aqiam
+          var alpha = Math.pow((1 - Math.abs(signedDist) / maxDistance), sdfExponent) / 2;
+          if (signedDist < 0) {
+            alpha = 1 - alpha;
+          }
+
+          alpha = Math.max(0, Math.min(255, Math.round(alpha * 255))); //clamp
+          textureData[sdfY * sdfWidth + sdfX] = alpha;
+        }
+      }
+
+      return textureData
+
+      /**
+       * For a given x/y, search the index for the closest line segment and return
+       * its signed distance. Negative = inside, positive = outside, zero = on edge
+       * @param x
+       * @param y
+       * @returns {number}
+       */
+      function findNearestSignedDistance (x, y) {
+        var closestDistSq = Infinity;
+        var closestDist = Infinity;
+
+        for (var i = segments.length; i--;) {
+          var seg = segments[i];
+          if (seg.maxX + closestDist <= x) { break } //sorting by maxX means no more can be closer, so we can short-circuit
+          if (x + closestDist > seg.minX && y - closestDist < seg.maxY && y + closestDist > seg.minY) {
+            var distSq = absSquareDistanceToLineSegment(x, y, seg.x1, seg.y1, seg.x2, seg.y2);
+            if (distSq < closestDistSq) {
+              closestDistSq = distSq;
+              closestDist = Math.sqrt(closestDistSq);
+            }
+          }
+        }
+
+        // Flip to negative distance if inside the poly
+        if (isPointInPoly(x, y)) {
+          closestDist = -closestDist;
+        }
+        return closestDist
+      }
+
+      /**
+       * Determine whether the given point lies inside or outside the glyph. Uses a simple
+       * winding-number ray casting algorithm using a ray pointing east from the point.
+       */
+      function isPointInPoly (x, y) {
+        var winding = 0;
+        for (var i = segments.length; i--;) {
+          var seg = segments[i];
+          if (seg.maxX <= x) { break } //sorting by maxX means no more can cross, so we can short-circuit
+          var intersects = ((seg.y1 > y) !== (seg.y2 > y)) && (x < (seg.x2 - seg.x1) * (y - seg.y1) / (seg.y2 - seg.y1) + seg.x1);
+          if (intersects) {
+            winding += seg.y1 < seg.y2 ? 1 : -1;
+          }
+        }
+        return winding !== 0
+      }
+    }
+
+    function generateIntoCanvas$2(sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent, canvas, x, y, channel) {
+      if ( sdfExponent === void 0 ) sdfExponent = 1;
+      if ( x === void 0 ) x = 0;
+      if ( y === void 0 ) y = 0;
+      if ( channel === void 0 ) channel = 0;
+
+      generateIntoFramebuffer$1(sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent, canvas, null, x, y, channel);
+    }
+
+    function generateIntoFramebuffer$1 (sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent, glOrCanvas, framebuffer, x, y, channel) {
+      if ( sdfExponent === void 0 ) sdfExponent = 1;
+      if ( x === void 0 ) x = 0;
+      if ( y === void 0 ) y = 0;
+      if ( channel === void 0 ) channel = 0;
+
+      var data = generate$2(sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent);
+      // Expand single-channel data to rbga
+      var rgbaData = new Uint8Array(data.length * 4);
+      for (var i = 0; i < data.length; i++) {
+        rgbaData[i * 4 + channel] = data[i];
+      }
+      renderImageData(glOrCanvas, rgbaData, x, y, sdfWidth, sdfHeight, 1 << (3 - channel), framebuffer);
+    }
+
+    /**
+     * Find the absolute distance from a point to a line segment at closest approach
+     */
+    function absSquareDistanceToLineSegment (x, y, lineX0, lineY0, lineX1, lineY1) {
+      var ldx = lineX1 - lineX0;
+      var ldy = lineY1 - lineY0;
+      var lengthSq = ldx * ldx + ldy * ldy;
+      var t = lengthSq ? Math.max(0, Math.min(1, ((x - lineX0) * ldx + (y - lineY0) * ldy) / lengthSq)) : 0;
+      var dx = x - (lineX0 + t * ldx);
+      var dy = y - (lineY0 + t * ldy);
+      return dx * dx + dy * dy
+    }
+
+    var javascript = /*#__PURE__*/Object.freeze({
+      __proto__: null,
+      generate: generate$2,
+      generateIntoCanvas: generateIntoCanvas$2,
+      generateIntoFramebuffer: generateIntoFramebuffer$1
+    });
+
+    var mainVertex = "precision highp float;uniform vec4 uGlyphBounds;attribute vec2 aUV;attribute vec4 aLineSegment;varying vec4 vLineSegment;varying vec2 vGlyphXY;void main(){vLineSegment=aLineSegment;vGlyphXY=mix(uGlyphBounds.xy,uGlyphBounds.zw,aUV);gl_Position=vec4(mix(vec2(-1.0),vec2(1.0),aUV),0.0,1.0);}";
+
+    var mainFragment = "precision highp float;uniform vec4 uGlyphBounds;uniform float uMaxDistance;uniform float uExponent;varying vec4 vLineSegment;varying vec2 vGlyphXY;float absDistToSegment(vec2 point,vec2 lineA,vec2 lineB){vec2 lineDir=lineB-lineA;float lenSq=dot(lineDir,lineDir);float t=lenSq==0.0 ? 0.0 : clamp(dot(point-lineA,lineDir)/lenSq,0.0,1.0);vec2 linePt=lineA+t*lineDir;return distance(point,linePt);}void main(){vec4 seg=vLineSegment;vec2 p=vGlyphXY;float dist=absDistToSegment(p,seg.xy,seg.zw);float val=pow(1.0-clamp(dist/uMaxDistance,0.0,1.0),uExponent)*0.5;bool crossing=(seg.y>p.y!=seg.w>p.y)&&(p.x<(seg.z-seg.x)*(p.y-seg.y)/(seg.w-seg.y)+seg.x);bool crossingUp=crossing&&vLineSegment.y<vLineSegment.w;gl_FragColor=vec4(crossingUp ? 1.0/255.0 : 0.0,crossing&&!crossingUp ? 1.0/255.0 : 0.0,0.0,val);}";
+
+    var postFragment = "precision highp float;uniform sampler2D tex;varying vec2 vUV;void main(){vec4 color=texture2D(tex,vUV);bool inside=color.r!=color.g;float val=inside ? 1.0-color.a : color.a;gl_FragColor=vec4(val);}";
+
+    // Single triangle covering viewport
+    var viewportUVs = new Float32Array([0, 0, 2, 0, 0, 2]);
+
+    var implicitContext = null;
+    var isTestingSupport = false;
+    var NULL_OBJECT = {};
+    var supportByCanvas = new WeakMap(); // canvas -> bool
+
+    function validateSupport (glOrCanvas) {
+      if (!isTestingSupport && !isSupported(glOrCanvas)) {
+        throw new Error('WebGL generation not supported')
+      }
+    }
+
+    function generate$1 (sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent, glOrCanvas) {
+      if ( sdfExponent === void 0 ) sdfExponent = 1;
+      if ( glOrCanvas === void 0 ) glOrCanvas = null;
+
+      if (!glOrCanvas) {
+        glOrCanvas = implicitContext;
+        if (!glOrCanvas) {
+          var canvas = typeof OffscreenCanvas === 'function'
+            ? new OffscreenCanvas(1, 1)
+            : typeof document !== 'undefined'
+              ? document.createElement('canvas')
+              : null;
+          if (!canvas) {
+            throw new Error('OffscreenCanvas or DOM canvas not supported')
+          }
+          glOrCanvas = implicitContext = canvas.getContext('webgl', { depth: false });
+        }
+      }
+
+      validateSupport(glOrCanvas);
+
+      var rgbaData = new Uint8Array(sdfWidth * sdfHeight * 4); //not Uint8ClampedArray, cuz Safari
+
+      // Render into a background texture framebuffer
+      withWebGLContext(glOrCanvas, function (ref) {
+        var gl = ref.gl;
+        var withTexture = ref.withTexture;
+        var withTextureFramebuffer = ref.withTextureFramebuffer;
+
+        withTexture('readable', function (texture, textureUnit) {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, sdfWidth, sdfHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+          withTextureFramebuffer(texture, textureUnit, function (framebuffer) {
+            generateIntoFramebuffer(
+              sdfWidth,
+              sdfHeight,
+              path,
+              viewBox,
+              maxDistance,
+              sdfExponent,
+              gl,
+              framebuffer,
+              0,
+              0,
+              0 // red channel
+            );
+            gl.readPixels(0, 0, sdfWidth, sdfHeight, gl.RGBA, gl.UNSIGNED_BYTE, rgbaData);
+          });
+        });
+      });
+
+      // Throw away all but the red channel
+      var data = new Uint8Array(sdfWidth * sdfHeight);
+      for (var i = 0, j = 0; i < rgbaData.length; i += 4) {
+        data[j++] = rgbaData[i];
+      }
+
+      return data
+    }
+
+    function generateIntoCanvas$1(sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent, canvas, x, y, channel) {
+      if ( sdfExponent === void 0 ) sdfExponent = 1;
+      if ( x === void 0 ) x = 0;
+      if ( y === void 0 ) y = 0;
+      if ( channel === void 0 ) channel = 0;
+
+      generateIntoFramebuffer(sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent, canvas, null, x, y, channel);
+    }
+
+    function generateIntoFramebuffer (sdfWidth, sdfHeight, path, viewBox, maxDistance, sdfExponent, glOrCanvas, framebuffer, x, y, channel) {
+      if ( sdfExponent === void 0 ) sdfExponent = 1;
+      if ( x === void 0 ) x = 0;
+      if ( y === void 0 ) y = 0;
+      if ( channel === void 0 ) channel = 0;
+
+      // Verify support
+      validateSupport(glOrCanvas);
+
+      // Compute path segments
+      var lineSegmentCoords = [];
+      pathToLineSegments(path, function (x1, y1, x2, y2) {
+        lineSegmentCoords.push(x1, y1, x2, y2);
+      });
+      lineSegmentCoords = new Float32Array(lineSegmentCoords);
+
+      withWebGLContext(glOrCanvas, function (ref) {
+        var gl = ref.gl;
+        var isWebGL2 = ref.isWebGL2;
+        var getExtension = ref.getExtension;
+        var withProgram = ref.withProgram;
+        var withTexture = ref.withTexture;
+        var withTextureFramebuffer = ref.withTextureFramebuffer;
+        var handleContextLoss = ref.handleContextLoss;
+
+        withTexture('rawDistances', function (intermediateTexture, intermediateTextureUnit) {
+          if (sdfWidth !== intermediateTexture._lastWidth || sdfHeight !== intermediateTexture._lastHeight) {
+            gl.texImage2D(
+              gl.TEXTURE_2D, 0, gl.RGBA,
+              intermediateTexture._lastWidth = sdfWidth,
+              intermediateTexture._lastHeight = sdfHeight,
+              0, gl.RGBA, gl.UNSIGNED_BYTE, null
+            );
+          }
+
+          // Unsigned distance pass
+          withProgram('main', mainVertex, mainFragment, function (ref) {
+            var setAttribute = ref.setAttribute;
+            var setUniform = ref.setUniform;
+
+            // Init extensions
+            var instancingExtension = !isWebGL2 && getExtension('ANGLE_instanced_arrays');
+            var blendMinMaxExtension = !isWebGL2 && getExtension('EXT_blend_minmax');
+
+            // Init/update attributes
+            setAttribute('aUV', 2, gl.STATIC_DRAW, 0, viewportUVs);
+            setAttribute('aLineSegment', 4, gl.DYNAMIC_DRAW, 1, lineSegmentCoords);
+
+            // Init/update uniforms
+            setUniform.apply(void 0, [ '4f', 'uGlyphBounds' ].concat( viewBox ));
+            setUniform('1f', 'uMaxDistance', maxDistance);
+            setUniform('1f', 'uExponent', sdfExponent);
+
+            // Render initial unsigned distance / winding number info to a texture
+            withTextureFramebuffer(intermediateTexture, intermediateTextureUnit, function (framebuffer) {
+              gl.enable(gl.BLEND);
+              gl.colorMask(true, true, true, true);
+              gl.viewport(0, 0, sdfWidth, sdfHeight);
+              gl.scissor(0, 0, sdfWidth, sdfHeight);
+              gl.blendFunc(gl.ONE, gl.ONE);
+              // Red+Green channels are incremented (FUNC_ADD) for segment-ray crossings to give a "winding number".
+              // Alpha holds the closest (MAX) unsigned distance.
+              gl.blendEquationSeparate(gl.FUNC_ADD, isWebGL2 ? gl.MAX : blendMinMaxExtension.MAX_EXT);
+              gl.clear(gl.COLOR_BUFFER_BIT);
+              if (isWebGL2) {
+                gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, lineSegmentCoords.length / 4);
+              } else {
+                instancingExtension.drawArraysInstancedANGLE(gl.TRIANGLES, 0, 3, lineSegmentCoords.length / 4);
+              }
+              // Debug
+              // const debug = new Uint8Array(sdfWidth * sdfHeight * 4)
+              // gl.readPixels(0, 0, sdfWidth, sdfHeight, gl.RGBA, gl.UNSIGNED_BYTE, debug)
+              // console.log('intermediate texture data: ', debug)
+            });
+          });
+
+          // Use the data stored in the texture to apply inside/outside and write to the output framebuffer rect+channel.
+          withProgram('post', viewportQuadVertex, postFragment, function (program) {
+            program.setAttribute('aUV', 2, gl.STATIC_DRAW, 0, viewportUVs);
+            program.setUniform('1i', 'tex', intermediateTextureUnit);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.disable(gl.BLEND);
+            gl.colorMask(channel === 0, channel === 1, channel === 2, channel === 3);
+            gl.viewport(x, y, sdfWidth, sdfHeight);
+            gl.scissor(x, y, sdfWidth, sdfHeight);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+          });
+        });
+
+        // Handle context loss occurring during any of the above calls
+        if (gl.isContextLost()) {
+          handleContextLoss();
+          throw new Error('webgl context lost')
+        }
+      });
+    }
+
+    function isSupported (glOrCanvas) {
+      var key = (!glOrCanvas || glOrCanvas === implicitContext) ? NULL_OBJECT : (glOrCanvas.canvas || glOrCanvas);
+      var supported = supportByCanvas.get(key);
+      if (supported === undefined) {
+        isTestingSupport = true;
+        var failReason = null;
+        try {
+          // Since we can't detect all failure modes up front, let's just do a trial run of a
+          // simple path and compare what we get back to the correct expected result. This will
+          // also serve to prime the shader compilation.
+          var expectedResult = [
+            97, 106, 97, 61,
+            99, 137, 118, 80,
+            80, 118, 137, 99,
+            61, 97, 106, 97
+          ];
+          var testResult = generate$1(
+            4,
+            4,
+            'M8,8L16,8L24,24L16,24Z',
+            [0, 0, 32, 32],
+            24,
+            1,
+            glOrCanvas
+          );
+          supported = testResult && expectedResult.length === testResult.length &&
+            testResult.every(function (val, i) { return val === expectedResult[i]; });
+          if (!supported) {
+            failReason = 'bad trial run results';
+            console.info(expectedResult, testResult);
+          }
+        } catch (err) {
+          // TODO if it threw due to webgl context loss, should we maybe leave isSupported as null and try again later?
+          supported = false;
+          failReason = err.message;
+        }
+        if (failReason) {
+          console.warn('WebGL SDF generation not supported:', failReason);
+        }
+        isTestingSupport = false;
+        supportByCanvas.set(key, supported);
+      }
+      return supported
+    }
+
+    var webgl = /*#__PURE__*/Object.freeze({
+      __proto__: null,
+      generate: generate$1,
+      generateIntoCanvas: generateIntoCanvas$1,
+      generateIntoFramebuffer: generateIntoFramebuffer,
+      isSupported: isSupported
+    });
+
+    /**
+     * Generate an SDF texture image for a 2D path.
+     *
+     * @param {number} sdfWidth - width of the SDF output image in pixels.
+     * @param {number} sdfHeight - height of the SDF output image in pixels.
+     * @param {string} path - an SVG-like path string describing the glyph; should only contain commands: M/L/Q/C/Z.
+     * @param {number[]} viewBox - [minX, minY, maxX, maxY] in font units aligning with the texture's edges.
+     * @param {number} maxDistance - the maximum distance from the glyph path in font units that will be encoded; defaults
+     *        to half the maximum viewBox dimension.
+     * @param {number} [sdfExponent] - specifies an exponent for encoding the SDF's distance values; higher exponents
+     *        will give greater precision nearer the glyph's path.
+     * @return {Uint8Array}
+     */
+    function generate(
+      sdfWidth,
+      sdfHeight,
+      path,
+      viewBox,
+      maxDistance,
+      sdfExponent
+    ) {
+      if ( maxDistance === void 0 ) maxDistance = Math.max(viewBox[2] - viewBox[0], viewBox[3] - viewBox[1]) / 2;
+      if ( sdfExponent === void 0 ) sdfExponent = 1;
+
+      try {
+        return generate$1.apply(webgl, arguments)
+      } catch(e) {
+        console.info('WebGL SDF generation failed, falling back to JS', e);
+        return generate$2.apply(javascript, arguments)
+      }
+    }
+
+    /**
+     * Generate an SDF texture image for a 2D path, inserting the result into a WebGL `canvas` at a given x/y position
+     * and color channel. This is generally much faster than calling `generate` because it does not require reading pixels
+     * back from the GPU->CPU -- the `canvas` can be used directly as a WebGL texture image, so it all stays on the GPU.
+     *
+     * @param {number} sdfWidth - width of the SDF output image in pixels.
+     * @param {number} sdfHeight - height of the SDF output image in pixels.
+     * @param {string} path - an SVG-like path string describing the glyph; should only contain commands: M/L/Q/C/Z.
+     * @param {number[]} viewBox - [minX, minY, maxX, maxY] in font units aligning with the texture's edges.
+     * @param {number} maxDistance - the maximum distance from the glyph path in font units that will be encoded; defaults
+     *        to half the maximum viewBox dimension.
+     * @param {number} [sdfExponent] - specifies an exponent for encoding the SDF's distance values; higher exponents
+     *        will give greater precision nearer the glyph's path.
+     * @param {HTMLCanvasElement|OffscreenCanvas} canvas - a WebGL-enabled canvas into which the SDF will be rendered.
+     *        Only the relevant rect/channel will be modified, the rest will be preserved. To avoid unpredictable results
+     *        due to shared GL context state, this canvas should be dedicated to use by this library alone.
+     * @param {number} x - the x position at which to render the SDF.
+     * @param {number} y - the y position at which to render the SDF.
+     * @param {number} channel - the color channel index (0-4) into which the SDF will be rendered.
+     * @return {Uint8Array}
+     */
+    function generateIntoCanvas(
+      sdfWidth,
+      sdfHeight,
+      path,
+      viewBox,
+      maxDistance,
+      sdfExponent,
+      canvas,
+      x,
+      y,
+      channel
+    ) {
+      if ( maxDistance === void 0 ) maxDistance = Math.max(viewBox[2] - viewBox[0], viewBox[3] - viewBox[1]) / 2;
+      if ( sdfExponent === void 0 ) sdfExponent = 1;
+      if ( x === void 0 ) x = 0;
+      if ( y === void 0 ) y = 0;
+      if ( channel === void 0 ) channel = 0;
+
+      try {
+        return generateIntoCanvas$1.apply(webgl, arguments)
+      } catch(e) {
+        console.info('WebGL SDF generation failed, falling back to JS', e);
+        return generateIntoCanvas$2.apply(javascript, arguments)
+      }
+    }
+
+    exports.forEachPathCommand = forEachPathCommand;
+    exports.generate = generate;
+    exports.generateIntoCanvas = generateIntoCanvas;
+    exports.javascript = javascript;
+    exports.pathToLineSegments = pathToLineSegments;
+    exports.webgl = webgl;
+    exports.webglUtils = webglUtils;
+
+    Object.defineProperty(exports, '__esModule', { value: true });
+
+    return exports;
+
+  }({}));
+  return exports
+  }
 
   function bidiFactory() {
   var bidi = (function (exports) {
@@ -656,42 +1494,46 @@
       "PDI": "6eh"
     };
 
-    const TYPES = {};
-    const TYPES_TO_NAMES = {};
+    var TYPES = {};
+    var TYPES_TO_NAMES = {};
     TYPES.L = 1; //L is the default
     TYPES_TO_NAMES[1] = 'L';
-    Object.keys(DATA).forEach((type, i) => {
+    Object.keys(DATA).forEach(function (type, i) {
       TYPES[type] = 1 << (i + 1);
       TYPES_TO_NAMES[TYPES[type]] = type;
     });
     Object.freeze(TYPES);
 
-    const ISOLATE_INIT_TYPES = TYPES.LRI | TYPES.RLI | TYPES.FSI;
-    const STRONG_TYPES = TYPES.L | TYPES.R | TYPES.AL;
-    const NEUTRAL_ISOLATE_TYPES = TYPES.B | TYPES.S | TYPES.WS | TYPES.ON | TYPES.FSI | TYPES.LRI | TYPES.RLI | TYPES.PDI;
-    const BN_LIKE_TYPES = TYPES.BN | TYPES.RLE | TYPES.LRE | TYPES.RLO | TYPES.LRO | TYPES.PDF;
-    const TRAILING_TYPES = TYPES.S | TYPES.WS | TYPES.B | ISOLATE_INIT_TYPES | TYPES.PDI | BN_LIKE_TYPES;
+    var ISOLATE_INIT_TYPES = TYPES.LRI | TYPES.RLI | TYPES.FSI;
+    var STRONG_TYPES = TYPES.L | TYPES.R | TYPES.AL;
+    var NEUTRAL_ISOLATE_TYPES = TYPES.B | TYPES.S | TYPES.WS | TYPES.ON | TYPES.FSI | TYPES.LRI | TYPES.RLI | TYPES.PDI;
+    var BN_LIKE_TYPES = TYPES.BN | TYPES.RLE | TYPES.LRE | TYPES.RLO | TYPES.LRO | TYPES.PDF;
+    var TRAILING_TYPES = TYPES.S | TYPES.WS | TYPES.B | ISOLATE_INIT_TYPES | TYPES.PDI | BN_LIKE_TYPES;
 
-    let map = null;
+    var map = null;
 
     function parseData () {
       if (!map) {
         //const start = performance.now()
         map = new Map();
-        for (let type in DATA) {
+        var loop = function ( type ) {
           if (DATA.hasOwnProperty(type)) {
-            let lastCode = 0;
-            DATA[type].split(',').forEach(range => {
-              let [skip, step] = range.split('+');
+            var lastCode = 0;
+            DATA[type].split(',').forEach(function (range) {
+              var ref = range.split('+');
+              var skip = ref[0];
+              var step = ref[1];
               skip = parseInt(skip, 36);
               step = step ? parseInt(step, 36) : 0;
               map.set(lastCode += skip, TYPES[type]);
-              for (let i = 0; i < step; i++) {
+              for (var i = 0; i < step; i++) {
                 map.set(++lastCode, TYPES[type]);
               }
             });
           }
-        }
+        };
+
+        for (var type in DATA) loop( type );
         //console.log(`char types parsed in ${performance.now() - start}ms`)
       }
     }
@@ -724,34 +1566,38 @@
      * @return {{map: Map<number, number>, reverseMap?: Map<number, number>}}
      */
     function parseCharacterMap (encodedString, includeReverse) {
-      const radix = 36;
-      let lastCode = 0;
-      const map = new Map();
-      const reverseMap = includeReverse && new Map();
-      let prevPair;
+      var radix = 36;
+      var lastCode = 0;
+      var map = new Map();
+      var reverseMap = includeReverse && new Map();
+      var prevPair;
       encodedString.split(',').forEach(function visit(entry) {
         if (entry.indexOf('+') !== -1) {
-          for (let i = +entry; i--;) {
+          for (var i = +entry; i--;) {
             visit(prevPair);
           }
         } else {
           prevPair = entry;
-          let [a, b] = entry.split('>');
+          var ref = entry.split('>');
+          var a = ref[0];
+          var b = ref[1];
           a = String.fromCodePoint(lastCode += parseInt(a, radix));
           b = String.fromCodePoint(lastCode += parseInt(b, radix));
           map.set(a, b);
           includeReverse && reverseMap.set(b, a);
         }
       });
-      return { map, reverseMap }
+      return { map: map, reverseMap: reverseMap }
     }
 
-    let openToClose, closeToOpen, canonical;
+    var openToClose, closeToOpen, canonical;
 
     function parse$1 () {
       if (!openToClose) {
         //const start = performance.now()
-        let { map, reverseMap } = parseCharacterMap(data$1.pairs, true);
+        var ref = parseCharacterMap(data$1.pairs, true);
+        var map = ref.map;
+        var reverseMap = ref.reverseMap;
         openToClose = map;
         closeToOpen = reverseMap;
         canonical = parseCharacterMap(data$1.canonical, false).map;
@@ -775,30 +1621,28 @@
     }
 
     // Local type aliases
-    const {
-      L: TYPE_L,
-      R: TYPE_R,
-      EN: TYPE_EN,
-      ES: TYPE_ES,
-      ET: TYPE_ET,
-      AN: TYPE_AN,
-      CS: TYPE_CS,
-      B: TYPE_B,
-      S: TYPE_S,
-      ON: TYPE_ON,
-      BN: TYPE_BN,
-      NSM: TYPE_NSM,
-      AL: TYPE_AL,
-      LRO: TYPE_LRO,
-      RLO: TYPE_RLO,
-      LRE: TYPE_LRE,
-      RLE: TYPE_RLE,
-      PDF: TYPE_PDF,
-      LRI: TYPE_LRI,
-      RLI: TYPE_RLI,
-      FSI: TYPE_FSI,
-      PDI: TYPE_PDI
-    } = TYPES;
+    var TYPE_L = TYPES.L;
+    var TYPE_R = TYPES.R;
+    var TYPE_EN = TYPES.EN;
+    var TYPE_ES = TYPES.ES;
+    var TYPE_ET = TYPES.ET;
+    var TYPE_AN = TYPES.AN;
+    var TYPE_CS = TYPES.CS;
+    var TYPE_B = TYPES.B;
+    var TYPE_S = TYPES.S;
+    var TYPE_ON = TYPES.ON;
+    var TYPE_BN = TYPES.BN;
+    var TYPE_NSM = TYPES.NSM;
+    var TYPE_AL = TYPES.AL;
+    var TYPE_LRO = TYPES.LRO;
+    var TYPE_RLO = TYPES.RLO;
+    var TYPE_LRE = TYPES.LRE;
+    var TYPE_RLE = TYPES.RLE;
+    var TYPE_PDF = TYPES.PDF;
+    var TYPE_LRI = TYPES.LRI;
+    var TYPE_RLI = TYPES.RLI;
+    var TYPE_FSI = TYPES.FSI;
+    var TYPE_PDI = TYPES.PDI;
 
     /**
      * @typedef {object} GetEmbeddingLevelsResult
@@ -817,17 +1661,17 @@
      * @return {GetEmbeddingLevelsResult}
      */
     function getEmbeddingLevels (string, baseDirection) {
-      const MAX_DEPTH = 125;
+      var MAX_DEPTH = 125;
 
       // Start by mapping all characters to their unicode type, as a bitmask integer
-      const charTypes = new Uint32Array(string.length);
-      for (let i = 0; i < string.length; i++) {
+      var charTypes = new Uint32Array(string.length);
+      for (var i = 0; i < string.length; i++) {
         charTypes[i] = getBidiCharType(string[i]);
       }
 
-      const charTypeCounts = new Map(); //will be cleared at start of each paragraph
+      var charTypeCounts = new Map(); //will be cleared at start of each paragraph
       function changeCharType(i, type) {
-        const oldType = charTypes[i];
+        var oldType = charTypes[i];
         charTypes[i] = type;
         charTypeCounts.set(oldType, charTypeCounts.get(oldType) - 1);
         if (oldType & NEUTRAL_ISOLATE_TYPES) {
@@ -839,49 +1683,49 @@
         }
       }
 
-      const embedLevels = new Uint8Array(string.length);
-      const isolationPairs = new Map(); //init->pdi and pdi->init
+      var embedLevels = new Uint8Array(string.length);
+      var isolationPairs = new Map(); //init->pdi and pdi->init
 
       // === 3.3.1 The Paragraph Level ===
       // 3.3.1 P1: Split the text into paragraphs
-      const paragraphs = []; // [{start, end, level}, ...]
-      let paragraph = null;
-      for (let i = 0; i < string.length; i++) {
+      var paragraphs = []; // [{start, end, level}, ...]
+      var paragraph = null;
+      for (var i$1 = 0; i$1 < string.length; i$1++) {
         if (!paragraph) {
           paragraphs.push(paragraph = {
-            start: i,
+            start: i$1,
             end: string.length - 1,
             // 3.3.1 P2-P3: Determine the paragraph level
-            level: baseDirection === 'rtl' ? 1 : baseDirection === 'ltr' ? 0 : determineAutoEmbedLevel(i, false)
+            level: baseDirection === 'rtl' ? 1 : baseDirection === 'ltr' ? 0 : determineAutoEmbedLevel(i$1, false)
           });
         }
-        if (charTypes[i] & TYPE_B) {
-          paragraph.end = i;
+        if (charTypes[i$1] & TYPE_B) {
+          paragraph.end = i$1;
           paragraph = null;
         }
       }
 
-      const FORMATTING_TYPES = TYPE_RLE | TYPE_LRE | TYPE_RLO | TYPE_LRO | ISOLATE_INIT_TYPES | TYPE_PDI | TYPE_PDF | TYPE_B;
-      const nextEven = n => n + ((n & 1) ? 1 : 2);
-      const nextOdd = n => n + ((n & 1) ? 2 : 1);
+      var FORMATTING_TYPES = TYPE_RLE | TYPE_LRE | TYPE_RLO | TYPE_LRO | ISOLATE_INIT_TYPES | TYPE_PDI | TYPE_PDF | TYPE_B;
+      var nextEven = function (n) { return n + ((n & 1) ? 1 : 2); };
+      var nextOdd = function (n) { return n + ((n & 1) ? 2 : 1); };
 
       // Everything from here on will operate per paragraph.
-      for (let paraIdx = 0; paraIdx < paragraphs.length; paraIdx++) {
+      for (var paraIdx = 0; paraIdx < paragraphs.length; paraIdx++) {
         paragraph = paragraphs[paraIdx];
-        const statusStack = [{
+        var statusStack = [{
           _level: paragraph.level,
           _override: 0, //0=neutral, 1=L, 2=R
           _isolate: 0 //bool
         }];
-        let stackTop;
-        let overflowIsolateCount = 0;
-        let overflowEmbeddingCount = 0;
-        let validIsolateCount = 0;
+        var stackTop = (void 0);
+        var overflowIsolateCount = 0;
+        var overflowEmbeddingCount = 0;
+        var validIsolateCount = 0;
         charTypeCounts.clear();
 
         // === 3.3.2 Explicit Levels and Directions ===
-        for (let i = paragraph.start; i <= paragraph.end; i++) {
-          let charType = charTypes[i];
+        for (var i$2 = paragraph.start; i$2 <= paragraph.end; i$2++) {
+          var charType = charTypes[i$2];
           stackTop = statusStack[statusStack.length - 1];
 
           // Set initial counts
@@ -893,8 +1737,8 @@
           // Explicit Embeddings: 3.3.2 X2 - X3
           if (charType & FORMATTING_TYPES) { //prefilter all formatters
             if (charType & (TYPE_RLE | TYPE_LRE)) {
-              embedLevels[i] = stackTop._level; // 5.2
-              const level = (charType === TYPE_RLE ? nextOdd : nextEven)(stackTop._level);
+              embedLevels[i$2] = stackTop._level; // 5.2
+              var level = (charType === TYPE_RLE ? nextOdd : nextEven)(stackTop._level);
               if (level <= MAX_DEPTH && !overflowIsolateCount && !overflowEmbeddingCount) {
                 statusStack.push({
                   _level: level,
@@ -908,11 +1752,11 @@
 
             // Explicit Overrides: 3.3.2 X4 - X5
             else if (charType & (TYPE_RLO | TYPE_LRO)) {
-              embedLevels[i] = stackTop._level; // 5.2
-              const level = (charType === TYPE_RLO ? nextOdd : nextEven)(stackTop._level);
-              if (level <= MAX_DEPTH && !overflowIsolateCount && !overflowEmbeddingCount) {
+              embedLevels[i$2] = stackTop._level; // 5.2
+              var level$1 = (charType === TYPE_RLO ? nextOdd : nextEven)(stackTop._level);
+              if (level$1 <= MAX_DEPTH && !overflowIsolateCount && !overflowEmbeddingCount) {
                 statusStack.push({
-                  _level: level,
+                  _level: level$1,
                   _override: (charType & TYPE_RLO) ? TYPE_R : TYPE_L,
                   _isolate: 0
                 });
@@ -925,21 +1769,21 @@
             else if (charType & ISOLATE_INIT_TYPES) {
               // X5c - FSI becomes either RLI or LRI
               if (charType & TYPE_FSI) {
-                charType = determineAutoEmbedLevel(i + 1, true) === 1 ? TYPE_RLI : TYPE_LRI;
+                charType = determineAutoEmbedLevel(i$2 + 1, true) === 1 ? TYPE_RLI : TYPE_LRI;
               }
 
-              embedLevels[i] = stackTop._level;
+              embedLevels[i$2] = stackTop._level;
               if (stackTop._override) {
-                changeCharType(i, stackTop._override);
+                changeCharType(i$2, stackTop._override);
               }
-              const level = (charType === TYPE_RLI ? nextOdd : nextEven)(stackTop._level);
-              if (level <= MAX_DEPTH && overflowIsolateCount === 0 && overflowEmbeddingCount === 0) {
+              var level$2 = (charType === TYPE_RLI ? nextOdd : nextEven)(stackTop._level);
+              if (level$2 <= MAX_DEPTH && overflowIsolateCount === 0 && overflowEmbeddingCount === 0) {
                 validIsolateCount++;
                 statusStack.push({
-                  _level: level,
+                  _level: level$2,
                   _override: 0,
                   _isolate: 1,
-                  _isolInitIndex: i
+                  _isolInitIndex: i$2
                 });
               } else {
                 overflowIsolateCount++;
@@ -956,18 +1800,18 @@
                   statusStack.pop();
                 }
                 // Add to isolation pairs bidirectional mapping:
-                const isolInitIndex = statusStack[statusStack.length - 1]._isolInitIndex;
+                var isolInitIndex = statusStack[statusStack.length - 1]._isolInitIndex;
                 if (isolInitIndex != null) {
-                  isolationPairs.set(isolInitIndex, i);
-                  isolationPairs.set(i, isolInitIndex);
+                  isolationPairs.set(isolInitIndex, i$2);
+                  isolationPairs.set(i$2, isolInitIndex);
                 }
                 statusStack.pop();
                 validIsolateCount--;
               }
               stackTop = statusStack[statusStack.length - 1];
-              embedLevels[i] = stackTop._level;
+              embedLevels[i$2] = stackTop._level;
               if (stackTop._override) {
-                changeCharType(i, stackTop._override);
+                changeCharType(i$2, stackTop._override);
               }
             }
 
@@ -982,21 +1826,21 @@
                   stackTop = statusStack[statusStack.length - 1];
                 }
               }
-              embedLevels[i] = stackTop._level; // 5.2
+              embedLevels[i$2] = stackTop._level; // 5.2
             }
 
             // End of Paragraph: 3.3.2 X8
             else if (charType & TYPE_B) {
-              embedLevels[i] = paragraph.level;
+              embedLevels[i$2] = paragraph.level;
             }
           }
 
           // Non-formatting characters: 3.3.2 X6
           else {
-            embedLevels[i] = stackTop._level;
+            embedLevels[i$2] = stackTop._level;
             // NOTE: This exclusion of BN seems to go against what section 5.2 says, but is required for test passage
             if (stackTop._override && charType !== TYPE_BN) {
-              changeCharType(i, stackTop._override);
+              changeCharType(i$2, stackTop._override);
             }
           }
         }
@@ -1009,21 +1853,21 @@
 
         // 3.3.3 X10
         // Compute the set of isolating run sequences as specified by BD13
-        const levelRuns = [];
-        let currentRun = null;
-        for (let i = paragraph.start; i <= paragraph.end; i++) {
-          const charType = charTypes[i];
-          if (!(charType & BN_LIKE_TYPES)) {
-            const lvl = embedLevels[i];
-            const isIsolInit = charType & ISOLATE_INIT_TYPES;
-            const isPDI = charType === TYPE_PDI;
+        var levelRuns = [];
+        var currentRun = null;
+        for (var i$3 = paragraph.start; i$3 <= paragraph.end; i$3++) {
+          var charType$1 = charTypes[i$3];
+          if (!(charType$1 & BN_LIKE_TYPES)) {
+            var lvl = embedLevels[i$3];
+            var isIsolInit = charType$1 & ISOLATE_INIT_TYPES;
+            var isPDI = charType$1 === TYPE_PDI;
             if (currentRun && lvl === currentRun._level) {
-              currentRun._end = i;
+              currentRun._end = i$3;
               currentRun._endsWithIsolInit = isIsolInit;
             } else {
               levelRuns.push(currentRun = {
-                _start: i,
-                _end: i,
+                _start: i$3,
+                _end: i$3,
                 _level: lvl,
                 _startsWithPDI: isPDI,
                 _endsWithIsolInit: isIsolInit
@@ -1031,43 +1875,43 @@
             }
           }
         }
-        const isolatingRunSeqs = []; // [{seqIndices: [], sosType: L|R, eosType: L|R}]
-        for (let runIdx = 0; runIdx < levelRuns.length; runIdx++) {
-          const run = levelRuns[runIdx];
+        var isolatingRunSeqs = []; // [{seqIndices: [], sosType: L|R, eosType: L|R}]
+        for (var runIdx = 0; runIdx < levelRuns.length; runIdx++) {
+          var run = levelRuns[runIdx];
           if (!run._startsWithPDI || (run._startsWithPDI && !isolationPairs.has(run._start))) {
-            const seqRuns = [currentRun = run];
-            for (let pdiIndex; currentRun && currentRun._endsWithIsolInit && (pdiIndex = isolationPairs.get(currentRun._end)) != null;) {
-              for (let i = runIdx + 1; i < levelRuns.length; i++) {
-                if (levelRuns[i]._start === pdiIndex) {
-                  seqRuns.push(currentRun = levelRuns[i]);
+            var seqRuns = [currentRun = run];
+            for (var pdiIndex = (void 0); currentRun && currentRun._endsWithIsolInit && (pdiIndex = isolationPairs.get(currentRun._end)) != null;) {
+              for (var i$4 = runIdx + 1; i$4 < levelRuns.length; i$4++) {
+                if (levelRuns[i$4]._start === pdiIndex) {
+                  seqRuns.push(currentRun = levelRuns[i$4]);
                   break
                 }
               }
             }
             // build flat list of indices across all runs:
-            const seqIndices = [];
-            for (let i = 0; i < seqRuns.length; i++) {
-              const run = seqRuns[i];
-              for (let j = run._start; j <= run._end; j++) {
+            var seqIndices = [];
+            for (var i$5 = 0; i$5 < seqRuns.length; i$5++) {
+              var run$1 = seqRuns[i$5];
+              for (var j = run$1._start; j <= run$1._end; j++) {
                 seqIndices.push(j);
               }
             }
             // determine the sos/eos types:
-            let firstLevel = embedLevels[seqIndices[0]];
-            let prevLevel = paragraph.level;
-            for (let i = seqIndices[0] - 1; i >= 0; i--) {
-              if (!(charTypes[i] & BN_LIKE_TYPES)) { //5.2
-                prevLevel = embedLevels[i];
+            var firstLevel = embedLevels[seqIndices[0]];
+            var prevLevel = paragraph.level;
+            for (var i$6 = seqIndices[0] - 1; i$6 >= 0; i$6--) {
+              if (!(charTypes[i$6] & BN_LIKE_TYPES)) { //5.2
+                prevLevel = embedLevels[i$6];
                 break
               }
             }
-            const lastIndex = seqIndices[seqIndices.length - 1];
-            let lastLevel = embedLevels[lastIndex];
-            let nextLevel = paragraph.level;
+            var lastIndex = seqIndices[seqIndices.length - 1];
+            var lastLevel = embedLevels[lastIndex];
+            var nextLevel = paragraph.level;
             if (!(charTypes[lastIndex] & ISOLATE_INIT_TYPES)) {
-              for (let i = lastIndex + 1; i <= paragraph.end; i++) {
-                if (!(charTypes[i] & BN_LIKE_TYPES)) { //5.2
-                  nextLevel = embedLevels[i];
+              for (var i$7 = lastIndex + 1; i$7 <= paragraph.end; i$7++) {
+                if (!(charTypes[i$7] & BN_LIKE_TYPES)) { //5.2
+                  nextLevel = embedLevels[i$7];
                   break
                 }
               }
@@ -1081,8 +1925,11 @@
         }
 
         // The next steps are done per isolating run sequence
-        for (let seqIdx = 0; seqIdx < isolatingRunSeqs.length; seqIdx++) {
-          const { _seqIndices: seqIndices, _sosType: sosType, _eosType: eosType } = isolatingRunSeqs[seqIdx];
+        for (var seqIdx = 0; seqIdx < isolatingRunSeqs.length; seqIdx++) {
+          var ref = isolatingRunSeqs[seqIdx];
+          var seqIndices$1 = ref._seqIndices;
+          var sosType = ref._sosType;
+          var eosType = ref._eosType;
 
           // === 3.3.4 Resolving Weak Types ===
 
@@ -1090,17 +1937,17 @@
           // bidirectional type is not BN, and set the NSM to ON if it is an isolate initiator or PDI, and to its
           // type otherwise. If the NSM is the first non-BN character, change the NSM to the type of sos.
           if (charTypeCounts.get(TYPE_NSM)) {
-            for (let si = 0; si < seqIndices.length; si++) {
-              const i = seqIndices[si];
-              if (charTypes[i] & TYPE_NSM) {
-                let prevType = sosType;
-                for (let sj = si - 1; sj >= 0; sj--) {
-                  if (!(charTypes[seqIndices[sj]] & BN_LIKE_TYPES)) { //5.2 scan back to first non-BN
-                    prevType = charTypes[seqIndices[sj]];
+            for (var si = 0; si < seqIndices$1.length; si++) {
+              var i$8 = seqIndices$1[si];
+              if (charTypes[i$8] & TYPE_NSM) {
+                var prevType = sosType;
+                for (var sj = si - 1; sj >= 0; sj--) {
+                  if (!(charTypes[seqIndices$1[sj]] & BN_LIKE_TYPES)) { //5.2 scan back to first non-BN
+                    prevType = charTypes[seqIndices$1[sj]];
                     break
                   }
                 }
-                changeCharType(i, (prevType & (ISOLATE_INIT_TYPES | TYPE_PDI)) ? TYPE_ON : prevType);
+                changeCharType(i$8, (prevType & (ISOLATE_INIT_TYPES | TYPE_PDI)) ? TYPE_ON : prevType);
               }
             }
           }
@@ -1108,14 +1955,14 @@
           // W2. Search backward from each instance of a European number until the first strong type (R, L, AL, or sos)
           // is found. If an AL is found, change the type of the European number to Arabic number.
           if (charTypeCounts.get(TYPE_EN)) {
-            for (let si = 0; si < seqIndices.length; si++) {
-              const i = seqIndices[si];
-              if (charTypes[i] & TYPE_EN) {
-                for (let sj = si - 1; sj >= -1; sj--) {
-                  const prevCharType = sj === -1 ? sosType : charTypes[seqIndices[sj]];
+            for (var si$1 = 0; si$1 < seqIndices$1.length; si$1++) {
+              var i$9 = seqIndices$1[si$1];
+              if (charTypes[i$9] & TYPE_EN) {
+                for (var sj$1 = si$1 - 1; sj$1 >= -1; sj$1--) {
+                  var prevCharType = sj$1 === -1 ? sosType : charTypes[seqIndices$1[sj$1]];
                   if (prevCharType & STRONG_TYPES) {
                     if (prevCharType === TYPE_AL) {
-                      changeCharType(i, TYPE_AN);
+                      changeCharType(i$9, TYPE_AN);
                     }
                     break
                   }
@@ -1126,10 +1973,10 @@
 
           // W3. Change all ALs to R
           if (charTypeCounts.get(TYPE_AL)) {
-            for (let si = 0; si < seqIndices.length; si++) {
-              const i = seqIndices[si];
-              if (charTypes[i] & TYPE_AL) {
-                changeCharType(i, TYPE_R);
+            for (var si$2 = 0; si$2 < seqIndices$1.length; si$2++) {
+              var i$10 = seqIndices$1[si$2];
+              if (charTypes[i$10] & TYPE_AL) {
+                changeCharType(i$10, TYPE_R);
               }
             }
           }
@@ -1137,24 +1984,24 @@
           // W4. A single European separator between two European numbers changes to a European number. A single common
           // separator between two numbers of the same type changes to that type.
           if (charTypeCounts.get(TYPE_ES) || charTypeCounts.get(TYPE_CS)) {
-            for (let si = 1; si < seqIndices.length - 1; si++) {
-              const i = seqIndices[si];
-              if (charTypes[i] & (TYPE_ES | TYPE_CS)) {
-                let prevType = 0, nextType = 0;
-                for (let sj = si - 1; sj >= 0; sj--) {
-                  prevType = charTypes[seqIndices[sj]];
-                  if (!(prevType & BN_LIKE_TYPES)) { //5.2
+            for (var si$3 = 1; si$3 < seqIndices$1.length - 1; si$3++) {
+              var i$11 = seqIndices$1[si$3];
+              if (charTypes[i$11] & (TYPE_ES | TYPE_CS)) {
+                var prevType$1 = 0, nextType = 0;
+                for (var sj$2 = si$3 - 1; sj$2 >= 0; sj$2--) {
+                  prevType$1 = charTypes[seqIndices$1[sj$2]];
+                  if (!(prevType$1 & BN_LIKE_TYPES)) { //5.2
                     break
                   }
                 }
-                for (let sj = si + 1; sj < seqIndices.length; sj++) {
-                  nextType = charTypes[seqIndices[sj]];
+                for (var sj$3 = si$3 + 1; sj$3 < seqIndices$1.length; sj$3++) {
+                  nextType = charTypes[seqIndices$1[sj$3]];
                   if (!(nextType & BN_LIKE_TYPES)) { //5.2
                     break
                   }
                 }
-                if (prevType === nextType && (charTypes[i] === TYPE_ES ? prevType === TYPE_EN : (prevType & (TYPE_EN | TYPE_AN)))) {
-                  changeCharType(i, prevType);
+                if (prevType$1 === nextType && (charTypes[i$11] === TYPE_ES ? prevType$1 === TYPE_EN : (prevType$1 & (TYPE_EN | TYPE_AN)))) {
+                  changeCharType(i$11, prevType$1);
                 }
               }
             }
@@ -1162,14 +2009,14 @@
 
           // W5. A sequence of European terminators adjacent to European numbers changes to all European numbers.
           if (charTypeCounts.get(TYPE_EN)) {
-            for (let si = 0; si < seqIndices.length; si++) {
-              const i = seqIndices[si];
-              if (charTypes[i] & TYPE_EN) {
-                for (let sj = si - 1; sj >= 0 && (charTypes[seqIndices[sj]] & (TYPE_ET | BN_LIKE_TYPES)); sj--) {
-                  changeCharType(seqIndices[sj], TYPE_EN);
+            for (var si$4 = 0; si$4 < seqIndices$1.length; si$4++) {
+              var i$12 = seqIndices$1[si$4];
+              if (charTypes[i$12] & TYPE_EN) {
+                for (var sj$4 = si$4 - 1; sj$4 >= 0 && (charTypes[seqIndices$1[sj$4]] & (TYPE_ET | BN_LIKE_TYPES)); sj$4--) {
+                  changeCharType(seqIndices$1[sj$4], TYPE_EN);
                 }
-                for (let sj = si + 1; sj < seqIndices.length && (charTypes[seqIndices[sj]] & (TYPE_ET | BN_LIKE_TYPES)); sj++) {
-                  changeCharType(seqIndices[sj], TYPE_EN);
+                for (var sj$5 = si$4 + 1; sj$5 < seqIndices$1.length && (charTypes[seqIndices$1[sj$5]] & (TYPE_ET | BN_LIKE_TYPES)); sj$5++) {
+                  changeCharType(seqIndices$1[sj$5], TYPE_EN);
                 }
               }
             }
@@ -1177,16 +2024,16 @@
 
           // W6. Otherwise, separators and terminators change to Other Neutral.
           if (charTypeCounts.get(TYPE_ET) || charTypeCounts.get(TYPE_ES) || charTypeCounts.get(TYPE_CS)) {
-            for (let si = 0; si < seqIndices.length; si++) {
-              const i = seqIndices[si];
-              if (charTypes[i] & (TYPE_ET | TYPE_ES | TYPE_CS)) {
-                changeCharType(i, TYPE_ON);
+            for (var si$5 = 0; si$5 < seqIndices$1.length; si$5++) {
+              var i$13 = seqIndices$1[si$5];
+              if (charTypes[i$13] & (TYPE_ET | TYPE_ES | TYPE_CS)) {
+                changeCharType(i$13, TYPE_ON);
                 // 5.2 transform adjacent BNs too:
-                for (let sj = si - 1; sj >= 0 && (charTypes[seqIndices[sj]] & BN_LIKE_TYPES); sj--) {
-                  changeCharType(seqIndices[sj], TYPE_ON);
+                for (var sj$6 = si$5 - 1; sj$6 >= 0 && (charTypes[seqIndices$1[sj$6]] & BN_LIKE_TYPES); sj$6--) {
+                  changeCharType(seqIndices$1[sj$6], TYPE_ON);
                 }
-                for (let sj = si + 1; sj < seqIndices.length && (charTypes[seqIndices[sj]] & BN_LIKE_TYPES); sj++) {
-                  changeCharType(seqIndices[sj], TYPE_ON);
+                for (var sj$7 = si$5 + 1; sj$7 < seqIndices$1.length && (charTypes[seqIndices$1[sj$7]] & BN_LIKE_TYPES); sj$7++) {
+                  changeCharType(seqIndices$1[sj$7], TYPE_ON);
                 }
               }
             }
@@ -1196,12 +2043,12 @@
           // is found. If an L is found, then change the type of the European number to L.
           // NOTE: implemented in single forward pass for efficiency
           if (charTypeCounts.get(TYPE_EN)) {
-            for (let si = 0, prevStrongType = sosType; si < seqIndices.length; si++) {
-              const i = seqIndices[si];
-              const type = charTypes[i];
+            for (var si$6 = 0, prevStrongType = sosType; si$6 < seqIndices$1.length; si$6++) {
+              var i$14 = seqIndices$1[si$6];
+              var type = charTypes[i$14];
               if (type & TYPE_EN) {
                 if (prevStrongType === TYPE_L) {
-                  changeCharType(i, TYPE_L);
+                  changeCharType(i$14, TYPE_L);
                 }
               } else if (type & STRONG_TYPES) {
                 prevStrongType = type;
@@ -1215,37 +2062,37 @@
             // N0. Process bracket pairs in an isolating run sequence sequentially in the logical order of the text
             // positions of the opening paired brackets using the logic given below. Within this scope, bidirectional
             // types EN and AN are treated as R.
-            const R_TYPES_FOR_N_STEPS = (TYPE_R | TYPE_EN | TYPE_AN);
-            const STRONG_TYPES_FOR_N_STEPS = R_TYPES_FOR_N_STEPS | TYPE_L;
+            var R_TYPES_FOR_N_STEPS = (TYPE_R | TYPE_EN | TYPE_AN);
+            var STRONG_TYPES_FOR_N_STEPS = R_TYPES_FOR_N_STEPS | TYPE_L;
 
             // * Identify the bracket pairs in the current isolating run sequence according to BD16.
-            const bracketPairs = [];
+            var bracketPairs = [];
             {
-              const openerStack = [];
-              for (let si = 0; si < seqIndices.length; si++) {
+              var openerStack = [];
+              for (var si$7 = 0; si$7 < seqIndices$1.length; si$7++) {
                 // NOTE: for any potential bracket character we also test that it still carries a NI
                 // type, as that may have been changed earlier. This doesn't seem to be explicitly
                 // called out in the spec, but is required for passage of certain tests.
-                if (charTypes[seqIndices[si]] & NEUTRAL_ISOLATE_TYPES) {
-                  const char = string[seqIndices[si]];
-                  let oppositeBracket;
+                if (charTypes[seqIndices$1[si$7]] & NEUTRAL_ISOLATE_TYPES) {
+                  var char = string[seqIndices$1[si$7]];
+                  var oppositeBracket = (void 0);
                   // Opening bracket
                   if (openingToClosingBracket(char) !== null) {
                     if (openerStack.length < 63) {
-                      openerStack.push({ char, seqIndex: si });
+                      openerStack.push({ char: char, seqIndex: si$7 });
                     } else {
                       break
                     }
                   }
                   // Closing bracket
                   else if ((oppositeBracket = closingToOpeningBracket(char)) !== null) {
-                    for (let stackIdx = openerStack.length - 1; stackIdx >= 0; stackIdx--) {
-                      const stackChar = openerStack[stackIdx].char;
+                    for (var stackIdx = openerStack.length - 1; stackIdx >= 0; stackIdx--) {
+                      var stackChar = openerStack[stackIdx].char;
                       if (stackChar === oppositeBracket ||
                         stackChar === closingToOpeningBracket(getCanonicalBracket(char)) ||
                         openingToClosingBracket(getCanonicalBracket(stackChar)) === char
                       ) {
-                        bracketPairs.push([openerStack[stackIdx].seqIndex, si]);
+                        bracketPairs.push([openerStack[stackIdx].seqIndex, si$7]);
                         openerStack.length = stackIdx; //pop the matching bracket and all following
                         break
                       }
@@ -1253,22 +2100,24 @@
                   }
                 }
               }
-              bracketPairs.sort((a, b) => a[0] - b[0]);
+              bracketPairs.sort(function (a, b) { return a[0] - b[0]; });
             }
             // * For each bracket-pair element in the list of pairs of text positions
-            for (let pairIdx = 0; pairIdx < bracketPairs.length; pairIdx++) {
-              const [openSeqIdx, closeSeqIdx] = bracketPairs[pairIdx];
+            for (var pairIdx = 0; pairIdx < bracketPairs.length; pairIdx++) {
+              var ref$1 = bracketPairs[pairIdx];
+              var openSeqIdx = ref$1[0];
+              var closeSeqIdx = ref$1[1];
               // a. Inspect the bidirectional types of the characters enclosed within the bracket pair.
               // b. If any strong type (either L or R) matching the embedding direction is found, set the type for both
               // brackets in the pair to match the embedding direction.
-              let foundStrongType = false;
-              let useStrongType = 0;
-              for (let si = openSeqIdx + 1; si < closeSeqIdx; si++) {
-                const i = seqIndices[si];
-                if (charTypes[i] & STRONG_TYPES_FOR_N_STEPS) {
+              var foundStrongType = false;
+              var useStrongType = 0;
+              for (var si$8 = openSeqIdx + 1; si$8 < closeSeqIdx; si$8++) {
+                var i$15 = seqIndices$1[si$8];
+                if (charTypes[i$15] & STRONG_TYPES_FOR_N_STEPS) {
                   foundStrongType = true;
-                  const lr = (charTypes[i] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
-                  if (lr === getEmbedDirection(i)) {
+                  var lr = (charTypes[i$15] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
+                  if (lr === getEmbedDirection(i$15)) {
                     useStrongType = lr;
                     break
                   }
@@ -1282,39 +2131,39 @@
               //    2. Otherwise set the type for both brackets in the pair to the embedding direction.
               if (foundStrongType && !useStrongType) {
                 useStrongType = sosType;
-                for (let si = openSeqIdx - 1; si >= 0; si--) {
-                  const i = seqIndices[si];
-                  if (charTypes[i] & STRONG_TYPES_FOR_N_STEPS) {
-                    const lr = (charTypes[i] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
-                    if (lr !== getEmbedDirection(i)) {
-                      useStrongType = lr;
+                for (var si$9 = openSeqIdx - 1; si$9 >= 0; si$9--) {
+                  var i$16 = seqIndices$1[si$9];
+                  if (charTypes[i$16] & STRONG_TYPES_FOR_N_STEPS) {
+                    var lr$1 = (charTypes[i$16] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
+                    if (lr$1 !== getEmbedDirection(i$16)) {
+                      useStrongType = lr$1;
                     } else {
-                      useStrongType = getEmbedDirection(i);
+                      useStrongType = getEmbedDirection(i$16);
                     }
                     break
                   }
                 }
               }
               if (useStrongType) {
-                charTypes[seqIndices[openSeqIdx]] = charTypes[seqIndices[closeSeqIdx]] = useStrongType;
+                charTypes[seqIndices$1[openSeqIdx]] = charTypes[seqIndices$1[closeSeqIdx]] = useStrongType;
                 // * Any number of characters that had original bidirectional character type NSM prior to the application
                 // of W1 that immediately follow a paired bracket which changed to L or R under N0 should change to match
                 // the type of their preceding bracket.
-                if (useStrongType !== getEmbedDirection(seqIndices[openSeqIdx])) {
-                  for (let si = openSeqIdx + 1; si < seqIndices.length; si++) {
-                    if (!(charTypes[seqIndices[si]] & BN_LIKE_TYPES)) {
-                      if (getBidiCharType(string[seqIndices[si]]) & TYPE_NSM) {
-                        charTypes[seqIndices[si]] = useStrongType;
+                if (useStrongType !== getEmbedDirection(seqIndices$1[openSeqIdx])) {
+                  for (var si$10 = openSeqIdx + 1; si$10 < seqIndices$1.length; si$10++) {
+                    if (!(charTypes[seqIndices$1[si$10]] & BN_LIKE_TYPES)) {
+                      if (getBidiCharType(string[seqIndices$1[si$10]]) & TYPE_NSM) {
+                        charTypes[seqIndices$1[si$10]] = useStrongType;
                       }
                       break
                     }
                   }
                 }
-                if (useStrongType !== getEmbedDirection(seqIndices[closeSeqIdx])) {
-                  for (let si = closeSeqIdx + 1; si < seqIndices.length; si++) {
-                    if (!(charTypes[seqIndices[si]] & BN_LIKE_TYPES)) {
-                      if (getBidiCharType(string[seqIndices[si]]) & TYPE_NSM) {
-                        charTypes[seqIndices[si]] = useStrongType;
+                if (useStrongType !== getEmbedDirection(seqIndices$1[closeSeqIdx])) {
+                  for (var si$11 = closeSeqIdx + 1; si$11 < seqIndices$1.length; si$11++) {
+                    if (!(charTypes[seqIndices$1[si$11]] & BN_LIKE_TYPES)) {
+                      if (getBidiCharType(string[seqIndices$1[si$11]]) & TYPE_NSM) {
+                        charTypes[seqIndices$1[si$11]] = useStrongType;
                       }
                       break
                     }
@@ -1326,31 +2175,31 @@
             // N1. A sequence of NIs takes the direction of the surrounding strong text if the text on both sides has the
             // same direction.
             // N2. Any remaining NIs take the embedding direction.
-            for (let si = 0; si < seqIndices.length; si++) {
-              if (charTypes[seqIndices[si]] & NEUTRAL_ISOLATE_TYPES) {
-                let niRunStart = si, niRunEnd = si;
-                let prevType = sosType; //si === 0 ? sosType : (charTypes[seqIndices[si - 1]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L
-                for (let si2 = si - 1; si2 >= 0; si2--) {
-                  if (charTypes[seqIndices[si2]] & BN_LIKE_TYPES) {
+            for (var si$12 = 0; si$12 < seqIndices$1.length; si$12++) {
+              if (charTypes[seqIndices$1[si$12]] & NEUTRAL_ISOLATE_TYPES) {
+                var niRunStart = si$12, niRunEnd = si$12;
+                var prevType$2 = sosType; //si === 0 ? sosType : (charTypes[seqIndices[si - 1]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L
+                for (var si2 = si$12 - 1; si2 >= 0; si2--) {
+                  if (charTypes[seqIndices$1[si2]] & BN_LIKE_TYPES) {
                     niRunStart = si2; //5.2 treat BNs adjacent to NIs as NIs
                   } else {
-                    prevType = (charTypes[seqIndices[si2]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
+                    prevType$2 = (charTypes[seqIndices$1[si2]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
                     break
                   }
                 }
-                let nextType = eosType;
-                for (let si2 = si + 1; si2 < seqIndices.length; si2++) {
-                  if (charTypes[seqIndices[si2]] & (NEUTRAL_ISOLATE_TYPES | BN_LIKE_TYPES)) {
-                    niRunEnd = si2;
+                var nextType$1 = eosType;
+                for (var si2$1 = si$12 + 1; si2$1 < seqIndices$1.length; si2$1++) {
+                  if (charTypes[seqIndices$1[si2$1]] & (NEUTRAL_ISOLATE_TYPES | BN_LIKE_TYPES)) {
+                    niRunEnd = si2$1;
                   } else {
-                    nextType = (charTypes[seqIndices[si2]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
+                    nextType$1 = (charTypes[seqIndices$1[si2$1]] & R_TYPES_FOR_N_STEPS) ? TYPE_R : TYPE_L;
                     break
                   }
                 }
-                for (let sj = niRunStart; sj <= niRunEnd; sj++) {
-                  charTypes[seqIndices[sj]] = prevType === nextType ? prevType : getEmbedDirection(seqIndices[sj]);
+                for (var sj$8 = niRunStart; sj$8 <= niRunEnd; sj$8++) {
+                  charTypes[seqIndices$1[sj$8]] = prevType$2 === nextType$1 ? prevType$2 : getEmbedDirection(seqIndices$1[sj$8]);
                 }
-                si = niRunEnd;
+                si$12 = niRunEnd;
               }
             }
           }
@@ -1358,37 +2207,37 @@
 
         // === 3.3.6 Resolving Implicit Levels ===
 
-        for (let i = paragraph.start; i <= paragraph.end; i++) {
-          const level = embedLevels[i];
-          const type = charTypes[i];
+        for (var i$17 = paragraph.start; i$17 <= paragraph.end; i$17++) {
+          var level$3 = embedLevels[i$17];
+          var type$1 = charTypes[i$17];
           // I2. For all characters with an odd (right-to-left) embedding level, those of type L, EN or AN go up one level.
-          if (level & 1) {
-            if (type & (TYPE_L | TYPE_EN | TYPE_AN)) {
-              embedLevels[i]++;
+          if (level$3 & 1) {
+            if (type$1 & (TYPE_L | TYPE_EN | TYPE_AN)) {
+              embedLevels[i$17]++;
             }
           }
             // I1. For all characters with an even (left-to-right) embedding level, those of type R go up one level
           // and those of type AN or EN go up two levels.
           else {
-            if (type & TYPE_R) {
-              embedLevels[i]++;
-            } else if (type & (TYPE_AN | TYPE_EN)) {
-              embedLevels[i] += 2;
+            if (type$1 & TYPE_R) {
+              embedLevels[i$17]++;
+            } else if (type$1 & (TYPE_AN | TYPE_EN)) {
+              embedLevels[i$17] += 2;
             }
           }
 
           // 5.2: Resolve any LRE, RLE, LRO, RLO, PDF, or BN to the level of the preceding character if there is one,
           // and otherwise to the base level.
-          if (type & BN_LIKE_TYPES) {
-            embedLevels[i] = i === 0 ? paragraph.level : embedLevels[i - 1];
+          if (type$1 & BN_LIKE_TYPES) {
+            embedLevels[i$17] = i$17 === 0 ? paragraph.level : embedLevels[i$17 - 1];
           }
 
           // 3.4 L1.1-4: Reset the embedding level of segment/paragraph separators, and any sequence of whitespace or
           // isolate formatting characters preceding them or the end of the paragraph, to the paragraph level.
           // NOTE: this will also need to be applied to each individual line ending after line wrapping occurs.
-          if (i === paragraph.end || getBidiCharType(string[i]) & (TYPE_S | TYPE_B)) {
-            for (let j = i; j >= 0 && (getBidiCharType(string[j]) & TRAILING_TYPES); j--) {
-              embedLevels[j] = paragraph.level;
+          if (i$17 === paragraph.end || getBidiCharType(string[i$17]) & (TYPE_S | TYPE_B)) {
+            for (var j$1 = i$17; j$1 >= 0 && (getBidiCharType(string[j$1]) & TRAILING_TYPES); j$1--) {
+              embedLevels[j$1] = paragraph.level;
             }
           }
         }
@@ -1398,13 +2247,13 @@
       // according to section 3.4 Reordering Resolved Levels
       return {
         levels: embedLevels,
-        paragraphs
+        paragraphs: paragraphs
       }
 
       function determineAutoEmbedLevel (start, isFSI) {
         // 3.3.1 P2 - P3
-        for (let i = start; i < string.length; i++) {
-          const charType = charTypes[i];
+        for (var i = start; i < string.length; i++) {
+          var charType = charTypes[i];
           if (charType & (TYPE_R | TYPE_AL)) {
             return 1
           }
@@ -1412,7 +2261,7 @@
             return 0
           }
           if (charType & ISOLATE_INIT_TYPES) {
-            const pdi = indexOfMatchingPDI(i);
+            var pdi = indexOfMatchingPDI(i);
             i = pdi === -1 ? string.length : pdi;
           }
         }
@@ -1421,9 +2270,9 @@
 
       function indexOfMatchingPDI (isolateStart) {
         // 3.1.2 BD9
-        let isolationLevel = 1;
-        for (let i = isolateStart + 1; i < string.length; i++) {
-          const charType = charTypes[i];
+        var isolationLevel = 1;
+        for (var i = isolateStart + 1; i < string.length; i++) {
+          var charType = charTypes[i];
           if (charType & TYPE_B) {
             break
           }
@@ -1447,14 +2296,16 @@
     // Bidi mirrored chars data, auto generated
     var data = "14>1,j>2,t>2,u>2,1a>g,2v3>1,1>1,1ge>1,1wd>1,b>1,1j>1,f>1,ai>3,-2>3,+1,8>1k0,-1jq>1y7,-1y6>1hf,-1he>1h6,-1h5>1ha,-1h8>1qi,-1pu>1,6>3u,-3s>7,6>1,1>1,f>1,1>1,+2,3>1,1>1,+13,4>1,1>1,6>1eo,-1ee>1,3>1mg,-1me>1mk,-1mj>1mi,-1mg>1mi,-1md>1,1>1,+2,1>10k,-103>1,1>1,4>1,5>1,1>1,+10,3>1,1>8,-7>8,+1,-6>7,+1,a>1,1>1,u>1,u6>1,1>1,+5,26>1,1>1,2>1,2>2,8>1,7>1,4>1,1>1,+5,b8>1,1>1,+3,1>3,-2>1,2>1,1>1,+2,c>1,3>1,1>1,+2,h>1,3>1,a>1,1>1,2>1,3>1,1>1,d>1,f>1,3>1,1a>1,1>1,6>1,7>1,13>1,k>1,1>1,+19,4>1,1>1,+2,2>1,1>1,+18,m>1,a>1,1>1,lk>1,1>1,4>1,2>1,f>1,3>1,1>1,+3,db>1,1>1,+3,3>1,1>1,+2,14qm>1,1>1,+1,6>1,4j>1,j>2,t>2,u>2,2>1,+1";
 
-    let mirrorMap;
+    var mirrorMap;
 
     function parse () {
       if (!mirrorMap) {
         //const start = performance.now()
-        const { map, reverseMap } = parseCharacterMap(data, true);
+        var ref = parseCharacterMap(data, true);
+        var map = ref.map;
+        var reverseMap = ref.reverseMap;
         // Combine both maps into one
-        reverseMap.forEach((value, key) => {
+        reverseMap.forEach(function (value, key) {
           map.set(key, value);
         });
         mirrorMap = map;
@@ -1477,14 +2328,14 @@
      * @return {Map<number, string>}
      */
     function getMirroredCharactersMap(string, embeddingLevels, start, end) {
-      let strLen = string.length;
+      var strLen = string.length;
       start = Math.max(0, start == null ? 0 : +start);
       end = Math.min(strLen - 1, end == null ? strLen - 1 : +end);
 
-      const map = new Map();
-      for (let i = start; i <= end; i++) {
+      var map = new Map();
+      for (var i = start; i <= end; i++) {
         if (embeddingLevels[i] & 1) { //only odd (rtl) levels
-          const mirror = getMirroredCharacter(string[i]);
+          var mirror = getMirroredCharacter(string[i]);
           if (mirror !== null) {
             map.set(i, mirror);
           }
@@ -1503,42 +2354,42 @@
      * @return {number[][]} - the list of start/end segments that should be flipped, in order.
      */
     function getReorderSegments(string, embeddingLevelsResult, start, end) {
-      let strLen = string.length;
+      var strLen = string.length;
       start = Math.max(0, start == null ? 0 : +start);
       end = Math.min(strLen - 1, end == null ? strLen - 1 : +end);
 
-      const segments = [];
-      embeddingLevelsResult.paragraphs.forEach(paragraph => {
-        const lineStart = Math.max(start, paragraph.start);
-        const lineEnd = Math.min(end, paragraph.end);
+      var segments = [];
+      embeddingLevelsResult.paragraphs.forEach(function (paragraph) {
+        var lineStart = Math.max(start, paragraph.start);
+        var lineEnd = Math.min(end, paragraph.end);
         if (lineStart < lineEnd) {
           // Local slice for mutation
-          const lineLevels = embeddingLevelsResult.levels.slice(lineStart, lineEnd + 1);
+          var lineLevels = embeddingLevelsResult.levels.slice(lineStart, lineEnd + 1);
 
           // 3.4 L1.4: Reset any sequence of whitespace characters and/or isolate formatting characters at the
           // end of the line to the paragraph level.
-          for (let i = lineEnd; i >= lineStart && (getBidiCharType(string[i]) & TRAILING_TYPES); i--) {
+          for (var i = lineEnd; i >= lineStart && (getBidiCharType(string[i]) & TRAILING_TYPES); i--) {
             lineLevels[i] = paragraph.level;
           }
 
           // L2. From the highest level found in the text to the lowest odd level on each line, including intermediate levels
           // not actually present in the text, reverse any contiguous sequence of characters that are at that level or higher.
-          let maxLevel = paragraph.level;
-          let minOddLevel = Infinity;
-          for (let i = 0; i < lineLevels.length; i++) {
-            const level = lineLevels[i];
-            if (level > maxLevel) maxLevel = level;
-            if (level < minOddLevel) minOddLevel = level | 1;
+          var maxLevel = paragraph.level;
+          var minOddLevel = Infinity;
+          for (var i$1 = 0; i$1 < lineLevels.length; i$1++) {
+            var level = lineLevels[i$1];
+            if (level > maxLevel) { maxLevel = level; }
+            if (level < minOddLevel) { minOddLevel = level | 1; }
           }
-          for (let lvl = maxLevel; lvl >= minOddLevel; lvl--) {
-            for (let i = 0; i < lineLevels.length; i++) {
-              if (lineLevels[i] >= lvl) {
-                const segStart = i;
-                while (i + 1 < lineLevels.length && lineLevels[i + 1] >= lvl) {
-                  i++;
+          for (var lvl = maxLevel; lvl >= minOddLevel; lvl--) {
+            for (var i$2 = 0; i$2 < lineLevels.length; i$2++) {
+              if (lineLevels[i$2] >= lvl) {
+                var segStart = i$2;
+                while (i$2 + 1 < lineLevels.length && lineLevels[i$2 + 1] >= lvl) {
+                  i$2++;
                 }
-                if (i > segStart) {
-                  segments.push([segStart + start, i + start]);
+                if (i$2 > segStart) {
+                  segments.push([segStart + start, i$2 + start]);
                 }
               }
             }
@@ -1556,9 +2407,9 @@
      * @return {string} the new string with bidi segments reordered
      */
     function getReorderedString(string, embedLevelsResult, start, end) {
-      const indices = getReorderedIndices(string, embedLevelsResult, start, end);
-      const chars = [...string];
-      indices.forEach((charIndex, i) => {
+      var indices = getReorderedIndices(string, embedLevelsResult, start, end);
+      var chars = [].concat( string );
+      indices.forEach(function (charIndex, i) {
         chars[i] = (
           (embedLevelsResult.levels[charIndex] & 1) ? getMirroredCharacter(string[charIndex]) : null
         ) || string[charIndex];
@@ -1574,16 +2425,19 @@
      * @return {number[]} an array with character indices in their new bidi order
      */
     function getReorderedIndices(string, embedLevelsResult, start, end) {
-      const segments = getReorderSegments(string, embedLevelsResult, start, end);
+      var segments = getReorderSegments(string, embedLevelsResult, start, end);
       // Fill an array with indices
-      const indices = [];
-      for (let i = 0; i < string.length; i++) {
+      var indices = [];
+      for (var i = 0; i < string.length; i++) {
         indices[i] = i;
       }
       // Reverse each segment in order
-      segments.forEach(([start, end]) => {
-        const slice = indices.slice(start, end + 1);
-        for (let i = slice.length; i--;) {
+      segments.forEach(function (ref) {
+        var start = ref[0];
+        var end = ref[1];
+
+        var slice = indices.slice(start, end + 1);
+        for (var i = slice.length; i--;) {
           indices[end - i] = slice[i];
         }
       });
@@ -1771,7 +2625,7 @@
       baseMaterial.onBeforeCompile.call(this, shaderInfo);
 
       // Upgrade the shaders, caching the result by incoming source code
-      const cacheKey = optionsKey + '|||' + shaderInfo.vertexShader + '|||' + shaderInfo.fragmentShader;
+      const cacheKey = this.customProgramCacheKey() + '|' + shaderInfo.vertexShader + '|' + shaderInfo.fragmentShader;
       let upgradedShaders = SHADER_UPGRADE_CACHE[cacheKey];
       if (!upgradedShaders) {
         const upgraded = upgradeShaders(shaderInfo, options, optionsKey);
@@ -1831,7 +2685,7 @@
         writable: true,
         configurable: true,
         value: function () {
-          return optionsKey
+          return baseMaterial.customProgramCacheKey() + '|' + optionsKey
         }
       },
 
@@ -2063,183 +2917,7 @@ void main() {
   }
 
   /**
-   * Initializes and returns a function to generate an SDF texture for a given glyph.
-   * @param {function} createGlyphSegmentsIndex - factory for a GlyphSegmentsIndex implementation.
-   * @param {number} config.sdfExponent
-   * @param {number} config.sdfMargin
-   *
-   * @return {function(Object): {renderingBounds: [minX, minY, maxX, maxY], textureData: Uint8Array}}
-   */
-  function createSDFGenerator(createGlyphSegmentsIndex, config) {
-    const { sdfExponent, sdfMargin } = config;
-
-    /**
-     * How many straight line segments to use when approximating a glyph's quadratic/cubic bezier curves.
-     */
-    const CURVE_POINTS = 16;
-
-    /**
-     * Find the point on a quadratic bezier curve at t where t is in the range [0, 1]
-     */
-    function pointOnQuadraticBezier(x0, y0, x1, y1, x2, y2, t) {
-      const t2 = 1 - t;
-      return {
-        x: t2 * t2 * x0 + 2 * t2 * t * x1 + t * t * x2,
-        y: t2 * t2 * y0 + 2 * t2 * t * y1 + t * t * y2
-      }
-    }
-
-    /**
-     * Find the point on a cubic bezier curve at t where t is in the range [0, 1]
-     */
-    function pointOnCubicBezier(x0, y0, x1, y1, x2, y2, x3, y3, t) {
-      const t2 = 1 - t;
-      return {
-        x: t2 * t2 * t2 * x0 + 3 * t2 * t2 * t * x1 + 3 * t2 * t * t * x2 + t * t * t * x3,
-        y: t2 * t2 * t2 * y0 + 3 * t2 * t2 * t * y1 + 3 * t2 * t * t * y2 + t * t * t * y3
-      }
-    }
-
-    /**
-     * Generate an SDF texture segment for a single glyph.
-     * @param {object} glyphObj
-     * @param {number} sdfSize - the length of one side of the SDF image.
-     *        Larger images encode more details. Must be a power of 2.
-     * @return {{textureData: Uint8Array, renderingBounds: *[]}}
-     */
-    function generateSDF(glyphObj, sdfSize) {
-      //console.time('glyphSDF')
-
-      const textureData = new Uint8Array(sdfSize * sdfSize);
-
-      // Determine mapping between glyph grid coords and sdf grid coords
-      const glyphW = glyphObj.xMax - glyphObj.xMin;
-      const glyphH = glyphObj.yMax - glyphObj.yMin;
-
-      // Choose a maximum search distance radius in font units, based on the glyph's max dimensions
-      const fontUnitsMaxSearchDist = Math.max(glyphW, glyphH);
-
-      // Margin - add an extra 0.5 over the configured value because the outer 0.5 doesn't contain
-      // useful interpolated values and will be ignored anyway.
-      const fontUnitsMargin = Math.max(glyphW, glyphH) / sdfSize * (sdfMargin * sdfSize + 0.5);
-
-      // Metrics of the texture/quad in font units
-      const textureMinFontX = glyphObj.xMin - fontUnitsMargin;
-      const textureMinFontY = glyphObj.yMin - fontUnitsMargin;
-      const textureMaxFontX = glyphObj.xMax + fontUnitsMargin;
-      const textureMaxFontY = glyphObj.yMax + fontUnitsMargin;
-      const fontUnitsTextureWidth = textureMaxFontX - textureMinFontX;
-      const fontUnitsTextureHeight = textureMaxFontY - textureMinFontY;
-      const fontUnitsTextureMaxDim = Math.max(fontUnitsTextureWidth, fontUnitsTextureHeight);
-
-      function textureXToFontX(x) {
-        return textureMinFontX + fontUnitsTextureWidth * x / sdfSize
-      }
-
-      function textureYToFontY(y) {
-        return textureMinFontY + fontUnitsTextureHeight * y / sdfSize
-      }
-
-      if (glyphObj.pathCommandCount) { //whitespace chars will have no commands, so we can skip all this
-        // Decompose all paths into straight line segments and add them to a quadtree
-        const lineSegmentsIndex = createGlyphSegmentsIndex(glyphObj);
-        let firstX, firstY, prevX, prevY;
-        glyphObj.forEachPathCommand((type, x0, y0, x1, y1, x2, y2) => {
-          switch (type) {
-            case 'M':
-              prevX = firstX = x0;
-              prevY = firstY = y0;
-              break
-            case 'L':
-              if (x0 !== prevX || y0 !== prevY) { //yup, some fonts have zero-length line commands
-                lineSegmentsIndex.addLineSegment(prevX, prevY, (prevX = x0), (prevY = y0));
-              }
-              break
-            case 'Q': {
-              let prevPoint = {x: prevX, y: prevY};
-              for (let i = 1; i < CURVE_POINTS; i++) {
-                let nextPoint = pointOnQuadraticBezier(
-                  prevX, prevY,
-                  x0, y0,
-                  x1, y1,
-                  i / (CURVE_POINTS - 1)
-                );
-                lineSegmentsIndex.addLineSegment(prevPoint.x, prevPoint.y, nextPoint.x, nextPoint.y);
-                prevPoint = nextPoint;
-              }
-              prevX = x1;
-              prevY = y1;
-              break
-            }
-            case 'C': {
-              let prevPoint = {x: prevX, y: prevY};
-              for (let i = 1; i < CURVE_POINTS; i++) {
-                let nextPoint = pointOnCubicBezier(
-                  prevX, prevY,
-                  x0, y0,
-                  x1, y1,
-                  x2, y2,
-                  i / (CURVE_POINTS - 1)
-                );
-                lineSegmentsIndex.addLineSegment(prevPoint.x, prevPoint.y, nextPoint.x, nextPoint.y);
-                prevPoint = nextPoint;
-              }
-              prevX = x2;
-              prevY = y2;
-              break
-            }
-            case 'Z':
-              if (prevX !== firstX || prevY !== firstY) {
-                lineSegmentsIndex.addLineSegment(prevX, prevY, firstX, firstY);
-              }
-              break
-          }
-        });
-
-        // For each target SDF texel, find the distance from its center to its nearest line segment,
-        // map that distance to an alpha value, and write that alpha to the texel
-        for (let sdfX = 0; sdfX < sdfSize; sdfX++) {
-          for (let sdfY = 0; sdfY < sdfSize; sdfY++) {
-            const signedDist = lineSegmentsIndex.findNearestSignedDistance(
-              textureXToFontX(sdfX + 0.5),
-              textureYToFontY(sdfY + 0.5),
-              fontUnitsMaxSearchDist
-            );
-
-            // Use an exponential scale to ensure the texels very near the glyph path have adequate
-            // precision, while allowing the distance field to cover the entire texture, given that
-            // there are only 8 bits available. Formula visualized: https://www.desmos.com/calculator/uiaq5aqiam
-            let alpha = Math.pow((1 - Math.abs(signedDist) / fontUnitsTextureMaxDim), sdfExponent) / 2;
-            if (signedDist < 0) {
-              alpha = 1 - alpha;
-            }
-
-            alpha = Math.max(0, Math.min(255, Math.round(alpha * 255))); //clamp
-            textureData[sdfY * sdfSize + sdfX] = alpha;
-          }
-        }
-      }
-
-      //console.timeEnd('glyphSDF')
-
-      return {
-        textureData: textureData,
-
-        renderingBounds: [
-          textureMinFontX,
-          textureMinFontY,
-          textureMaxFontX,
-          textureMaxFontY
-        ]
-      }
-    }
-
-
-    return generateSDF
-  }
-
-  /**
-   * Creates a self-contained environment for processing text rendering requests.
+   * Factory function that creates a self-contained environment for processing text typesetting requests.
    *
    * It is important that this function has no closure dependencies, so that it can be easily injected
    * into the source for a Worker without requiring a build step or complex dependency loading. All its
@@ -2271,38 +2949,15 @@ void main() {
    *       })
    *     }
    *   }
-   * @param {function} sdfGenerator - a function that accepts a glyph object and generates an SDF texture
-   * from it.
+   * @param {object} bidi - the bidi.js implementation object
    * @param {Object} config
    * @return {Object}
    */
-  function createFontProcessor(fontParser, sdfGenerator, bidi, config) {
+  function createTypesetter(fontParser, bidi, config) {
 
     const {
       defaultFontURL
     } = config;
-
-
-    /**
-     * @private
-     * Holds data about font glyphs and how they relate to SDF atlases
-     *
-     * {
-     *   'fontUrl@sdfSize': {
-     *     fontObj: {}, //result of the fontParser
-     *     glyphs: {
-     *       [glyphIndex]: {
-     *         atlasIndex: 0,
-     *         glyphObj: {}, //glyph object from the fontParser
-     *         renderingBounds: [x0, y0, x1, y1]
-     *       },
-     *       ...
-     *     },
-     *     glyphCount: 123
-     *   }
-     * }
-     */
-    const fontAtlases = Object.create(null);
 
     /**
      * Holds parsed font objects by url
@@ -2313,6 +2968,10 @@ void main() {
 
     // Set of Unicode Default_Ignorable_Code_Point characters, these will not produce visible glyphs
     const DEFAULT_IGNORABLE_CHARS = /[\u00AD\u034F\u061C\u115F-\u1160\u17B4-\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFF8]/;
+
+    // Incomplete set of characters that allow line breaking after them
+    // In the future we may consider a full Unicode line breaking algorithm impl: https://www.unicode.org/reports/tr14
+    const BREAK_AFTER_CHARS = /[\s\-\u007C\u00AD\u2010\u2012-\u2014\u2027\u2056\u2E17\u2E40]/;
 
     /**
      * Load a given font url
@@ -2379,34 +3038,11 @@ void main() {
 
 
     /**
-     * Get the atlas data for a given font url, loading it from the network and initializing
-     * its atlas data objects if necessary.
-     */
-    function getSdfAtlas(fontUrl, sdfGlyphSize, callback) {
-      if (!fontUrl) fontUrl = defaultFontURL;
-      let atlasKey = `${fontUrl}@${sdfGlyphSize}`;
-      let atlas = fontAtlases[atlasKey];
-      if (atlas) {
-        callback(atlas);
-      } else {
-        loadFont(fontUrl, fontObj => {
-          atlas = fontAtlases[atlasKey] || (fontAtlases[atlasKey] = {
-            fontObj: fontObj,
-            glyphs: {},
-            glyphCount: 0
-          });
-          callback(atlas);
-        });
-      }
-    }
-
-
-    /**
      * Main entry point.
      * Process a text string with given font and formatting parameters, and return all info
      * necessary to render all its glyphs.
      */
-    function process(
+    function typeset(
       {
         text='',
         font=defaultFontURL,
@@ -2430,11 +3066,11 @@ void main() {
       metricsOnly=false
     ) {
       const mainStart = now();
-      const timings = {total: 0, fontLoad: 0, layout: 0, sdf: {}, sdfTotal: 0};
+      const timings = {fontLoad: 0, typesetting: 0};
 
       // Ensure newlines are normalized
       if (text.indexOf('\r') > -1) {
-        console.warn('FontProcessor.process: got text with \\r chars; normalizing to \\n');
+        console.info('Typesetter: got text with \\r chars; normalizing to \\n');
         text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       }
 
@@ -2445,12 +3081,11 @@ void main() {
       lineHeight = lineHeight || 'normal';
       textIndent = +textIndent;
 
-      getSdfAtlas(font, sdfGlyphSize, atlas => {
-        const fontObj = atlas.fontObj;
+      loadFont(font, fontObj => {
         const hasMaxWidth = isFinite(maxWidth);
-        let newGlyphs = null;
-        let glyphBounds = null;
-        let glyphAtlasIndices = null;
+        let glyphIds = null;
+        let glyphPositions = null;
+        let glyphData = null;
         let glyphColors = null;
         let caretPositions = null;
         let visibleBounds = null;
@@ -2460,7 +3095,7 @@ void main() {
         let canWrap = whiteSpace !== 'nowrap';
         const {ascender, descender, unitsPerEm} = fontObj;
         timings.fontLoad = now() - mainStart;
-        const layoutStart = now();
+        const typesetStart = now();
 
         // Find conversion between native font units and fontSize units; this will already be done
         // for the gx/gy values below but everything else we'll need to convert
@@ -2493,6 +3128,7 @@ void main() {
           // Calc isWhitespace and isEmpty once per glyphObj
           if (!('isEmpty' in glyphObj)) {
             glyphObj.isWhitespace = !!char && /\s/.test(char);
+            glyphObj.canBreakAfter = !!char && BREAK_AFTER_CHARS.test(char);
             glyphObj.isEmpty = glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax || DEFAULT_IGNORABLE_CHARS.test(char);
           }
           if (!glyphObj.isWhitespace && !glyphObj.isEmpty) {
@@ -2502,7 +3138,7 @@ void main() {
           // If a non-whitespace character overflows the max width, we need to soft-wrap
           if (canWrap && hasMaxWidth && !glyphObj.isWhitespace && glyphX + glyphWidth + lineXOffset > maxWidth && curLineCount) {
             // If it's the first char after a whitespace, start a new line
-            if (currentLine.glyphAt(curLineCount - 1).glyphObj.isWhitespace) {
+            if (currentLine.glyphAt(curLineCount - 1).glyphObj.canBreakAfter) {
               nextLine = new TextLine();
               lineXOffset = -glyphX;
             } else {
@@ -2515,7 +3151,7 @@ void main() {
                   break
                 }
                 // Found a soft break point; move all chars since it to a new line
-                else if (currentLine.glyphAt(i).glyphObj.isWhitespace) {
+                else if (currentLine.glyphAt(i).glyphObj.canBreakAfter) {
                   nextLine = currentLine.splitAt(i + 1);
                   const adjustX = nextLine.glyphAt(0).x;
                   lineXOffset -= adjustX;
@@ -2599,8 +3235,9 @@ void main() {
 
           // Process each line, applying alignment offsets, adding each glyph to the atlas, and
           // collecting all renderable glyphs into a single collection.
-          glyphBounds = new Float32Array(renderableGlyphCount * 4);
-          glyphAtlasIndices = new Float32Array(renderableGlyphCount);
+          glyphIds = new Uint16Array(renderableGlyphCount);
+          glyphPositions = new Float32Array(renderableGlyphCount * 2);
+          glyphData = {};
           visibleBounds = [INF, INF, -INF, -INF];
           chunkedBounds = [];
           let lineYOffset = topBaseline;
@@ -2693,6 +3330,7 @@ void main() {
               for (let i = 0; i < lineGlyphCount; i++) {
                 let glyphInfo = line.glyphAt(i);
                 glyphObj = glyphInfo.glyphObj;
+                const glyphId = glyphObj.index;
 
                 // Replace mirrored characters in rtl
                 const rtl = bidiLevelsResult.levels[glyphInfo.charIndex] & 1; //odd level means rtl
@@ -2712,14 +3350,13 @@ void main() {
                   caretPositions[charIndex * 3 + 1] = rtl ? caretLeft : caretRight; //end edge x
                   caretPositions[charIndex * 3 + 2] = lineYOffset + caretBottomOffset + anchorYOffset; //common bottom y
 
-                  // If we skipped any chars from the previous glyph (due to ligature subs), copy the
-                  // previous glyph's info to those missing char indices. In the future we may try to
-                  // use the font's LigatureCaretList table to get interior caret positions.
-                  while (charIndex - prevCharIndex > 1) {
-                    caretPositions[(prevCharIndex + 1) * 3] = caretPositions[prevCharIndex * 3];
-                    caretPositions[(prevCharIndex + 1) * 3 + 1] = caretPositions[prevCharIndex * 3 + 1];
-                    caretPositions[(prevCharIndex + 1) * 3 + 2] = caretPositions[prevCharIndex * 3 + 2];
-                    prevCharIndex++;
+                  // If we skipped any chars from the previous glyph (due to ligature subs), fill in caret
+                  // positions for those missing char indices; currently this uses a best-guess by dividing
+                  // the ligature's width evenly. In the future we may try to use the font's LigatureCaretList
+                  // table to get better interior caret positions.
+                  const ligCount = charIndex - prevCharIndex;
+                  if (ligCount > 1) {
+                    fillLigatureCaretPositions(caretPositions, prevCharIndex, ligCount);
                   }
                   prevCharIndex = charIndex;
                 }
@@ -2739,43 +3376,25 @@ void main() {
                 if (!glyphObj.isWhitespace && !glyphObj.isEmpty) {
                   const idx = renderableGlyphIndex++;
 
-                  // If we haven't seen this glyph yet, generate its SDF
-                  let glyphAtlasInfo = atlas.glyphs[glyphObj.index];
-                  if (!glyphAtlasInfo) {
-                    const sdfStart = now();
-                    const glyphSDFData = sdfGenerator(glyphObj, sdfGlyphSize);
-                    timings.sdf[text.charAt(glyphInfo.charIndex)] = now() - sdfStart;
-
-                    // Assign this glyph the next available atlas index
-                    glyphSDFData.atlasIndex = atlas.glyphCount++;
-
-                    // Queue it up in the response's newGlyphs list
-                    if (!newGlyphs) newGlyphs = [];
-                    newGlyphs.push(glyphSDFData);
-
-                    // Store its metadata (not the texture) in our atlas info
-                    glyphAtlasInfo = atlas.glyphs[glyphObj.index] = {
-                      atlasIndex: glyphSDFData.atlasIndex,
-                      glyphObj: glyphObj,
-                      renderingBounds: glyphSDFData.renderingBounds
+                  // Add this glyph's path data
+                  if (!glyphData[glyphId]) {
+                    glyphData[glyphId] = {
+                      path: glyphObj.path,
+                      pathBounds: [glyphObj.xMin, glyphObj.yMin, glyphObj.xMax, glyphObj.yMax]
                     };
                   }
 
-                  // Determine final glyph quad bounds and add them to the glyphBounds array
-                  const bounds = glyphAtlasInfo.renderingBounds;
-                  const startIdx = idx * 4;
-                  const xStart = glyphInfo.x + anchorXOffset;
-                  const yStart = lineYOffset + anchorYOffset;
-                  glyphBounds[startIdx] = xStart + bounds[0] * fontSizeMult;
-                  glyphBounds[startIdx + 1] = yStart + bounds[1] * fontSizeMult;
-                  glyphBounds[startIdx + 2] = xStart + bounds[2] * fontSizeMult;
-                  glyphBounds[startIdx + 3] = yStart + bounds[3] * fontSizeMult;
+                  // Determine final glyph position and add to glyphPositions array
+                  const glyphX = glyphInfo.x + anchorXOffset;
+                  const glyphY = lineYOffset + anchorYOffset;
+                  glyphPositions[idx * 2] = glyphX;
+                  glyphPositions[idx * 2 + 1] = glyphY;
 
                   // Track total visible bounds
-                  const visX0 = xStart + glyphObj.xMin * fontSizeMult;
-                  const visY0 = yStart + glyphObj.yMin * fontSizeMult;
-                  const visX1 = xStart + glyphObj.xMax * fontSizeMult;
-                  const visY1 = yStart + glyphObj.yMax * fontSizeMult;
+                  const visX0 = glyphX + glyphObj.xMin * fontSizeMult;
+                  const visY0 = glyphY + glyphObj.yMin * fontSizeMult;
+                  const visX1 = glyphX + glyphObj.xMax * fontSizeMult;
+                  const visY1 = glyphY + glyphObj.yMax * fontSizeMult;
                   if (visX0 < visibleBounds[0]) visibleBounds[0] = visX0;
                   if (visY0 < visibleBounds[1]) visibleBounds[1] = visY0;
                   if (visX1 > visibleBounds[2]) visibleBounds[2] = visX1;
@@ -2793,8 +3412,8 @@ void main() {
                   if (visX1 > chunkRect[2]) chunkRect[2] = visX1;
                   if (visY1 > chunkRect[3]) chunkRect[3] = visY1;
 
-                  // Add to atlas indices array
-                  glyphAtlasIndices[idx] = glyphAtlasInfo.atlasIndex;
+                  // Add to glyph ids array
+                  glyphIds[idx] = glyphId;
 
                   // Add colors
                   if (colorRanges) {
@@ -2810,22 +3429,29 @@ void main() {
             // Increment y offset for next line
             lineYOffset -= lineHeight;
           });
+
+          // Fill in remaining caret positions in case the final character was a ligature
+          if (caretPositions) {
+            const ligCount = text.length - prevCharIndex;
+            if (ligCount > 1) {
+              fillLigatureCaretPositions(caretPositions, prevCharIndex, ligCount);
+            }
+          }
         }
 
         // Timing stats
-        for (let ch in timings.sdf) {
-          timings.sdfTotal += timings.sdf[ch];
-        }
-        timings.layout = now() - layoutStart - timings.sdfTotal;
-        timings.total = now() - mainStart;
+        timings.typesetting = now() - typesetStart;
 
         callback({
-          glyphBounds, //rendering quad bounds for each glyph [x1, y1, x2, y2]
-          glyphAtlasIndices, //atlas indices for each glyph
-          caretPositions, //x,y of bottom of cursor position before each char, plus one after last char
+          glyphIds, //font indices for each glyph
+          glyphPositions, //x,y of each glyph's origin in layout
+          glyphData, //dict holding data about each glyph appearing in the text
+          caretPositions, //startX,endX,bottomY caret positions for each char
           caretHeight, //height of cursor from bottom to top
           glyphColors, //color for each glyph, if color ranges supplied
           chunkedBounds, //total rects per (n=chunkedBoundsSize) consecutive glyphs
+          fontSize, //calculated em height
+          unitsPerEm, //font units per em
           ascender: ascender * fontSizeMult, //font ascender
           descender: descender * fontSizeMult, //font descender
           lineHeight, //computed line height
@@ -2837,7 +3463,6 @@ void main() {
             anchorYOffset
           ],
           visibleBounds, //total bounds of visible text paths, may be larger or smaller than totalBounds
-          newGlyphSDFs: newGlyphs, //if this request included any new SDFs for the atlas, they'll be included here
           timings
         });
       });
@@ -2851,7 +3476,7 @@ void main() {
      * @param callback
      */
     function measure(args, callback) {
-      process(args, (result) => {
+      typeset(args, (result) => {
         const [x0, y0, x1, y1] = result.blockBounds;
         callback({
           width: x1 - x0,
@@ -2864,6 +3489,19 @@ void main() {
       let match = str.match(/^([\d.]+)%$/);
       let pct = match ? parseFloat(match[1]) : NaN;
       return isNaN(pct) ? 0 : pct / 100
+    }
+
+    function fillLigatureCaretPositions(caretPositions, ligStartIndex, ligCount) {
+      const ligStartX = caretPositions[ligStartIndex * 3];
+      const ligEndX = caretPositions[ligStartIndex * 3 + 1];
+      const ligY = caretPositions[ligStartIndex * 3 + 2];
+      const guessedAdvanceX = (ligEndX - ligStartX) / ligCount;
+      for (let i = 0; i < ligCount; i++) {
+        const startIndex = (ligStartIndex + i) * 3;
+        caretPositions[startIndex] = ligStartX + guessedAdvanceX * i;
+        caretPositions[startIndex + 1] = ligStartX + guessedAdvanceX * (i + 1);
+        caretPositions[startIndex + 2] = ligY;
+      }
     }
 
     function now() {
@@ -2907,120 +3545,153 @@ void main() {
 
 
     return {
-      process,
+      typeset,
       measure,
       loadFont
     }
   }
 
+  const now = () => (self.performance || Date).now();
+
+  const mainThreadGenerator = SDFGenerator();
+
+  let warned;
+
   /**
-   * Index for performing fast spatial searches of a glyph's line segments.
-   * @return {{addLineSegment:function, findNearestSignedDistance:function}}
+   * Generate an SDF texture image for a single glyph path, placing the result into a webgl canvas at a
+   * given location and channel. Utilizes the webgl-sdf-generator external package for GPU-accelerated SDF
+   * generation when supported.
    */
-  function createGlyphSegmentsIndex() {
-    let needsSort = false;
-    const segments = [];
-
-    function sortSegments() {
-      if (needsSort) {
-        // sort by maxX, this will let us short-circuit some loops below
-        segments.sort(function(a, b) {
-          return a.maxX - b.maxX
-        });
-        needsSort = false;
-      }
+  function generateSDF(width, height, path, viewBox, distance, exponent, canvas, x, y, channel, useWebGL = true) {
+    // Allow opt-out
+    if (!useWebGL) {
+      return generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel)
     }
 
-    /**
-     * Add a line segment to the index.
-     * @param x0
-     * @param y0
-     * @param x1
-     * @param y1
-     */
-    function addLineSegment(x0, y0, x1, y1) {
-      const segment = {
-        x0, y0, x1, y1,
-        minX: Math.min(x0, x1),
-        minY: Math.min(y0, y1),
-        maxX: Math.max(x0, x1),
-        maxY: Math.max(y0, y1)
-      };
-      segments.push(segment);
-      needsSort = true;
-    }
-
-    /**
-     * For a given x/y, search the index for the closest line segment and return
-     * its signed distance. Negative = inside, positive = outside, zero = on edge
-     * @param x
-     * @param y
-     * @returns {number}
-     */
-    function findNearestSignedDistance(x, y) {
-      sortSegments();
-      let closestDistSq = Infinity;
-      let closestDist = Infinity;
-
-      for (let i = segments.length; i--;) {
-        const seg = segments[i];
-        if (seg.maxX + closestDist <= x) break //sorting by maxX means no more can be closer, so we can short-circuit
-        if (x + closestDist > seg.minX && y - closestDist < seg.maxY && y + closestDist > seg.minY) {
-          const distSq = absSquareDistanceToLineSegment(x, y, seg.x0, seg.y0, seg.x1, seg.y1);
-          if (distSq < closestDistSq) {
-            closestDistSq = distSq;
-            closestDist = Math.sqrt(closestDistSq);
-          }
+    // Attempt GPU-accelerated generation first
+    return generateSDF_GL(width, height, path, viewBox, distance, exponent, canvas, x, y, channel).then(
+      null,
+      err => {
+        // WebGL failed either due to a hard error or unexpected results; fall back to JS in workers
+        if (!warned) {
+          console.warn(`WebGL SDF generation failed, falling back to JS`, err);
+          warned = true;
         }
+        return generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel)
       }
+    )
+  }
 
-      // Flip to negative distance if inside the poly
-      if (isPointInPoly(x, y)) {
-        closestDist = -closestDist;
+  /**
+   * WebGL-based implementation executed on the main thread. Requests are executed in time-bounded
+   * macrotask chunks to allow render frames to execute in between.
+   */
+  const generateSDF_GL = /*#__PURE__*/function() {
+    const queue = [];
+    const chunkTimeBudget = 5; //ms
+    let timer = 0;
+    function nextChunk() {
+      const start = now();
+      while (queue.length && now() - start < chunkTimeBudget) {
+        queue.shift()();
       }
-      return closestDist
+      timer = queue.length ? setTimeout(nextChunk, 0) : 0;
     }
-
-    // Determine whether the given point lies inside or outside the glyph. Uses a simple
-    // ray casting algorithm using a ray pointing east from the point.
-    function isPointInPoly(x, y) {
-      sortSegments();
-      let inside = false;
-      for (let i = segments.length; i--;) {
-        const seg = segments[i];
-        if (seg.maxX <= x) break //sorting by maxX means no more can cross, so we can short-circuit
-        if (seg.minY < y && seg.maxY > y) {
-          const intersects = ((seg.y0 > y) !== (seg.y1 > y)) && (x < (seg.x1 - seg.x0) * (y - seg.y0) / (seg.y1 - seg.y0) + seg.x0);
-          if (intersects) {
-            inside = !inside;
-          }
+    return (...args) => {
+      const thenable = DefaultThenable();
+      queue.push(() => {
+        const start = now();
+        try {
+          mainThreadGenerator.webgl.generateIntoCanvas(...args);
+          thenable.resolve({timing: now() - start});
+        } catch(err) {
+          thenable.reject(err);
         }
+      });
+      if (!timer) {
+        timer = setTimeout(nextChunk, 0);
       }
-      return inside
+      return thenable
     }
+  }();
 
-    // Find the absolute distance from a point to a line segment at closest approach
-    function absSquareDistanceToLineSegment(x, y, lineX0, lineY0, lineX1, lineY1) {
-      const ldx = lineX1 - lineX0;
-      const ldy = lineY1 - lineY0;
-      const lengthSq = ldx * ldx + ldy * ldy;
-      const t = lengthSq ? Math.max(0, Math.min(1, ((x - lineX0) * ldx + (y - lineY0) * ldy) / lengthSq)) : 0;
-      const dx = x - (lineX0 + t * ldx);
-      const dy = y - (lineY0 + t * ldy);
-      return dx * dx + dy * dy
+  /**
+   * Fallback JS-based implementation, fanned out to a number of worker threads for parallelism
+   */
+  const generateSDF_JS_Worker = /*#__PURE__*/function() {
+    const threadCount = 4; //how many workers to spawn
+    const idleTimeout = 2000; //workers will be terminated after being idle this many milliseconds
+    const threads = {};
+    let callNum = 0;
+    return function(width, height, path, viewBox, distance, exponent, canvas, x, y, channel) {
+      const workerId = 'TroikaTextSDFGenerator_JS_' + ((callNum++) % threadCount);
+      let thread = threads[workerId];
+      if (!thread) {
+        thread = threads[workerId] = {
+          workerModule: defineWorkerModule({
+            name: workerId,
+            workerId,
+            dependencies: [
+              SDFGenerator,
+              now
+            ],
+            init(_createSDFGenerator, now) {
+              const generate = _createSDFGenerator().javascript.generate;
+              return function (...args) {
+                const start = now();
+                const textureData = generate(...args);
+                return {
+                  textureData,
+                  timing: now() - start
+                }
+              }
+            },
+            getTransferables(result) {
+              return [result.textureData.buffer]
+            }
+          }),
+          requests: 0,
+          idleTimer: null
+        };
+      }
+
+      thread.requests++;
+      clearTimeout(thread.idleTimer);
+      return thread.workerModule(width, height, path, viewBox, distance, exponent)
+        .then(({textureData, timing}) => {
+          // copy result data into the canvas
+          const start = now();
+          // expand single-channel data into rgba
+          const imageData = new Uint8Array(textureData.length * 4);
+          for (let i = 0; i < textureData.length; i++) {
+            imageData[i * 4 + channel] = textureData[i];
+          }
+          mainThreadGenerator.webglUtils.renderImageData(canvas, imageData, x, y, width, height, 1 << (3 - channel));
+          timing += now() - start;
+
+          // clean up workers after a while
+          if (--thread.requests === 0) {
+            thread.idleTimer = setTimeout(() => { terminateWorker(workerId); }, idleTimeout);
+          }
+          return {timing}
+        })
     }
+  }();
 
-    return {
-      addLineSegment,
-      findNearestSignedDistance
+  function warmUpSDFCanvas(canvas) {
+    if (!canvas._warm) {
+      mainThreadGenerator.webgl.isSupported(canvas);
+      canvas._warm = true;
     }
   }
+
+  const resizeWebGLCanvasWithoutClearing = mainThreadGenerator.webglUtils.resizeWebGLCanvasWithoutClearing;
 
   /*!
   Custom build of Typr.ts (https://github.com/fredli74/Typr.ts) for use in Troika text rendering.
   Original MIT license applies: https://github.com/fredli74/Typr.ts/blob/master/LICENSE
   */
-  function typrFactory(){return "undefined"==typeof window&&(self.window=self),function(r){var e={parse:function(r){var t=e._bin,a=new Uint8Array(r);if("ttcf"==t.readASCII(a,0,4)){var n=4;t.readUshort(a,n),n+=2,t.readUshort(a,n),n+=2;var o=t.readUint(a,n);n+=4;for(var s=[],i=0;i<o;i++){var h=t.readUint(a,n);n+=4,s.push(e._readFont(a,h));}return s}return [e._readFont(a,0)]},_readFont:function(r,t){var a=e._bin,n=t;a.readFixed(r,t),t+=4;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2;for(var s=["cmap","head","hhea","maxp","hmtx","name","OS/2","post","loca","glyf","kern","CFF ","GPOS","GSUB","SVG "],i={_data:r,_offset:n},h={},f=0;f<o;f++){var d=a.readASCII(r,t,4);t+=4,a.readUint(r,t),t+=4;var u=a.readUint(r,t);t+=4;var l=a.readUint(r,t);t+=4,h[d]={offset:u,length:l};}for(f=0;f<s.length;f++){var v=s[f];h[v]&&(i[v.trim()]=e[v.trim()].parse(r,h[v].offset,h[v].length,i));}return i},_tabOffset:function(r,t,a){for(var n=e._bin,o=n.readUshort(r,a+4),s=a+12,i=0;i<o;i++){var h=n.readASCII(r,s,4);s+=4,n.readUint(r,s),s+=4;var f=n.readUint(r,s);if(s+=4,n.readUint(r,s),s+=4,h==t)return f}return 0}};e._bin={readFixed:function(r,e){return (r[e]<<8|r[e+1])+(r[e+2]<<8|r[e+3])/65540},readF2dot14:function(r,t){return e._bin.readShort(r,t)/16384},readInt:function(r,t){var a=e._bin.t.uint8;return a[0]=r[t+3],a[1]=r[t+2],a[2]=r[t+1],a[3]=r[t],e._bin.t.int32[0]},readInt8:function(r,t){return e._bin.t.uint8[0]=r[t],e._bin.t.int8[0]},readShort:function(r,t){var a=e._bin.t.uint8;return a[1]=r[t],a[0]=r[t+1],e._bin.t.int16[0]},readUshort:function(r,e){return r[e]<<8|r[e+1]},readUshorts:function(r,t,a){for(var n=[],o=0;o<a;o++)n.push(e._bin.readUshort(r,t+2*o));return n},readUint:function(r,t){var a=e._bin.t.uint8;return a[3]=r[t],a[2]=r[t+1],a[1]=r[t+2],a[0]=r[t+3],e._bin.t.uint32[0]},readUint64:function(r,t){return 4294967296*e._bin.readUint(r,t)+e._bin.readUint(r,t+4)},readASCII:function(r,e,t){for(var a="",n=0;n<t;n++)a+=String.fromCharCode(r[e+n]);return a},readUnicode:function(r,e,t){for(var a="",n=0;n<t;n++){var o=r[e++]<<8|r[e++];a+=String.fromCharCode(o);}return a},_tdec:"undefined"!=typeof window&&window.TextDecoder?new window.TextDecoder:null,readUTF8:function(r,t,a){var n=e._bin._tdec;return n&&0==t&&a==r.length?n.decode(r):e._bin.readASCII(r,t,a)},readBytes:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(r[e+n]);return a},readASCIIArray:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(String.fromCharCode(r[e+n]));return a}},e._bin.t={buff:new ArrayBuffer(8)},e._bin.t.int8=new Int8Array(e._bin.t.buff),e._bin.t.uint8=new Uint8Array(e._bin.t.buff),e._bin.t.int16=new Int16Array(e._bin.t.buff),e._bin.t.uint16=new Uint16Array(e._bin.t.buff),e._bin.t.int32=new Int32Array(e._bin.t.buff),e._bin.t.uint32=new Uint32Array(e._bin.t.buff),e._lctf={},e._lctf.parse=function(r,t,a,n,o){var s=e._bin,i={},h=t;s.readFixed(r,t),t+=4;var f=s.readUshort(r,t);t+=2;var d=s.readUshort(r,t);t+=2;var u=s.readUshort(r,t);return t+=2,i.scriptList=e._lctf.readScriptList(r,h+f),i.featureList=e._lctf.readFeatureList(r,h+d),i.lookupList=e._lctf.readLookupList(r,h+u,o),i},e._lctf.readLookupList=function(r,t,a){var n=e._bin,o=t,s=[],i=n.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=n.readUshort(r,t);t+=2;var d=e._lctf.readLookupTable(r,o+f,a);s.push(d);}return s},e._lctf.readLookupTable=function(r,t,a){var n=e._bin,o=t,s={tabs:[]};s.ltype=n.readUshort(r,t),t+=2,s.flag=n.readUshort(r,t),t+=2;var i=n.readUshort(r,t);t+=2;for(var h=s.ltype,f=0;f<i;f++){var d=n.readUshort(r,t);t+=2;var u=a(r,h,o+d,s);s.tabs.push(u);}return s},e._lctf.numOfOnes=function(r){for(var e=0,t=0;t<32;t++)0!=(r>>>t&1)&&e++;return e},e._lctf.readClassDef=function(r,t){var a=e._bin,n=[],o=a.readUshort(r,t);if(t+=2,1==o){var s=a.readUshort(r,t);t+=2;var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++)n.push(s+h),n.push(s+h),n.push(a.readUshort(r,t)),t+=2;}if(2==o){var f=a.readUshort(r,t);t+=2;for(h=0;h<f;h++)n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2;}return n},e._lctf.getInterval=function(r,e){for(var t=0;t<r.length;t+=3){var a=r[t],n=r[t+1];if(r[t+2],a<=e&&e<=n)return t}return -1},e._lctf.readCoverage=function(r,t){var a=e._bin,n={};n.fmt=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,1==n.fmt&&(n.tab=a.readUshorts(r,t,o)),2==n.fmt&&(n.tab=a.readUshorts(r,t,3*o)),n},e._lctf.coverageIndex=function(r,t){var a=r.tab;if(1==r.fmt)return a.indexOf(t);if(2==r.fmt){var n=e._lctf.getInterval(a,t);if(-1!=n)return a[n+2]+(t-a[n])}return -1},e._lctf.readFeatureList=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2;var d=e._lctf.readFeatureTable(r,n+f);d.tag=h.trim(),o.push(d);}return o},e._lctf.readFeatureTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,s>0&&(o.featureParams=n+s);var i=a.readUshort(r,t);t+=2,o.tab=[];for(var h=0;h<i;h++)o.tab.push(a.readUshort(r,t+2*h));return o},e._lctf.readScriptList=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2,o[h.trim()]=e._lctf.readScriptTable(r,n+f);}return o},e._lctf.readScriptTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,o.default=e._lctf.readLangSysTable(r,n+s);var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=a.readASCII(r,t,4);t+=4;var d=a.readUshort(r,t);t+=2,o[f.trim()]=e._lctf.readLangSysTable(r,n+d);}return o},e._lctf.readLangSysTable=function(r,t){var a=e._bin,n={};a.readUshort(r,t),t+=2,n.reqFeature=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,n.features=a.readUshorts(r,t,o),n},e.CFF={},e.CFF.parse=function(r,t,a){var n=e._bin;(r=new Uint8Array(r.buffer,t,a))[t=0],r[++t],r[++t],r[++t],t++;var o=[];t=e.CFF.readIndex(r,t,o);for(var s=[],i=0;i<o.length-1;i++)s.push(n.readASCII(r,t+o[i],o[i+1]-o[i]));t+=o[o.length-1];var h=[];t=e.CFF.readIndex(r,t,h);var f=[];for(i=0;i<h.length-1;i++)f.push(e.CFF.readDict(r,t+h[i],t+h[i+1]));t+=h[h.length-1];var d=f[0],u=[];t=e.CFF.readIndex(r,t,u);var l=[];for(i=0;i<u.length-1;i++)l.push(n.readASCII(r,t+u[i],u[i+1]-u[i]));if(t+=u[u.length-1],e.CFF.readSubrs(r,t,d),d.CharStrings){t=d.CharStrings;u=[];t=e.CFF.readIndex(r,t,u);var v=[];for(i=0;i<u.length-1;i++)v.push(n.readBytes(r,t+u[i],u[i+1]-u[i]));d.CharStrings=v;}if(d.ROS){t=d.FDArray;var c=[];t=e.CFF.readIndex(r,t,c),d.FDArray=[];for(i=0;i<c.length-1;i++){var p=e.CFF.readDict(r,t+c[i],t+c[i+1]);e.CFF._readFDict(r,p,l),d.FDArray.push(p);}t+=c[c.length-1],t=d.FDSelect,d.FDSelect=[];var U=r[t];if(t++,3!=U)throw U;var g=n.readUshort(r,t);t+=2;for(i=0;i<g+1;i++)d.FDSelect.push(n.readUshort(r,t),r[t+2]),t+=3;}return d.Encoding&&(d.Encoding=e.CFF.readEncoding(r,d.Encoding,d.CharStrings.length)),d.charset&&(d.charset=e.CFF.readCharset(r,d.charset,d.CharStrings.length)),e.CFF._readFDict(r,d,l),d},e.CFF._readFDict=function(r,t,a){var n;for(var o in t.Private&&(n=t.Private[1],t.Private=e.CFF.readDict(r,n,n+t.Private[0]),t.Private.Subrs&&e.CFF.readSubrs(r,n+t.Private.Subrs,t.Private)),t)-1!=["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(o)&&(t[o]=a[t[o]-426+35]);},e.CFF.readSubrs=function(r,t,a){var n=e._bin,o=[];t=e.CFF.readIndex(r,t,o);var s,i=o.length;s=i<1240?107:i<33900?1131:32768,a.Bias=s,a.Subrs=[];for(var h=0;h<o.length-1;h++)a.Subrs.push(n.readBytes(r,t+o[h],o[h+1]-o[h]));},e.CFF.tableSE=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,0,111,112,113,114,0,115,116,117,118,119,120,121,122,0,123,0,124,125,126,127,128,129,130,131,0,132,133,0,134,135,136,137,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,138,0,139,0,0,0,0,140,141,142,143,0,0,0,0,0,144,0,0,0,145,0,0,146,147,148,149,0,0,0,0],e.CFF.glyphByUnicode=function(r,e){for(var t=0;t<r.charset.length;t++)if(r.charset[t]==e)return t;return -1},e.CFF.glyphBySE=function(r,t){return t<0||t>255?-1:e.CFF.glyphByUnicode(r,e.CFF.tableSE[t])},e.CFF.readEncoding=function(r,t,a){e._bin;var n=[".notdef"],o=r[t];if(t++,0!=o)throw "error: unknown encoding format: "+o;var s=r[t];t++;for(var i=0;i<s;i++)n.push(r[t+i]);return n},e.CFF.readCharset=function(r,t,a){var n=e._bin,o=[".notdef"],s=r[t];if(t++,0==s)for(var i=0;i<a;i++){var h=n.readUshort(r,t);t+=2,o.push(h);}else {if(1!=s&&2!=s)throw "error: format: "+s;for(;o.length<a;){h=n.readUshort(r,t);t+=2;var f=0;1==s?(f=r[t],t++):(f=n.readUshort(r,t),t+=2);for(i=0;i<=f;i++)o.push(h),h++;}}return o},e.CFF.readIndex=function(r,t,a){var n=e._bin,o=n.readUshort(r,t)+1,s=r[t+=2];if(t++,1==s)for(var i=0;i<o;i++)a.push(r[t+i]);else if(2==s)for(i=0;i<o;i++)a.push(n.readUshort(r,t+2*i));else if(3==s)for(i=0;i<o;i++)a.push(16777215&n.readUint(r,t+3*i-1));else if(1!=o)throw "unsupported offset size: "+s+", count: "+o;return (t+=o*s)-1},e.CFF.getCharString=function(r,t,a){var n=e._bin,o=r[t],s=r[t+1];r[t+2],r[t+3],r[t+4];var i=1,h=null,f=null;o<=20&&(h=o,i=1),12==o&&(h=100*o+s,i=2),21<=o&&o<=27&&(h=o,i=1),28==o&&(f=n.readShort(r,t+1),i=3),29<=o&&o<=31&&(h=o,i=1),32<=o&&o<=246&&(f=o-139,i=1),247<=o&&o<=250&&(f=256*(o-247)+s+108,i=2),251<=o&&o<=254&&(f=256*-(o-251)-s-108,i=2),255==o&&(f=n.readInt(r,t+1)/65535,i=5),a.val=null!=f?f:"o"+h,a.size=i;},e.CFF.readCharString=function(r,t,a){for(var n=t+a,o=e._bin,s=[];t<n;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;i<=20&&(d=i,f=1),12==i&&(d=100*i+h,f=2),19!=i&&20!=i||(d=i,f=2),21<=i&&i<=27&&(d=i,f=1),28==i&&(u=o.readShort(r,t+1),f=3),29<=i&&i<=31&&(d=i,f=1),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i&&(u=o.readInt(r,t+1)/65535,f=5),s.push(null!=u?u:"o"+d),t+=f;}return s},e.CFF.readDict=function(r,t,a){for(var n=e._bin,o={},s=[];t<a;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;if(28==i&&(u=n.readShort(r,t+1),f=3),29==i&&(u=n.readInt(r,t+1),f=5),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i)throw u=n.readInt(r,t+1)/65535,f=5,"unknown number";if(30==i){var l=[];for(f=1;;){var v=r[t+f];f++;var c=v>>4,p=15&v;if(15!=c&&l.push(c),15!=p&&l.push(p),15==p)break}for(var U="",g=[0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"],S=0;S<l.length;S++)U+=g[l[S]];u=parseFloat(U);}if(i<=21)if(d=["version","Notice","FullName","FamilyName","Weight","FontBBox","BlueValues","OtherBlues","FamilyBlues","FamilyOtherBlues","StdHW","StdVW","escape","UniqueID","XUID","charset","Encoding","CharStrings","Private","Subrs","defaultWidthX","nominalWidthX"][i],f=1,12==i)d=["Copyright","isFixedPitch","ItalicAngle","UnderlinePosition","UnderlineThickness","PaintType","CharstringType","FontMatrix","StrokeWidth","BlueScale","BlueShift","BlueFuzz","StemSnapH","StemSnapV","ForceBold",0,0,"LanguageGroup","ExpansionFactor","initialRandomSeed","SyntheticBase","PostScript","BaseFontName","BaseFontBlend",0,0,0,0,0,0,"ROS","CIDFontVersion","CIDFontRevision","CIDFontType","CIDCount","UIDBase","FDArray","FDSelect","FontName"][h],f=2;null!=d?(o[d]=1==s.length?s[0]:s,s=[]):s.push(u),t+=f;}return o},e.cmap={},e.cmap.parse=function(r,t,a){r=new Uint8Array(r.buffer,t,a),t=0;var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2;var i=[];o.tables=[];for(var h=0;h<s;h++){var f=n.readUshort(r,t);t+=2;var d=n.readUshort(r,t);t+=2;var u=n.readUint(r,t);t+=4;var l="p"+f+"e"+d,v=i.indexOf(u);if(-1==v){var c;v=o.tables.length,i.push(u);var p=n.readUshort(r,u);0==p?c=e.cmap.parse0(r,u):4==p?c=e.cmap.parse4(r,u):6==p?c=e.cmap.parse6(r,u):12==p?c=e.cmap.parse12(r,u):console.debug("unknown format: "+p,f,d,u),o.tables.push(c);}if(null!=o[l])throw "multiple tables for one platform+encoding";o[l]=v;}return o},e.cmap.parse0=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,n.map=[];for(var s=0;s<o-6;s++)n.map.push(r[t+s]);return n},e.cmap.parse4=function(r,t){var a=e._bin,n=t,o={};o.format=a.readUshort(r,t),t+=2;var s=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2;var i=a.readUshort(r,t);t+=2;var h=i/2;o.searchRange=a.readUshort(r,t),t+=2,o.entrySelector=a.readUshort(r,t),t+=2,o.rangeShift=a.readUshort(r,t),t+=2,o.endCount=a.readUshorts(r,t,h),t+=2*h,t+=2,o.startCount=a.readUshorts(r,t,h),t+=2*h,o.idDelta=[];for(var f=0;f<h;f++)o.idDelta.push(a.readShort(r,t)),t+=2;for(o.idRangeOffset=a.readUshorts(r,t,h),t+=2*h,o.glyphIdArray=[];t<n+s;)o.glyphIdArray.push(a.readUshort(r,t)),t+=2;return o},e.cmap.parse6=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,n.firstCode=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,n.glyphIdArray=[];for(var s=0;s<o;s++)n.glyphIdArray.push(a.readUshort(r,t)),t+=2;return n},e.cmap.parse12=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,t+=2,a.readUint(r,t),t+=4,a.readUint(r,t),t+=4;var o=a.readUint(r,t);t+=4,n.groups=[];for(var s=0;s<o;s++){var i=t+12*s,h=a.readUint(r,i+0),f=a.readUint(r,i+4),d=a.readUint(r,i+8);n.groups.push([h,f,d]);}return n},e.glyf={},e.glyf.parse=function(r,e,t,a){for(var n=[],o=0;o<a.maxp.numGlyphs;o++)n.push(null);return n},e.glyf._parseGlyf=function(r,t){var a=e._bin,n=r._data,o=e._tabOffset(n,"glyf",r._offset)+r.loca[t];if(r.loca[t]==r.loca[t+1])return null;var s={};if(s.noc=a.readShort(n,o),o+=2,s.xMin=a.readShort(n,o),o+=2,s.yMin=a.readShort(n,o),o+=2,s.xMax=a.readShort(n,o),o+=2,s.yMax=a.readShort(n,o),o+=2,s.xMin>=s.xMax||s.yMin>=s.yMax)return null;if(s.noc>0){s.endPts=[];for(var i=0;i<s.noc;i++)s.endPts.push(a.readUshort(n,o)),o+=2;var h=a.readUshort(n,o);if(o+=2,n.length-o<h)return null;s.instructions=a.readBytes(n,o,h),o+=h;var f=s.endPts[s.noc-1]+1;s.flags=[];for(i=0;i<f;i++){var d=n[o];if(o++,s.flags.push(d),0!=(8&d)){var u=n[o];o++;for(var l=0;l<u;l++)s.flags.push(d),i++;}}s.xs=[];for(i=0;i<f;i++){var v=0!=(2&s.flags[i]),c=0!=(16&s.flags[i]);v?(s.xs.push(c?n[o]:-n[o]),o++):c?s.xs.push(0):(s.xs.push(a.readShort(n,o)),o+=2);}s.ys=[];for(i=0;i<f;i++){v=0!=(4&s.flags[i]),c=0!=(32&s.flags[i]);v?(s.ys.push(c?n[o]:-n[o]),o++):c?s.ys.push(0):(s.ys.push(a.readShort(n,o)),o+=2);}var p=0,U=0;for(i=0;i<f;i++)p+=s.xs[i],U+=s.ys[i],s.xs[i]=p,s.ys[i]=U;}else {var g;s.parts=[];do{g=a.readUshort(n,o),o+=2;var S={m:{a:1,b:0,c:0,d:1,tx:0,ty:0},p1:-1,p2:-1};if(s.parts.push(S),S.glyphIndex=a.readUshort(n,o),o+=2,1&g){var m=a.readShort(n,o);o+=2;var b=a.readShort(n,o);o+=2;}else {m=a.readInt8(n,o);o++;b=a.readInt8(n,o);o++;}2&g?(S.m.tx=m,S.m.ty=b):(S.p1=m,S.p2=b),8&g?(S.m.a=S.m.d=a.readF2dot14(n,o),o+=2):64&g?(S.m.a=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2):128&g&&(S.m.a=a.readF2dot14(n,o),o+=2,S.m.b=a.readF2dot14(n,o),o+=2,S.m.c=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2);}while(32&g);if(256&g){var y=a.readUshort(n,o);o+=2,s.instr=[];for(i=0;i<y;i++)s.instr.push(n[o]),o++;}}return s},e.GPOS={},e.GPOS.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GPOS.subt)},e.GPOS.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1==t||2==t||3==t||7==t||8==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,h+s);}if(1==t&&1==i.fmt){var f=o.readUshort(r,a);a+=2;var d=e._lctf.numOfOnes(f);0!=f&&(i.pos=e.GPOS.readValueRecord(r,a,f));}else if(2==t&&i.fmt>=1&&i.fmt<=2){f=o.readUshort(r,a);a+=2;var u=o.readUshort(r,a);a+=2;d=e._lctf.numOfOnes(f);var l=e._lctf.numOfOnes(u);if(1==i.fmt){i.pairsets=[];var v=o.readUshort(r,a);a+=2;for(var c=0;c<v;c++){var p=s+o.readUshort(r,a);a+=2;var U=o.readUshort(r,p);p+=2;for(var g=[],S=0;S<U;S++){var m=o.readUshort(r,p);p+=2,0!=f&&(x=e.GPOS.readValueRecord(r,p,f),p+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,p,u),p+=2*l),g.push({gid2:m,val1:x,val2:P});}i.pairsets.push(g);}}if(2==i.fmt){var b=o.readUshort(r,a);a+=2;var y=o.readUshort(r,a);a+=2;var F=o.readUshort(r,a);a+=2;var _=o.readUshort(r,a);a+=2,i.classDef1=e._lctf.readClassDef(r,s+b),i.classDef2=e._lctf.readClassDef(r,s+y),i.matrix=[];for(c=0;c<F;c++){var C=[];for(S=0;S<_;S++){var x=null,P=null;0!=f&&(x=e.GPOS.readValueRecord(r,a,f),a+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,a,u),a+=2*l),C.push({val1:x,val2:P});}i.matrix.push(C);}}}else {if(9==t&&1==i.fmt){var I=o.readUshort(r,a);a+=2;var w=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=I;else if(n.ltype!=I)throw "invalid extension substitution";return e.GPOS.subt(r,n.ltype,s+w)}console.debug("unsupported GPOS table LookupType",t,"format",i.fmt);}return i},e.GPOS.readValueRecord=function(r,t,a){var n=e._bin,o=[];return o.push(1&a?n.readShort(r,t):0),t+=1&a?2:0,o.push(2&a?n.readShort(r,t):0),t+=2&a?2:0,o.push(4&a?n.readShort(r,t):0),t+=4&a?2:0,o.push(8&a?n.readShort(r,t):0),t+=8&a?2:0,o},e.GSUB={},e.GSUB.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GSUB.subt)},e.GSUB.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1!=t&&4!=t&&5!=t&&6!=t)return null;if(1==t||4==t||5==t&&i.fmt<=2||6==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,s+h);}if(1==t&&i.fmt>=1&&i.fmt<=2){if(1==i.fmt)i.delta=o.readShort(r,a),a+=2;else if(2==i.fmt){var f=o.readUshort(r,a);a+=2,i.newg=o.readUshorts(r,a,f),a+=2*i.newg.length;}}else if(4==t){i.vals=[];f=o.readUshort(r,a);a+=2;for(var d=0;d<f;d++){var u=o.readUshort(r,a);a+=2,i.vals.push(e.GSUB.readLigatureSet(r,s+u));}}else if(5==t&&2==i.fmt){if(2==i.fmt){var l=o.readUshort(r,a);a+=2,i.cDef=e._lctf.readClassDef(r,s+l),i.scset=[];var v=o.readUshort(r,a);a+=2;for(d=0;d<v;d++){var c=o.readUshort(r,a);a+=2,i.scset.push(0==c?null:e.GSUB.readSubClassSet(r,s+c));}}}else if(6==t&&3==i.fmt){if(3==i.fmt){for(d=0;d<3;d++){f=o.readUshort(r,a);a+=2;for(var p=[],U=0;U<f;U++)p.push(e._lctf.readCoverage(r,s+o.readUshort(r,a+2*U)));a+=2*f,0==d&&(i.backCvg=p),1==d&&(i.inptCvg=p),2==d&&(i.ahedCvg=p);}f=o.readUshort(r,a);a+=2,i.lookupRec=e.GSUB.readSubstLookupRecords(r,a,f);}}else {if(7==t&&1==i.fmt){var g=o.readUshort(r,a);a+=2;var S=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=g;else if(n.ltype!=g)throw "invalid extension substitution";return e.GSUB.subt(r,n.ltype,s+S)}console.debug("unsupported GSUB table LookupType",t,"format",i.fmt);}return i},e.GSUB.readSubClassSet=function(r,t){var a=e._bin.readUshort,n=t,o=[],s=a(r,t);t+=2;for(var i=0;i<s;i++){var h=a(r,t);t+=2,o.push(e.GSUB.readSubClassRule(r,n+h));}return o},e.GSUB.readSubClassRule=function(r,t){var a=e._bin.readUshort,n={},o=a(r,t),s=a(r,t+=2);t+=2,n.input=[];for(var i=0;i<o-1;i++)n.input.push(a(r,t)),t+=2;return n.substLookupRecords=e.GSUB.readSubstLookupRecords(r,t,s),n},e.GSUB.readSubstLookupRecords=function(r,t,a){for(var n=e._bin.readUshort,o=[],s=0;s<a;s++)o.push(n(r,t),n(r,t+2)),t+=4;return o},e.GSUB.readChainSubClassSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readChainSubClassRule(r,n+h));}return o},e.GSUB.readChainSubClassRule=function(r,t){for(var a=e._bin,n={},o=["backtrack","input","lookahead"],s=0;s<o.length;s++){var i=a.readUshort(r,t);t+=2,1==s&&i--,n[o[s]]=a.readUshorts(r,t,i),t+=2*n[o[s]].length;}i=a.readUshort(r,t);return t+=2,n.subst=a.readUshorts(r,t,2*i),t+=2*n.subst.length,n},e.GSUB.readLigatureSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readLigature(r,n+h));}return o},e.GSUB.readLigature=function(r,t){var a=e._bin,n={chain:[]};n.nglyph=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2;for(var s=0;s<o-1;s++)n.chain.push(a.readUshort(r,t)),t+=2;return n},e.head={},e.head.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.fontRevision=n.readFixed(r,t),t+=4,n.readUint(r,t),t+=4,n.readUint(r,t),t+=4,o.flags=n.readUshort(r,t),t+=2,o.unitsPerEm=n.readUshort(r,t),t+=2,o.created=n.readUint64(r,t),t+=8,o.modified=n.readUint64(r,t),t+=8,o.xMin=n.readShort(r,t),t+=2,o.yMin=n.readShort(r,t),t+=2,o.xMax=n.readShort(r,t),t+=2,o.yMax=n.readShort(r,t),t+=2,o.macStyle=n.readUshort(r,t),t+=2,o.lowestRecPPEM=n.readUshort(r,t),t+=2,o.fontDirectionHint=n.readShort(r,t),t+=2,o.indexToLocFormat=n.readShort(r,t),t+=2,o.glyphDataFormat=n.readShort(r,t),t+=2,o},e.hhea={},e.hhea.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.ascender=n.readShort(r,t),t+=2,o.descender=n.readShort(r,t),t+=2,o.lineGap=n.readShort(r,t),t+=2,o.advanceWidthMax=n.readUshort(r,t),t+=2,o.minLeftSideBearing=n.readShort(r,t),t+=2,o.minRightSideBearing=n.readShort(r,t),t+=2,o.xMaxExtent=n.readShort(r,t),t+=2,o.caretSlopeRise=n.readShort(r,t),t+=2,o.caretSlopeRun=n.readShort(r,t),t+=2,o.caretOffset=n.readShort(r,t),t+=2,t+=8,o.metricDataFormat=n.readShort(r,t),t+=2,o.numberOfHMetrics=n.readUshort(r,t),t+=2,o},e.hmtx={},e.hmtx.parse=function(r,t,a,n){for(var o=e._bin,s={aWidth:[],lsBearing:[]},i=0,h=0,f=0;f<n.maxp.numGlyphs;f++)f<n.hhea.numberOfHMetrics&&(i=o.readUshort(r,t),t+=2,h=o.readShort(r,t),t+=2),s.aWidth.push(i),s.lsBearing.push(h);return s},e.kern={},e.kern.parse=function(r,t,a,n){var o=e._bin,s=o.readUshort(r,t);if(t+=2,1==s)return e.kern.parseV1(r,t-2,a,n);var i=o.readUshort(r,t);t+=2;for(var h={glyph1:[],rval:[]},f=0;f<i;f++){t+=2;a=o.readUshort(r,t);t+=2;var d=o.readUshort(r,t);t+=2;var u=d>>>8;if(0!=(u&=15))throw "unknown kern table format: "+u;t=e.kern.readFormat0(r,t,h);}return h},e.kern.parseV1=function(r,t,a,n){var o=e._bin;o.readFixed(r,t),t+=4;var s=o.readUint(r,t);t+=4;for(var i={glyph1:[],rval:[]},h=0;h<s;h++){o.readUint(r,t),t+=4;var f=o.readUshort(r,t);t+=2,o.readUshort(r,t),t+=2;var d=f>>>8;if(0!=(d&=15))throw "unknown kern table format: "+d;t=e.kern.readFormat0(r,t,i);}return i},e.kern.readFormat0=function(r,t,a){var n=e._bin,o=-1,s=n.readUshort(r,t);t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2;for(var i=0;i<s;i++){var h=n.readUshort(r,t);t+=2;var f=n.readUshort(r,t);t+=2;var d=n.readShort(r,t);t+=2,h!=o&&(a.glyph1.push(h),a.rval.push({glyph2:[],vals:[]}));var u=a.rval[a.rval.length-1];u.glyph2.push(f),u.vals.push(d),o=h;}return t},e.loca={},e.loca.parse=function(r,t,a,n){var o=e._bin,s=[],i=n.head.indexToLocFormat,h=n.maxp.numGlyphs+1;if(0==i)for(var f=0;f<h;f++)s.push(o.readUshort(r,t+(f<<1))<<1);if(1==i)for(f=0;f<h;f++)s.push(o.readUint(r,t+(f<<2)));return s},e.maxp={},e.maxp.parse=function(r,t,a){var n=e._bin,o={},s=n.readUint(r,t);return t+=4,o.numGlyphs=n.readUshort(r,t),t+=2,65536==s&&(o.maxPoints=n.readUshort(r,t),t+=2,o.maxContours=n.readUshort(r,t),t+=2,o.maxCompositePoints=n.readUshort(r,t),t+=2,o.maxCompositeContours=n.readUshort(r,t),t+=2,o.maxZones=n.readUshort(r,t),t+=2,o.maxTwilightPoints=n.readUshort(r,t),t+=2,o.maxStorage=n.readUshort(r,t),t+=2,o.maxFunctionDefs=n.readUshort(r,t),t+=2,o.maxInstructionDefs=n.readUshort(r,t),t+=2,o.maxStackElements=n.readUshort(r,t),t+=2,o.maxSizeOfInstructions=n.readUshort(r,t),t+=2,o.maxComponentElements=n.readUshort(r,t),t+=2,o.maxComponentDepth=n.readUshort(r,t),t+=2),o},e.name={},e.name.parse=function(r,t,a){var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2,n.readUshort(r,t);for(var i,h=["copyright","fontFamily","fontSubfamily","ID","fullName","version","postScriptName","trademark","manufacturer","designer","description","urlVendor","urlDesigner","licence","licenceURL","---","typoFamilyName","typoSubfamilyName","compatibleFull","sampleText","postScriptCID","wwsFamilyName","wwsSubfamilyName","lightPalette","darkPalette"],f=t+=2,d=0;d<s;d++){var u=n.readUshort(r,t);t+=2;var l=n.readUshort(r,t);t+=2;var v=n.readUshort(r,t);t+=2;var c=n.readUshort(r,t);t+=2;var p=n.readUshort(r,t);t+=2;var U=n.readUshort(r,t);t+=2;var g,S=h[c],m=f+12*s+U;if(0==u)g=n.readUnicode(r,m,p/2);else if(3==u&&0==l)g=n.readUnicode(r,m,p/2);else if(0==l)g=n.readASCII(r,m,p);else if(1==l)g=n.readUnicode(r,m,p/2);else if(3==l)g=n.readUnicode(r,m,p/2);else {if(1!=u)throw "unknown encoding "+l+", platformID: "+u;g=n.readASCII(r,m,p),console.debug("reading unknown MAC encoding "+l+" as ASCII");}var b="p"+u+","+v.toString(16);null==o[b]&&(o[b]={}),o[b][void 0!==S?S:c]=g,o[b]._lang=v;}for(var y in o)if(null!=o[y].postScriptName&&1033==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&0==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&3084==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName)return o[y];for(var y in o){i=y;break}return console.debug("returning name table with languageID "+o[i]._lang),o[i]},e["OS/2"]={},e["OS/2"].parse=function(r,t,a){var n=e._bin.readUshort(r,t);t+=2;var o={};if(0==n)e["OS/2"].version0(r,t,o);else if(1==n)e["OS/2"].version1(r,t,o);else if(2==n||3==n||4==n)e["OS/2"].version2(r,t,o);else {if(5!=n)throw "unknown OS/2 table version: "+n;e["OS/2"].version5(r,t,o);}return o},e["OS/2"].version0=function(r,t,a){var n=e._bin;return a.xAvgCharWidth=n.readShort(r,t),t+=2,a.usWeightClass=n.readUshort(r,t),t+=2,a.usWidthClass=n.readUshort(r,t),t+=2,a.fsType=n.readUshort(r,t),t+=2,a.ySubscriptXSize=n.readShort(r,t),t+=2,a.ySubscriptYSize=n.readShort(r,t),t+=2,a.ySubscriptXOffset=n.readShort(r,t),t+=2,a.ySubscriptYOffset=n.readShort(r,t),t+=2,a.ySuperscriptXSize=n.readShort(r,t),t+=2,a.ySuperscriptYSize=n.readShort(r,t),t+=2,a.ySuperscriptXOffset=n.readShort(r,t),t+=2,a.ySuperscriptYOffset=n.readShort(r,t),t+=2,a.yStrikeoutSize=n.readShort(r,t),t+=2,a.yStrikeoutPosition=n.readShort(r,t),t+=2,a.sFamilyClass=n.readShort(r,t),t+=2,a.panose=n.readBytes(r,t,10),t+=10,a.ulUnicodeRange1=n.readUint(r,t),t+=4,a.ulUnicodeRange2=n.readUint(r,t),t+=4,a.ulUnicodeRange3=n.readUint(r,t),t+=4,a.ulUnicodeRange4=n.readUint(r,t),t+=4,a.achVendID=[n.readInt8(r,t),n.readInt8(r,t+1),n.readInt8(r,t+2),n.readInt8(r,t+3)],t+=4,a.fsSelection=n.readUshort(r,t),t+=2,a.usFirstCharIndex=n.readUshort(r,t),t+=2,a.usLastCharIndex=n.readUshort(r,t),t+=2,a.sTypoAscender=n.readShort(r,t),t+=2,a.sTypoDescender=n.readShort(r,t),t+=2,a.sTypoLineGap=n.readShort(r,t),t+=2,a.usWinAscent=n.readUshort(r,t),t+=2,a.usWinDescent=n.readUshort(r,t),t+=2},e["OS/2"].version1=function(r,t,a){var n=e._bin;return t=e["OS/2"].version0(r,t,a),a.ulCodePageRange1=n.readUint(r,t),t+=4,a.ulCodePageRange2=n.readUint(r,t),t+=4},e["OS/2"].version2=function(r,t,a){var n=e._bin;return t=e["OS/2"].version1(r,t,a),a.sxHeight=n.readShort(r,t),t+=2,a.sCapHeight=n.readShort(r,t),t+=2,a.usDefault=n.readUshort(r,t),t+=2,a.usBreak=n.readUshort(r,t),t+=2,a.usMaxContext=n.readUshort(r,t),t+=2},e["OS/2"].version5=function(r,t,a){var n=e._bin;return t=e["OS/2"].version2(r,t,a),a.usLowerOpticalPointSize=n.readUshort(r,t),t+=2,a.usUpperOpticalPointSize=n.readUshort(r,t),t+=2},e.post={},e.post.parse=function(r,t,a){var n=e._bin,o={};return o.version=n.readFixed(r,t),t+=4,o.italicAngle=n.readFixed(r,t),t+=4,o.underlinePosition=n.readShort(r,t),t+=2,o.underlineThickness=n.readShort(r,t),t+=2,o},null==e&&(e={}),null==e.U&&(e.U={}),e.U.codeToGlyph=function(r,e){var t=r.cmap,a=-1;if(null!=t.p0e4?a=t.p0e4:null!=t.p3e1?a=t.p3e1:null!=t.p1e0?a=t.p1e0:null!=t.p0e3&&(a=t.p0e3),-1==a)throw "no familiar platform and encoding!";var n=t.tables[a];if(0==n.format)return e>=n.map.length?0:n.map[e];if(4==n.format){for(var o=-1,s=0;s<n.endCount.length;s++)if(e<=n.endCount[s]){o=s;break}if(-1==o)return 0;if(n.startCount[o]>e)return 0;return 65535&(0!=n.idRangeOffset[o]?n.glyphIdArray[e-n.startCount[o]+(n.idRangeOffset[o]>>1)-(n.idRangeOffset.length-o)]:e+n.idDelta[o])}if(12==n.format){if(e>n.groups[n.groups.length-1][1])return 0;for(s=0;s<n.groups.length;s++){var i=n.groups[s];if(i[0]<=e&&e<=i[1])return i[2]+(e-i[0])}return 0}throw "unknown cmap table format "+n.format},e.U.glyphToPath=function(r,t){var a={cmds:[],crds:[]};if(r.SVG&&r.SVG.entries[t]){var n=r.SVG.entries[t];return null==n?a:("string"==typeof n&&(n=e.SVG.toPath(n),r.SVG.entries[t]=n),n)}if(r.CFF){var o={x:0,y:0,stack:[],nStems:0,haveWidth:!1,width:r.CFF.Private?r.CFF.Private.defaultWidthX:0,open:!1},s=r.CFF,i=r.CFF.Private;if(s.ROS){for(var h=0;s.FDSelect[h+2]<=t;)h+=2;i=s.FDArray[s.FDSelect[h+1]].Private;}e.U._drawCFF(r.CFF.CharStrings[t],o,s,i,a);}else r.glyf&&e.U._drawGlyf(t,r,a);return a},e.U._drawGlyf=function(r,t,a){var n=t.glyf[r];null==n&&(n=t.glyf[r]=e.glyf._parseGlyf(t,r)),null!=n&&(n.noc>-1?e.U._simpleGlyph(n,a):e.U._compoGlyph(n,t,a));},e.U._simpleGlyph=function(r,t){for(var a=0;a<r.noc;a++){for(var n=0==a?0:r.endPts[a-1]+1,o=r.endPts[a],s=n;s<=o;s++){var i=s==n?o:s-1,h=s==o?n:s+1,f=1&r.flags[s],d=1&r.flags[i],u=1&r.flags[h],l=r.xs[s],v=r.ys[s];if(s==n)if(f){if(!d){e.U.P.moveTo(t,l,v);continue}e.U.P.moveTo(t,r.xs[i],r.ys[i]);}else d?e.U.P.moveTo(t,r.xs[i],r.ys[i]):e.U.P.moveTo(t,(r.xs[i]+l)/2,(r.ys[i]+v)/2);f?d&&e.U.P.lineTo(t,l,v):u?e.U.P.qcurveTo(t,l,v,r.xs[h],r.ys[h]):e.U.P.qcurveTo(t,l,v,(l+r.xs[h])/2,(v+r.ys[h])/2);}e.U.P.closePath(t);}},e.U._compoGlyph=function(r,t,a){for(var n=0;n<r.parts.length;n++){var o={cmds:[],crds:[]},s=r.parts[n];e.U._drawGlyf(s.glyphIndex,t,o);for(var i=s.m,h=0;h<o.crds.length;h+=2){var f=o.crds[h],d=o.crds[h+1];a.crds.push(f*i.a+d*i.b+i.tx),a.crds.push(f*i.c+d*i.d+i.ty);}for(h=0;h<o.cmds.length;h++)a.cmds.push(o.cmds[h]);}},e.U._getGlyphClass=function(r,t){var a=e._lctf.getInterval(t,r);return -1==a?0:t[a+2]},e.U.getPairAdjustment=function(r,t,a){var n=0;if(r.GPOS)for(var o=r.GPOS,s=o.lookupList,i=o.featureList,h=[],f=0;f<i.length;f++){var d=i[f];if("kern"==d.tag)for(var u=0;u<d.tab.length;u++)if(!h[d.tab[u]]){h[d.tab[u]]=!0;for(var l=s[d.tab[u]],v=0;v<l.tabs.length;v++)if(null!=l.tabs[v]){var c,p=l.tabs[v];if(!p.coverage||-1!=(c=e._lctf.coverageIndex(p.coverage,t)))if(1==l.ltype);else if(2==l.ltype){var U;if(1==p.fmt){var g=p.pairsets[c];for(f=0;f<g.length;f++)g[f].gid2==a&&(U=g[f]);}else if(2==p.fmt){var S=e.U._getGlyphClass(t,p.classDef1),m=e.U._getGlyphClass(a,p.classDef2);U=p.matrix[S][m];}U&&U.val1&&U.val1[2]&&(n+=U.val1[2]),U&&U.val2&&U.val2[0]&&(n+=U.val2[0]);}}}}if(r.kern){var b=r.kern.glyph1.indexOf(t);if(-1!=b){var y=r.kern.rval[b].glyph2.indexOf(a);-1!=y&&(n+=r.kern.rval[b].vals[y]);}}return n},e.U._applySubs=function(r,t,a,n){for(var o=r.length-t-1,s=0;s<a.tabs.length;s++)if(null!=a.tabs[s]){var i,h=a.tabs[s];if(!h.coverage||-1!=(i=e._lctf.coverageIndex(h.coverage,r[t])))if(1==a.ltype)r[t],1==h.fmt?r[t]=r[t]+h.delta:r[t]=h.newg[i];else if(4==a.ltype)for(var f=h.vals[i],d=0;d<f.length;d++){var u=f[d],l=u.chain.length;if(!(l>o)){for(var v=!0,c=0,p=0;p<l;p++){for(;-1==r[t+c+(1+p)];)c++;u.chain[p]!=r[t+c+(1+p)]&&(v=!1);}if(v){r[t]=u.nglyph;for(p=0;p<l+c;p++)r[t+p+1]=-1;break}}}else if(5==a.ltype&&2==h.fmt)for(var U=e._lctf.getInterval(h.cDef,r[t]),g=h.cDef[U+2],S=h.scset[g],m=0;m<S.length;m++){var b=S[m],y=b.input;if(!(y.length>o)){for(v=!0,p=0;p<y.length;p++){var F=e._lctf.getInterval(h.cDef,r[t+1+p]);if(-1==U&&h.cDef[F+2]!=y[p]){v=!1;break}}if(v){var _=b.substLookupRecords;for(d=0;d<_.length;d+=2)_[d],_[d+1];}}}else if(6==a.ltype&&3==h.fmt){if(!e.U._glsCovered(r,h.backCvg,t-h.backCvg.length))continue;if(!e.U._glsCovered(r,h.inptCvg,t))continue;if(!e.U._glsCovered(r,h.ahedCvg,t+h.inptCvg.length))continue;var C=h.lookupRec;for(m=0;m<C.length;m+=2){U=C[m];var x=n[C[m+1]];e.U._applySubs(r,t+U,x,n);}}}},e.U._glsCovered=function(r,t,a){for(var n=0;n<t.length;n++){if(-1==e._lctf.coverageIndex(t[n],r[a+n]))return !1}return !0},e.U.glyphsToPath=function(r,t,a){for(var n={cmds:[],crds:[]},o=0,s=0;s<t.length;s++){var i=t[s];if(-1!=i){for(var h=s<t.length-1&&-1!=t[s+1]?t[s+1]:0,f=e.U.glyphToPath(r,i),d=0;d<f.crds.length;d+=2)n.crds.push(f.crds[d]+o),n.crds.push(f.crds[d+1]);a&&n.cmds.push(a);for(d=0;d<f.cmds.length;d++)n.cmds.push(f.cmds[d]);a&&n.cmds.push("X"),o+=r.hmtx.aWidth[i],s<t.length-1&&(o+=e.U.getPairAdjustment(r,i,h));}}return n},e.U.P={},e.U.P.moveTo=function(r,e,t){r.cmds.push("M"),r.crds.push(e,t);},e.U.P.lineTo=function(r,e,t){r.cmds.push("L"),r.crds.push(e,t);},e.U.P.curveTo=function(r,e,t,a,n,o,s){r.cmds.push("C"),r.crds.push(e,t,a,n,o,s);},e.U.P.qcurveTo=function(r,e,t,a,n){r.cmds.push("Q"),r.crds.push(e,t,a,n);},e.U.P.closePath=function(r){r.cmds.push("Z");},e.U._drawCFF=function(r,t,a,n,o){for(var s=t.stack,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open,u=0,l=t.x,v=t.y,c=0,p=0,U=0,g=0,S=0,m=0,b=0,y=0,F=0,_=0,C={val:0,size:0};u<r.length;){e.CFF.getCharString(r,u,C);var x=C.val;if(u+=C.size,"o1"==x||"o18"==x)s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;else if("o3"==x||"o23"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;}else if("o4"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),d&&e.U.P.closePath(o),v+=s.pop(),e.U.P.moveTo(o,l,v),d=!0;else if("o5"==x)for(;s.length>0;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);else if("o6"==x||"o7"==x)for(var P=s.length,I="o6"==x,w=0;w<P;w++){var O=s.shift();I?l+=O:v+=O,I=!I,e.U.P.lineTo(o,l,v);}else if("o8"==x||"o24"==x){P=s.length;for(var T=0;T+6<=P;)c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v),T+=6;"o24"==x&&(l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v));}else {if("o11"==x)break;if("o1234"==x||"o1235"==x||"o1236"==x||"o1237"==x)"o1234"==x&&(p=v,U=(c=l+s.shift())+s.shift(),_=g=p+s.shift(),m=g,y=v,l=(b=(S=(F=U+s.shift())+s.shift())+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1235"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),l=b+s.shift(),v=y+s.shift(),s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1236"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),_=g=p+s.shift(),m=g,b=(S=(F=U+s.shift())+s.shift())+s.shift(),y=m+s.shift(),l=b+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1237"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),Math.abs(b-l)>Math.abs(y-v)?l=b+s.shift():v=y+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v));else if("o14"==x){if(s.length>0&&!h&&(f=s.shift()+a.nominalWidthX,h=!0),4==s.length){var k=s.shift(),G=s.shift(),D=s.shift(),B=s.shift(),A=e.CFF.glyphBySE(a,D),R=e.CFF.glyphBySE(a,B);e.U._drawCFF(a.CharStrings[A],t,a,n,o),t.x=k,t.y=G,e.U._drawCFF(a.CharStrings[R],t,a,n,o);}d&&(e.U.P.closePath(o),d=!1);}else if("o19"==x||"o20"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0,u+=i+7>>3;}else if("o21"==x)s.length>2&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),v+=s.pop(),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o22"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o25"==x){for(;s.length>6;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);}else if("o26"==x)for(s.length%2&&(l+=s.shift());s.length>0;)c=l,p=v+s.shift(),l=U=c+s.shift(),v=(g=p+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);else if("o27"==x)for(s.length%2&&(v+=s.shift());s.length>0;)p=v,U=(c=l+s.shift())+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g,e.U.P.curveTo(o,c,p,U,g,l,v);else if("o10"==x||"o29"==x){var L="o10"==x?n:a;if(0==s.length)console.debug("error: empty stack");else {var W=s.pop(),M=L.Subrs[W+L.Bias];t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d,e.U._drawCFF(M,t,a,n,o),l=t.x,v=t.y,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open;}}else if("o30"==x||"o31"==x){var N=s.length,V=(T=0,"o31"==x);for(T+=N-(P=-3&N);T<P;)V?(p=v,U=(c=l+s.shift())+s.shift(),v=(g=p+s.shift())+s.shift(),P-T==5?(l=U+s.shift(),T++):l=U,V=!1):(c=l,p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),P-T==5?(v=g+s.shift(),T++):v=g,V=!0),e.U.P.curveTo(o,c,p,U,g,l,v),T+=4;}else {if("o"==(x+"").charAt(0))throw console.debug("Unknown operation: "+x,r),x;s.push(x);}}}t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d;};var t=e,a={Typr:t};return r.Typr=t,r.default=a,Object.defineProperty(r,"__esModule",{value:!0}),r}({}).Typr}
+  function typrFactory(){return "undefined"==typeof window&&(self.window=self),function(r){var e={parse:function(r){var t=e._bin,a=new Uint8Array(r);if("ttcf"==t.readASCII(a,0,4)){var n=4;t.readUshort(a,n),n+=2,t.readUshort(a,n),n+=2;var o=t.readUint(a,n);n+=4;for(var s=[],i=0;i<o;i++){var h=t.readUint(a,n);n+=4,s.push(e._readFont(a,h));}return s}return [e._readFont(a,0)]},_readFont:function(r,t){var a=e._bin,n=t;a.readFixed(r,t),t+=4;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2;for(var s=["cmap","head","hhea","maxp","hmtx","name","OS/2","post","loca","glyf","kern","CFF ","GPOS","GSUB","SVG "],i={_data:r,_offset:n},h={},f=0;f<o;f++){var d=a.readASCII(r,t,4);t+=4,a.readUint(r,t),t+=4;var l=a.readUint(r,t);t+=4;var u=a.readUint(r,t);t+=4,h[d]={offset:l,length:u};}for(f=0;f<s.length;f++){var v=s[f];h[v]&&(i[v.trim()]=e[v.trim()].parse(r,h[v].offset,h[v].length,i));}return i},_tabOffset:function(r,t,a){for(var n=e._bin,o=n.readUshort(r,a+4),s=a+12,i=0;i<o;i++){var h=n.readASCII(r,s,4);s+=4,n.readUint(r,s),s+=4;var f=n.readUint(r,s);if(s+=4,n.readUint(r,s),s+=4,h==t)return f}return 0}};e._bin={readFixed:function(r,e){return (r[e]<<8|r[e+1])+(r[e+2]<<8|r[e+3])/65540},readF2dot14:function(r,t){return e._bin.readShort(r,t)/16384},readInt:function(r,t){return e._bin._view(r).getInt32(t)},readInt8:function(r,t){return e._bin._view(r).getInt8(t)},readShort:function(r,t){return e._bin._view(r).getInt16(t)},readUshort:function(r,t){return e._bin._view(r).getUint16(t)},readUshorts:function(r,t,a){for(var n=[],o=0;o<a;o++)n.push(e._bin.readUshort(r,t+2*o));return n},readUint:function(r,t){return e._bin._view(r).getUint32(t)},readUint64:function(r,t){return 4294967296*e._bin.readUint(r,t)+e._bin.readUint(r,t+4)},readASCII:function(r,e,t){for(var a="",n=0;n<t;n++)a+=String.fromCharCode(r[e+n]);return a},readUnicode:function(r,e,t){for(var a="",n=0;n<t;n++){var o=r[e++]<<8|r[e++];a+=String.fromCharCode(o);}return a},_tdec:"undefined"!=typeof window&&window.TextDecoder?new window.TextDecoder:null,readUTF8:function(r,t,a){var n=e._bin._tdec;return n&&0==t&&a==r.length?n.decode(r):e._bin.readASCII(r,t,a)},readBytes:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(r[e+n]);return a},readASCIIArray:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(String.fromCharCode(r[e+n]));return a},_view:function(r){return r._dataView||(r._dataView=r.buffer?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(new Uint8Array(r).buffer))}},e._lctf={},e._lctf.parse=function(r,t,a,n,o){var s=e._bin,i={},h=t;s.readFixed(r,t),t+=4;var f=s.readUshort(r,t);t+=2;var d=s.readUshort(r,t);t+=2;var l=s.readUshort(r,t);return t+=2,i.scriptList=e._lctf.readScriptList(r,h+f),i.featureList=e._lctf.readFeatureList(r,h+d),i.lookupList=e._lctf.readLookupList(r,h+l,o),i},e._lctf.readLookupList=function(r,t,a){var n=e._bin,o=t,s=[],i=n.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=n.readUshort(r,t);t+=2;var d=e._lctf.readLookupTable(r,o+f,a);s.push(d);}return s},e._lctf.readLookupTable=function(r,t,a){var n=e._bin,o=t,s={tabs:[]};s.ltype=n.readUshort(r,t),t+=2,s.flag=n.readUshort(r,t),t+=2;var i=n.readUshort(r,t);t+=2;for(var h=s.ltype,f=0;f<i;f++){var d=n.readUshort(r,t);t+=2;var l=a(r,h,o+d,s);s.tabs.push(l);}return s},e._lctf.numOfOnes=function(r){for(var e=0,t=0;t<32;t++)0!=(r>>>t&1)&&e++;return e},e._lctf.readClassDef=function(r,t){var a=e._bin,n=[],o=a.readUshort(r,t);if(t+=2,1==o){var s=a.readUshort(r,t);t+=2;var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++)n.push(s+h),n.push(s+h),n.push(a.readUshort(r,t)),t+=2;}if(2==o){var f=a.readUshort(r,t);t+=2;for(h=0;h<f;h++)n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2;}return n},e._lctf.getInterval=function(r,e){for(var t=0;t<r.length;t+=3){var a=r[t],n=r[t+1];if(r[t+2],a<=e&&e<=n)return t}return -1},e._lctf.readCoverage=function(r,t){var a=e._bin,n={};n.fmt=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,1==n.fmt&&(n.tab=a.readUshorts(r,t,o)),2==n.fmt&&(n.tab=a.readUshorts(r,t,3*o)),n},e._lctf.coverageIndex=function(r,t){var a=r.tab;if(1==r.fmt)return a.indexOf(t);if(2==r.fmt){var n=e._lctf.getInterval(a,t);if(-1!=n)return a[n+2]+(t-a[n])}return -1},e._lctf.readFeatureList=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2;var d=e._lctf.readFeatureTable(r,n+f);d.tag=h.trim(),o.push(d);}return o},e._lctf.readFeatureTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,s>0&&(o.featureParams=n+s);var i=a.readUshort(r,t);t+=2,o.tab=[];for(var h=0;h<i;h++)o.tab.push(a.readUshort(r,t+2*h));return o},e._lctf.readScriptList=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2,o[h.trim()]=e._lctf.readScriptTable(r,n+f);}return o},e._lctf.readScriptTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,o.default=e._lctf.readLangSysTable(r,n+s);var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=a.readASCII(r,t,4);t+=4;var d=a.readUshort(r,t);t+=2,o[f.trim()]=e._lctf.readLangSysTable(r,n+d);}return o},e._lctf.readLangSysTable=function(r,t){var a=e._bin,n={};a.readUshort(r,t),t+=2,n.reqFeature=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,n.features=a.readUshorts(r,t,o),n},e.CFF={},e.CFF.parse=function(r,t,a){var n=e._bin;(r=new Uint8Array(r.buffer,t,a))[t=0],r[++t],r[++t],r[++t],t++;var o=[];t=e.CFF.readIndex(r,t,o);for(var s=[],i=0;i<o.length-1;i++)s.push(n.readASCII(r,t+o[i],o[i+1]-o[i]));t+=o[o.length-1];var h=[];t=e.CFF.readIndex(r,t,h);var f=[];for(i=0;i<h.length-1;i++)f.push(e.CFF.readDict(r,t+h[i],t+h[i+1]));t+=h[h.length-1];var d=f[0],l=[];t=e.CFF.readIndex(r,t,l);var u=[];for(i=0;i<l.length-1;i++)u.push(n.readASCII(r,t+l[i],l[i+1]-l[i]));if(t+=l[l.length-1],e.CFF.readSubrs(r,t,d),d.CharStrings){t=d.CharStrings;l=[];t=e.CFF.readIndex(r,t,l);var v=[];for(i=0;i<l.length-1;i++)v.push(n.readBytes(r,t+l[i],l[i+1]-l[i]));d.CharStrings=v;}if(d.ROS){t=d.FDArray;var c=[];t=e.CFF.readIndex(r,t,c),d.FDArray=[];for(i=0;i<c.length-1;i++){var p=e.CFF.readDict(r,t+c[i],t+c[i+1]);e.CFF._readFDict(r,p,u),d.FDArray.push(p);}t+=c[c.length-1],t=d.FDSelect,d.FDSelect=[];var U=r[t];if(t++,3!=U)throw U;var g=n.readUshort(r,t);t+=2;for(i=0;i<g+1;i++)d.FDSelect.push(n.readUshort(r,t),r[t+2]),t+=3;}return d.Encoding&&(d.Encoding=e.CFF.readEncoding(r,d.Encoding,d.CharStrings.length)),d.charset&&(d.charset=e.CFF.readCharset(r,d.charset,d.CharStrings.length)),e.CFF._readFDict(r,d,u),d},e.CFF._readFDict=function(r,t,a){var n;for(var o in t.Private&&(n=t.Private[1],t.Private=e.CFF.readDict(r,n,n+t.Private[0]),t.Private.Subrs&&e.CFF.readSubrs(r,n+t.Private.Subrs,t.Private)),t)-1!=["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(o)&&(t[o]=a[t[o]-426+35]);},e.CFF.readSubrs=function(r,t,a){var n=e._bin,o=[];t=e.CFF.readIndex(r,t,o);var s,i=o.length;s=i<1240?107:i<33900?1131:32768,a.Bias=s,a.Subrs=[];for(var h=0;h<o.length-1;h++)a.Subrs.push(n.readBytes(r,t+o[h],o[h+1]-o[h]));},e.CFF.tableSE=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,0,111,112,113,114,0,115,116,117,118,119,120,121,122,0,123,0,124,125,126,127,128,129,130,131,0,132,133,0,134,135,136,137,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,138,0,139,0,0,0,0,140,141,142,143,0,0,0,0,0,144,0,0,0,145,0,0,146,147,148,149,0,0,0,0],e.CFF.glyphByUnicode=function(r,e){for(var t=0;t<r.charset.length;t++)if(r.charset[t]==e)return t;return -1},e.CFF.glyphBySE=function(r,t){return t<0||t>255?-1:e.CFF.glyphByUnicode(r,e.CFF.tableSE[t])},e.CFF.readEncoding=function(r,t,a){e._bin;var n=[".notdef"],o=r[t];if(t++,0!=o)throw "error: unknown encoding format: "+o;var s=r[t];t++;for(var i=0;i<s;i++)n.push(r[t+i]);return n},e.CFF.readCharset=function(r,t,a){var n=e._bin,o=[".notdef"],s=r[t];if(t++,0==s)for(var i=0;i<a;i++){var h=n.readUshort(r,t);t+=2,o.push(h);}else {if(1!=s&&2!=s)throw "error: format: "+s;for(;o.length<a;){h=n.readUshort(r,t);t+=2;var f=0;1==s?(f=r[t],t++):(f=n.readUshort(r,t),t+=2);for(i=0;i<=f;i++)o.push(h),h++;}}return o},e.CFF.readIndex=function(r,t,a){var n=e._bin,o=n.readUshort(r,t)+1,s=r[t+=2];if(t++,1==s)for(var i=0;i<o;i++)a.push(r[t+i]);else if(2==s)for(i=0;i<o;i++)a.push(n.readUshort(r,t+2*i));else if(3==s)for(i=0;i<o;i++)a.push(16777215&n.readUint(r,t+3*i-1));else if(1!=o)throw "unsupported offset size: "+s+", count: "+o;return (t+=o*s)-1},e.CFF.getCharString=function(r,t,a){var n=e._bin,o=r[t],s=r[t+1];r[t+2],r[t+3],r[t+4];var i=1,h=null,f=null;o<=20&&(h=o,i=1),12==o&&(h=100*o+s,i=2),21<=o&&o<=27&&(h=o,i=1),28==o&&(f=n.readShort(r,t+1),i=3),29<=o&&o<=31&&(h=o,i=1),32<=o&&o<=246&&(f=o-139,i=1),247<=o&&o<=250&&(f=256*(o-247)+s+108,i=2),251<=o&&o<=254&&(f=256*-(o-251)-s-108,i=2),255==o&&(f=n.readInt(r,t+1)/65535,i=5),a.val=null!=f?f:"o"+h,a.size=i;},e.CFF.readCharString=function(r,t,a){for(var n=t+a,o=e._bin,s=[];t<n;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,l=null;i<=20&&(d=i,f=1),12==i&&(d=100*i+h,f=2),19!=i&&20!=i||(d=i,f=2),21<=i&&i<=27&&(d=i,f=1),28==i&&(l=o.readShort(r,t+1),f=3),29<=i&&i<=31&&(d=i,f=1),32<=i&&i<=246&&(l=i-139,f=1),247<=i&&i<=250&&(l=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(l=256*-(i-251)-h-108,f=2),255==i&&(l=o.readInt(r,t+1)/65535,f=5),s.push(null!=l?l:"o"+d),t+=f;}return s},e.CFF.readDict=function(r,t,a){for(var n=e._bin,o={},s=[];t<a;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,l=null;if(28==i&&(l=n.readShort(r,t+1),f=3),29==i&&(l=n.readInt(r,t+1),f=5),32<=i&&i<=246&&(l=i-139,f=1),247<=i&&i<=250&&(l=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(l=256*-(i-251)-h-108,f=2),255==i)throw l=n.readInt(r,t+1)/65535,f=5,"unknown number";if(30==i){var u=[];for(f=1;;){var v=r[t+f];f++;var c=v>>4,p=15&v;if(15!=c&&u.push(c),15!=p&&u.push(p),15==p)break}for(var U="",g=[0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"],S=0;S<u.length;S++)U+=g[u[S]];l=parseFloat(U);}if(i<=21)if(d=["version","Notice","FullName","FamilyName","Weight","FontBBox","BlueValues","OtherBlues","FamilyBlues","FamilyOtherBlues","StdHW","StdVW","escape","UniqueID","XUID","charset","Encoding","CharStrings","Private","Subrs","defaultWidthX","nominalWidthX"][i],f=1,12==i)d=["Copyright","isFixedPitch","ItalicAngle","UnderlinePosition","UnderlineThickness","PaintType","CharstringType","FontMatrix","StrokeWidth","BlueScale","BlueShift","BlueFuzz","StemSnapH","StemSnapV","ForceBold",0,0,"LanguageGroup","ExpansionFactor","initialRandomSeed","SyntheticBase","PostScript","BaseFontName","BaseFontBlend",0,0,0,0,0,0,"ROS","CIDFontVersion","CIDFontRevision","CIDFontType","CIDCount","UIDBase","FDArray","FDSelect","FontName"][h],f=2;null!=d?(o[d]=1==s.length?s[0]:s,s=[]):s.push(l),t+=f;}return o},e.cmap={},e.cmap.parse=function(r,t,a){r=new Uint8Array(r.buffer,t,a),t=0;var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2;var i=[];o.tables=[];for(var h=0;h<s;h++){var f=n.readUshort(r,t);t+=2;var d=n.readUshort(r,t);t+=2;var l=n.readUint(r,t);t+=4;var u="p"+f+"e"+d,v=i.indexOf(l);if(-1==v){var c;v=o.tables.length,i.push(l);var p=n.readUshort(r,l);0==p?c=e.cmap.parse0(r,l):4==p?c=e.cmap.parse4(r,l):6==p?c=e.cmap.parse6(r,l):12==p?c=e.cmap.parse12(r,l):console.debug("unknown format: "+p,f,d,l),o.tables.push(c);}if(null!=o[u])throw "multiple tables for one platform+encoding";o[u]=v;}return o},e.cmap.parse0=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,n.map=[];for(var s=0;s<o-6;s++)n.map.push(r[t+s]);return n},e.cmap.parse4=function(r,t){var a=e._bin,n=t,o={};o.format=a.readUshort(r,t),t+=2;var s=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2;var i=a.readUshort(r,t);t+=2;var h=i/2;o.searchRange=a.readUshort(r,t),t+=2,o.entrySelector=a.readUshort(r,t),t+=2,o.rangeShift=a.readUshort(r,t),t+=2,o.endCount=a.readUshorts(r,t,h),t+=2*h,t+=2,o.startCount=a.readUshorts(r,t,h),t+=2*h,o.idDelta=[];for(var f=0;f<h;f++)o.idDelta.push(a.readShort(r,t)),t+=2;for(o.idRangeOffset=a.readUshorts(r,t,h),t+=2*h,o.glyphIdArray=[];t<n+s;)o.glyphIdArray.push(a.readUshort(r,t)),t+=2;return o},e.cmap.parse6=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,n.firstCode=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,n.glyphIdArray=[];for(var s=0;s<o;s++)n.glyphIdArray.push(a.readUshort(r,t)),t+=2;return n},e.cmap.parse12=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,t+=2,a.readUint(r,t),t+=4,a.readUint(r,t),t+=4;var o=a.readUint(r,t);t+=4,n.groups=[];for(var s=0;s<o;s++){var i=t+12*s,h=a.readUint(r,i+0),f=a.readUint(r,i+4),d=a.readUint(r,i+8);n.groups.push([h,f,d]);}return n},e.glyf={},e.glyf.parse=function(r,e,t,a){for(var n=[],o=0;o<a.maxp.numGlyphs;o++)n.push(null);return n},e.glyf._parseGlyf=function(r,t){var a=e._bin,n=r._data,o=e._tabOffset(n,"glyf",r._offset)+r.loca[t];if(r.loca[t]==r.loca[t+1])return null;var s={};if(s.noc=a.readShort(n,o),o+=2,s.xMin=a.readShort(n,o),o+=2,s.yMin=a.readShort(n,o),o+=2,s.xMax=a.readShort(n,o),o+=2,s.yMax=a.readShort(n,o),o+=2,s.xMin>=s.xMax||s.yMin>=s.yMax)return null;if(s.noc>0){s.endPts=[];for(var i=0;i<s.noc;i++)s.endPts.push(a.readUshort(n,o)),o+=2;var h=a.readUshort(n,o);if(o+=2,n.length-o<h)return null;s.instructions=a.readBytes(n,o,h),o+=h;var f=s.endPts[s.noc-1]+1;s.flags=[];for(i=0;i<f;i++){var d=n[o];if(o++,s.flags.push(d),0!=(8&d)){var l=n[o];o++;for(var u=0;u<l;u++)s.flags.push(d),i++;}}s.xs=[];for(i=0;i<f;i++){var v=0!=(2&s.flags[i]),c=0!=(16&s.flags[i]);v?(s.xs.push(c?n[o]:-n[o]),o++):c?s.xs.push(0):(s.xs.push(a.readShort(n,o)),o+=2);}s.ys=[];for(i=0;i<f;i++){v=0!=(4&s.flags[i]),c=0!=(32&s.flags[i]);v?(s.ys.push(c?n[o]:-n[o]),o++):c?s.ys.push(0):(s.ys.push(a.readShort(n,o)),o+=2);}var p=0,U=0;for(i=0;i<f;i++)p+=s.xs[i],U+=s.ys[i],s.xs[i]=p,s.ys[i]=U;}else {var g;s.parts=[];do{g=a.readUshort(n,o),o+=2;var S={m:{a:1,b:0,c:0,d:1,tx:0,ty:0},p1:-1,p2:-1};if(s.parts.push(S),S.glyphIndex=a.readUshort(n,o),o+=2,1&g){var m=a.readShort(n,o);o+=2;var b=a.readShort(n,o);o+=2;}else {m=a.readInt8(n,o);o++;b=a.readInt8(n,o);o++;}2&g?(S.m.tx=m,S.m.ty=b):(S.p1=m,S.p2=b),8&g?(S.m.a=S.m.d=a.readF2dot14(n,o),o+=2):64&g?(S.m.a=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2):128&g&&(S.m.a=a.readF2dot14(n,o),o+=2,S.m.b=a.readF2dot14(n,o),o+=2,S.m.c=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2);}while(32&g);if(256&g){var y=a.readUshort(n,o);o+=2,s.instr=[];for(i=0;i<y;i++)s.instr.push(n[o]),o++;}}return s},e.GPOS={},e.GPOS.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GPOS.subt)},e.GPOS.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1==t||2==t||3==t||7==t||8==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,h+s);}if(1==t&&1==i.fmt){var f=o.readUshort(r,a);a+=2;var d=e._lctf.numOfOnes(f);0!=f&&(i.pos=e.GPOS.readValueRecord(r,a,f));}else if(2==t&&i.fmt>=1&&i.fmt<=2){f=o.readUshort(r,a);a+=2;var l=o.readUshort(r,a);a+=2;d=e._lctf.numOfOnes(f);var u=e._lctf.numOfOnes(l);if(1==i.fmt){i.pairsets=[];var v=o.readUshort(r,a);a+=2;for(var c=0;c<v;c++){var p=s+o.readUshort(r,a);a+=2;var U=o.readUshort(r,p);p+=2;for(var g=[],S=0;S<U;S++){var m=o.readUshort(r,p);p+=2,0!=f&&(x=e.GPOS.readValueRecord(r,p,f),p+=2*d),0!=l&&(P=e.GPOS.readValueRecord(r,p,l),p+=2*u),g.push({gid2:m,val1:x,val2:P});}i.pairsets.push(g);}}if(2==i.fmt){var b=o.readUshort(r,a);a+=2;var y=o.readUshort(r,a);a+=2;var F=o.readUshort(r,a);a+=2;var _=o.readUshort(r,a);a+=2,i.classDef1=e._lctf.readClassDef(r,s+b),i.classDef2=e._lctf.readClassDef(r,s+y),i.matrix=[];for(c=0;c<F;c++){var C=[];for(S=0;S<_;S++){var x=null,P=null;0!=f&&(x=e.GPOS.readValueRecord(r,a,f),a+=2*d),0!=l&&(P=e.GPOS.readValueRecord(r,a,l),a+=2*u),C.push({val1:x,val2:P});}i.matrix.push(C);}}}else {if(9==t&&1==i.fmt){var I=o.readUshort(r,a);a+=2;var w=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=I;else if(n.ltype!=I)throw "invalid extension substitution";return e.GPOS.subt(r,n.ltype,s+w)}console.debug("unsupported GPOS table LookupType",t,"format",i.fmt);}return i},e.GPOS.readValueRecord=function(r,t,a){var n=e._bin,o=[];return o.push(1&a?n.readShort(r,t):0),t+=1&a?2:0,o.push(2&a?n.readShort(r,t):0),t+=2&a?2:0,o.push(4&a?n.readShort(r,t):0),t+=4&a?2:0,o.push(8&a?n.readShort(r,t):0),t+=8&a?2:0,o},e.GSUB={},e.GSUB.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GSUB.subt)},e.GSUB.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1!=t&&4!=t&&5!=t&&6!=t)return null;if(1==t||4==t||5==t&&i.fmt<=2||6==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,s+h);}if(1==t&&i.fmt>=1&&i.fmt<=2){if(1==i.fmt)i.delta=o.readShort(r,a),a+=2;else if(2==i.fmt){var f=o.readUshort(r,a);a+=2,i.newg=o.readUshorts(r,a,f),a+=2*i.newg.length;}}else if(4==t){i.vals=[];f=o.readUshort(r,a);a+=2;for(var d=0;d<f;d++){var l=o.readUshort(r,a);a+=2,i.vals.push(e.GSUB.readLigatureSet(r,s+l));}}else if(5==t&&2==i.fmt){if(2==i.fmt){var u=o.readUshort(r,a);a+=2,i.cDef=e._lctf.readClassDef(r,s+u),i.scset=[];var v=o.readUshort(r,a);a+=2;for(d=0;d<v;d++){var c=o.readUshort(r,a);a+=2,i.scset.push(0==c?null:e.GSUB.readSubClassSet(r,s+c));}}}else if(6==t&&3==i.fmt){if(3==i.fmt){for(d=0;d<3;d++){f=o.readUshort(r,a);a+=2;for(var p=[],U=0;U<f;U++)p.push(e._lctf.readCoverage(r,s+o.readUshort(r,a+2*U)));a+=2*f,0==d&&(i.backCvg=p),1==d&&(i.inptCvg=p),2==d&&(i.ahedCvg=p);}f=o.readUshort(r,a);a+=2,i.lookupRec=e.GSUB.readSubstLookupRecords(r,a,f);}}else {if(7==t&&1==i.fmt){var g=o.readUshort(r,a);a+=2;var S=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=g;else if(n.ltype!=g)throw "invalid extension substitution";return e.GSUB.subt(r,n.ltype,s+S)}console.debug("unsupported GSUB table LookupType",t,"format",i.fmt);}return i},e.GSUB.readSubClassSet=function(r,t){var a=e._bin.readUshort,n=t,o=[],s=a(r,t);t+=2;for(var i=0;i<s;i++){var h=a(r,t);t+=2,o.push(e.GSUB.readSubClassRule(r,n+h));}return o},e.GSUB.readSubClassRule=function(r,t){var a=e._bin.readUshort,n={},o=a(r,t),s=a(r,t+=2);t+=2,n.input=[];for(var i=0;i<o-1;i++)n.input.push(a(r,t)),t+=2;return n.substLookupRecords=e.GSUB.readSubstLookupRecords(r,t,s),n},e.GSUB.readSubstLookupRecords=function(r,t,a){for(var n=e._bin.readUshort,o=[],s=0;s<a;s++)o.push(n(r,t),n(r,t+2)),t+=4;return o},e.GSUB.readChainSubClassSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readChainSubClassRule(r,n+h));}return o},e.GSUB.readChainSubClassRule=function(r,t){for(var a=e._bin,n={},o=["backtrack","input","lookahead"],s=0;s<o.length;s++){var i=a.readUshort(r,t);t+=2,1==s&&i--,n[o[s]]=a.readUshorts(r,t,i),t+=2*n[o[s]].length;}i=a.readUshort(r,t);return t+=2,n.subst=a.readUshorts(r,t,2*i),t+=2*n.subst.length,n},e.GSUB.readLigatureSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readLigature(r,n+h));}return o},e.GSUB.readLigature=function(r,t){var a=e._bin,n={chain:[]};n.nglyph=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2;for(var s=0;s<o-1;s++)n.chain.push(a.readUshort(r,t)),t+=2;return n},e.head={},e.head.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.fontRevision=n.readFixed(r,t),t+=4,n.readUint(r,t),t+=4,n.readUint(r,t),t+=4,o.flags=n.readUshort(r,t),t+=2,o.unitsPerEm=n.readUshort(r,t),t+=2,o.created=n.readUint64(r,t),t+=8,o.modified=n.readUint64(r,t),t+=8,o.xMin=n.readShort(r,t),t+=2,o.yMin=n.readShort(r,t),t+=2,o.xMax=n.readShort(r,t),t+=2,o.yMax=n.readShort(r,t),t+=2,o.macStyle=n.readUshort(r,t),t+=2,o.lowestRecPPEM=n.readUshort(r,t),t+=2,o.fontDirectionHint=n.readShort(r,t),t+=2,o.indexToLocFormat=n.readShort(r,t),t+=2,o.glyphDataFormat=n.readShort(r,t),t+=2,o},e.hhea={},e.hhea.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.ascender=n.readShort(r,t),t+=2,o.descender=n.readShort(r,t),t+=2,o.lineGap=n.readShort(r,t),t+=2,o.advanceWidthMax=n.readUshort(r,t),t+=2,o.minLeftSideBearing=n.readShort(r,t),t+=2,o.minRightSideBearing=n.readShort(r,t),t+=2,o.xMaxExtent=n.readShort(r,t),t+=2,o.caretSlopeRise=n.readShort(r,t),t+=2,o.caretSlopeRun=n.readShort(r,t),t+=2,o.caretOffset=n.readShort(r,t),t+=2,t+=8,o.metricDataFormat=n.readShort(r,t),t+=2,o.numberOfHMetrics=n.readUshort(r,t),t+=2,o},e.hmtx={},e.hmtx.parse=function(r,t,a,n){for(var o=e._bin,s={aWidth:[],lsBearing:[]},i=0,h=0,f=0;f<n.maxp.numGlyphs;f++)f<n.hhea.numberOfHMetrics&&(i=o.readUshort(r,t),t+=2,h=o.readShort(r,t),t+=2),s.aWidth.push(i),s.lsBearing.push(h);return s},e.kern={},e.kern.parse=function(r,t,a,n){var o=e._bin,s=o.readUshort(r,t);if(t+=2,1==s)return e.kern.parseV1(r,t-2,a,n);var i=o.readUshort(r,t);t+=2;for(var h={glyph1:[],rval:[]},f=0;f<i;f++){t+=2;a=o.readUshort(r,t);t+=2;var d=o.readUshort(r,t);t+=2;var l=d>>>8;if(0!=(l&=15))throw "unknown kern table format: "+l;t=e.kern.readFormat0(r,t,h);}return h},e.kern.parseV1=function(r,t,a,n){var o=e._bin;o.readFixed(r,t),t+=4;var s=o.readUint(r,t);t+=4;for(var i={glyph1:[],rval:[]},h=0;h<s;h++){o.readUint(r,t),t+=4;var f=o.readUshort(r,t);t+=2,o.readUshort(r,t),t+=2;var d=f>>>8;if(0!=(d&=15))throw "unknown kern table format: "+d;t=e.kern.readFormat0(r,t,i);}return i},e.kern.readFormat0=function(r,t,a){var n=e._bin,o=-1,s=n.readUshort(r,t);t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2;for(var i=0;i<s;i++){var h=n.readUshort(r,t);t+=2;var f=n.readUshort(r,t);t+=2;var d=n.readShort(r,t);t+=2,h!=o&&(a.glyph1.push(h),a.rval.push({glyph2:[],vals:[]}));var l=a.rval[a.rval.length-1];l.glyph2.push(f),l.vals.push(d),o=h;}return t},e.loca={},e.loca.parse=function(r,t,a,n){var o=e._bin,s=[],i=n.head.indexToLocFormat,h=n.maxp.numGlyphs+1;if(0==i)for(var f=0;f<h;f++)s.push(o.readUshort(r,t+(f<<1))<<1);if(1==i)for(f=0;f<h;f++)s.push(o.readUint(r,t+(f<<2)));return s},e.maxp={},e.maxp.parse=function(r,t,a){var n=e._bin,o={},s=n.readUint(r,t);return t+=4,o.numGlyphs=n.readUshort(r,t),t+=2,65536==s&&(o.maxPoints=n.readUshort(r,t),t+=2,o.maxContours=n.readUshort(r,t),t+=2,o.maxCompositePoints=n.readUshort(r,t),t+=2,o.maxCompositeContours=n.readUshort(r,t),t+=2,o.maxZones=n.readUshort(r,t),t+=2,o.maxTwilightPoints=n.readUshort(r,t),t+=2,o.maxStorage=n.readUshort(r,t),t+=2,o.maxFunctionDefs=n.readUshort(r,t),t+=2,o.maxInstructionDefs=n.readUshort(r,t),t+=2,o.maxStackElements=n.readUshort(r,t),t+=2,o.maxSizeOfInstructions=n.readUshort(r,t),t+=2,o.maxComponentElements=n.readUshort(r,t),t+=2,o.maxComponentDepth=n.readUshort(r,t),t+=2),o},e.name={},e.name.parse=function(r,t,a){var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2,n.readUshort(r,t);for(var i,h=["copyright","fontFamily","fontSubfamily","ID","fullName","version","postScriptName","trademark","manufacturer","designer","description","urlVendor","urlDesigner","licence","licenceURL","---","typoFamilyName","typoSubfamilyName","compatibleFull","sampleText","postScriptCID","wwsFamilyName","wwsSubfamilyName","lightPalette","darkPalette"],f=t+=2,d=0;d<s;d++){var l=n.readUshort(r,t);t+=2;var u=n.readUshort(r,t);t+=2;var v=n.readUshort(r,t);t+=2;var c=n.readUshort(r,t);t+=2;var p=n.readUshort(r,t);t+=2;var U=n.readUshort(r,t);t+=2;var g,S=h[c],m=f+12*s+U;if(0==l)g=n.readUnicode(r,m,p/2);else if(3==l&&0==u)g=n.readUnicode(r,m,p/2);else if(0==u)g=n.readASCII(r,m,p);else if(1==u)g=n.readUnicode(r,m,p/2);else if(3==u)g=n.readUnicode(r,m,p/2);else {if(1!=l)throw "unknown encoding "+u+", platformID: "+l;g=n.readASCII(r,m,p),console.debug("reading unknown MAC encoding "+u+" as ASCII");}var b="p"+l+","+v.toString(16);null==o[b]&&(o[b]={}),o[b][void 0!==S?S:c]=g,o[b]._lang=v;}for(var y in o)if(null!=o[y].postScriptName&&1033==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&0==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&3084==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName)return o[y];for(var y in o){i=y;break}return console.debug("returning name table with languageID "+o[i]._lang),o[i]},e["OS/2"]={},e["OS/2"].parse=function(r,t,a){var n=e._bin.readUshort(r,t);t+=2;var o={};if(0==n)e["OS/2"].version0(r,t,o);else if(1==n)e["OS/2"].version1(r,t,o);else if(2==n||3==n||4==n)e["OS/2"].version2(r,t,o);else {if(5!=n)throw "unknown OS/2 table version: "+n;e["OS/2"].version5(r,t,o);}return o},e["OS/2"].version0=function(r,t,a){var n=e._bin;return a.xAvgCharWidth=n.readShort(r,t),t+=2,a.usWeightClass=n.readUshort(r,t),t+=2,a.usWidthClass=n.readUshort(r,t),t+=2,a.fsType=n.readUshort(r,t),t+=2,a.ySubscriptXSize=n.readShort(r,t),t+=2,a.ySubscriptYSize=n.readShort(r,t),t+=2,a.ySubscriptXOffset=n.readShort(r,t),t+=2,a.ySubscriptYOffset=n.readShort(r,t),t+=2,a.ySuperscriptXSize=n.readShort(r,t),t+=2,a.ySuperscriptYSize=n.readShort(r,t),t+=2,a.ySuperscriptXOffset=n.readShort(r,t),t+=2,a.ySuperscriptYOffset=n.readShort(r,t),t+=2,a.yStrikeoutSize=n.readShort(r,t),t+=2,a.yStrikeoutPosition=n.readShort(r,t),t+=2,a.sFamilyClass=n.readShort(r,t),t+=2,a.panose=n.readBytes(r,t,10),t+=10,a.ulUnicodeRange1=n.readUint(r,t),t+=4,a.ulUnicodeRange2=n.readUint(r,t),t+=4,a.ulUnicodeRange3=n.readUint(r,t),t+=4,a.ulUnicodeRange4=n.readUint(r,t),t+=4,a.achVendID=[n.readInt8(r,t),n.readInt8(r,t+1),n.readInt8(r,t+2),n.readInt8(r,t+3)],t+=4,a.fsSelection=n.readUshort(r,t),t+=2,a.usFirstCharIndex=n.readUshort(r,t),t+=2,a.usLastCharIndex=n.readUshort(r,t),t+=2,a.sTypoAscender=n.readShort(r,t),t+=2,a.sTypoDescender=n.readShort(r,t),t+=2,a.sTypoLineGap=n.readShort(r,t),t+=2,a.usWinAscent=n.readUshort(r,t),t+=2,a.usWinDescent=n.readUshort(r,t),t+=2},e["OS/2"].version1=function(r,t,a){var n=e._bin;return t=e["OS/2"].version0(r,t,a),a.ulCodePageRange1=n.readUint(r,t),t+=4,a.ulCodePageRange2=n.readUint(r,t),t+=4},e["OS/2"].version2=function(r,t,a){var n=e._bin;return t=e["OS/2"].version1(r,t,a),a.sxHeight=n.readShort(r,t),t+=2,a.sCapHeight=n.readShort(r,t),t+=2,a.usDefault=n.readUshort(r,t),t+=2,a.usBreak=n.readUshort(r,t),t+=2,a.usMaxContext=n.readUshort(r,t),t+=2},e["OS/2"].version5=function(r,t,a){var n=e._bin;return t=e["OS/2"].version2(r,t,a),a.usLowerOpticalPointSize=n.readUshort(r,t),t+=2,a.usUpperOpticalPointSize=n.readUshort(r,t),t+=2},e.post={},e.post.parse=function(r,t,a){var n=e._bin,o={};return o.version=n.readFixed(r,t),t+=4,o.italicAngle=n.readFixed(r,t),t+=4,o.underlinePosition=n.readShort(r,t),t+=2,o.underlineThickness=n.readShort(r,t),t+=2,o},null==e&&(e={}),null==e.U&&(e.U={}),e.U.codeToGlyph=function(r,e){var t=r.cmap,a=-1;if(null!=t.p0e4?a=t.p0e4:null!=t.p3e1?a=t.p3e1:null!=t.p1e0?a=t.p1e0:null!=t.p0e3&&(a=t.p0e3),-1==a)throw "no familiar platform and encoding!";var n=t.tables[a];if(0==n.format)return e>=n.map.length?0:n.map[e];if(4==n.format){for(var o=-1,s=0;s<n.endCount.length;s++)if(e<=n.endCount[s]){o=s;break}if(-1==o)return 0;if(n.startCount[o]>e)return 0;return 65535&(0!=n.idRangeOffset[o]?n.glyphIdArray[e-n.startCount[o]+(n.idRangeOffset[o]>>1)-(n.idRangeOffset.length-o)]:e+n.idDelta[o])}if(12==n.format){if(e>n.groups[n.groups.length-1][1])return 0;for(s=0;s<n.groups.length;s++){var i=n.groups[s];if(i[0]<=e&&e<=i[1])return i[2]+(e-i[0])}return 0}throw "unknown cmap table format "+n.format},e.U.glyphToPath=function(r,t){var a={cmds:[],crds:[]};if(r.SVG&&r.SVG.entries[t]){var n=r.SVG.entries[t];return null==n?a:("string"==typeof n&&(n=e.SVG.toPath(n),r.SVG.entries[t]=n),n)}if(r.CFF){var o={x:0,y:0,stack:[],nStems:0,haveWidth:!1,width:r.CFF.Private?r.CFF.Private.defaultWidthX:0,open:!1},s=r.CFF,i=r.CFF.Private;if(s.ROS){for(var h=0;s.FDSelect[h+2]<=t;)h+=2;i=s.FDArray[s.FDSelect[h+1]].Private;}e.U._drawCFF(r.CFF.CharStrings[t],o,s,i,a);}else r.glyf&&e.U._drawGlyf(t,r,a);return a},e.U._drawGlyf=function(r,t,a){var n=t.glyf[r];null==n&&(n=t.glyf[r]=e.glyf._parseGlyf(t,r)),null!=n&&(n.noc>-1?e.U._simpleGlyph(n,a):e.U._compoGlyph(n,t,a));},e.U._simpleGlyph=function(r,t){for(var a=0;a<r.noc;a++){for(var n=0==a?0:r.endPts[a-1]+1,o=r.endPts[a],s=n;s<=o;s++){var i=s==n?o:s-1,h=s==o?n:s+1,f=1&r.flags[s],d=1&r.flags[i],l=1&r.flags[h],u=r.xs[s],v=r.ys[s];if(s==n)if(f){if(!d){e.U.P.moveTo(t,u,v);continue}e.U.P.moveTo(t,r.xs[i],r.ys[i]);}else d?e.U.P.moveTo(t,r.xs[i],r.ys[i]):e.U.P.moveTo(t,(r.xs[i]+u)/2,(r.ys[i]+v)/2);f?d&&e.U.P.lineTo(t,u,v):l?e.U.P.qcurveTo(t,u,v,r.xs[h],r.ys[h]):e.U.P.qcurveTo(t,u,v,(u+r.xs[h])/2,(v+r.ys[h])/2);}e.U.P.closePath(t);}},e.U._compoGlyph=function(r,t,a){for(var n=0;n<r.parts.length;n++){var o={cmds:[],crds:[]},s=r.parts[n];e.U._drawGlyf(s.glyphIndex,t,o);for(var i=s.m,h=0;h<o.crds.length;h+=2){var f=o.crds[h],d=o.crds[h+1];a.crds.push(f*i.a+d*i.b+i.tx),a.crds.push(f*i.c+d*i.d+i.ty);}for(h=0;h<o.cmds.length;h++)a.cmds.push(o.cmds[h]);}},e.U._getGlyphClass=function(r,t){var a=e._lctf.getInterval(t,r);return -1==a?0:t[a+2]},e.U.getPairAdjustment=function(r,t,a){var n=0,o=!1;if(r.GPOS)for(var s=r.GPOS,i=s.lookupList,h=s.featureList,f=[],d=0;d<h.length;d++){var l=h[d];if("kern"==l.tag){o=!0;for(var u=0;u<l.tab.length;u++)if(!f[l.tab[u]]){f[l.tab[u]]=!0;for(var v=i[l.tab[u]],c=0;c<v.tabs.length;c++)if(null!=v.tabs[c]){var p,U=v.tabs[c];if(!U.coverage||-1!=(p=e._lctf.coverageIndex(U.coverage,t)))if(1==v.ltype);else if(2==v.ltype){var g;if(1==U.fmt){var S=U.pairsets[p];for(d=0;d<S.length;d++)S[d].gid2==a&&(g=S[d]);}else if(2==U.fmt){var m=e.U._getGlyphClass(t,U.classDef1),b=e.U._getGlyphClass(a,U.classDef2);g=U.matrix[m][b];}g&&g.val1&&g.val1[2]&&(n+=g.val1[2]),g&&g.val2&&g.val2[0]&&(n+=g.val2[0]);}}}}}if(r.kern&&!o){var y=r.kern.glyph1.indexOf(t);if(-1!=y){var F=r.kern.rval[y].glyph2.indexOf(a);-1!=F&&(n+=r.kern.rval[y].vals[F]);}}return n},e.U._applySubs=function(r,t,a,n){for(var o=r.length-t-1,s=0;s<a.tabs.length;s++)if(null!=a.tabs[s]){var i,h=a.tabs[s];if(!h.coverage||-1!=(i=e._lctf.coverageIndex(h.coverage,r[t])))if(1==a.ltype)r[t],1==h.fmt?r[t]=r[t]+h.delta:r[t]=h.newg[i];else if(4==a.ltype)for(var f=h.vals[i],d=0;d<f.length;d++){var l=f[d],u=l.chain.length;if(!(u>o)){for(var v=!0,c=0,p=0;p<u;p++){for(;-1==r[t+c+(1+p)];)c++;l.chain[p]!=r[t+c+(1+p)]&&(v=!1);}if(v){r[t]=l.nglyph;for(p=0;p<u+c;p++)r[t+p+1]=-1;break}}}else if(5==a.ltype&&2==h.fmt)for(var U=e._lctf.getInterval(h.cDef,r[t]),g=h.cDef[U+2],S=h.scset[g],m=0;m<S.length;m++){var b=S[m],y=b.input;if(!(y.length>o)){for(v=!0,p=0;p<y.length;p++){var F=e._lctf.getInterval(h.cDef,r[t+1+p]);if(-1==U&&h.cDef[F+2]!=y[p]){v=!1;break}}if(v){var _=b.substLookupRecords;for(d=0;d<_.length;d+=2)_[d],_[d+1];}}}else if(6==a.ltype&&3==h.fmt){if(!e.U._glsCovered(r,h.backCvg,t-h.backCvg.length))continue;if(!e.U._glsCovered(r,h.inptCvg,t))continue;if(!e.U._glsCovered(r,h.ahedCvg,t+h.inptCvg.length))continue;var C=h.lookupRec;for(m=0;m<C.length;m+=2){U=C[m];var x=n[C[m+1]];e.U._applySubs(r,t+U,x,n);}}}},e.U._glsCovered=function(r,t,a){for(var n=0;n<t.length;n++){if(-1==e._lctf.coverageIndex(t[n],r[a+n]))return !1}return !0},e.U.glyphsToPath=function(r,t,a){for(var n={cmds:[],crds:[]},o=0,s=0;s<t.length;s++){var i=t[s];if(-1!=i){for(var h=s<t.length-1&&-1!=t[s+1]?t[s+1]:0,f=e.U.glyphToPath(r,i),d=0;d<f.crds.length;d+=2)n.crds.push(f.crds[d]+o),n.crds.push(f.crds[d+1]);a&&n.cmds.push(a);for(d=0;d<f.cmds.length;d++)n.cmds.push(f.cmds[d]);a&&n.cmds.push("X"),o+=r.hmtx.aWidth[i],s<t.length-1&&(o+=e.U.getPairAdjustment(r,i,h));}}return n},e.U.P={},e.U.P.moveTo=function(r,e,t){r.cmds.push("M"),r.crds.push(e,t);},e.U.P.lineTo=function(r,e,t){r.cmds.push("L"),r.crds.push(e,t);},e.U.P.curveTo=function(r,e,t,a,n,o,s){r.cmds.push("C"),r.crds.push(e,t,a,n,o,s);},e.U.P.qcurveTo=function(r,e,t,a,n){r.cmds.push("Q"),r.crds.push(e,t,a,n);},e.U.P.closePath=function(r){r.cmds.push("Z");},e.U._drawCFF=function(r,t,a,n,o){for(var s=t.stack,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open,l=0,u=t.x,v=t.y,c=0,p=0,U=0,g=0,S=0,m=0,b=0,y=0,F=0,_=0,C={val:0,size:0};l<r.length;){e.CFF.getCharString(r,l,C);var x=C.val;if(l+=C.size,"o1"==x||"o18"==x)s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;else if("o3"==x||"o23"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;}else if("o4"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),d&&e.U.P.closePath(o),v+=s.pop(),e.U.P.moveTo(o,u,v),d=!0;else if("o5"==x)for(;s.length>0;)u+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,u,v);else if("o6"==x||"o7"==x)for(var P=s.length,I="o6"==x,w=0;w<P;w++){var O=s.shift();I?u+=O:v+=O,I=!I,e.U.P.lineTo(o,u,v);}else if("o8"==x||"o24"==x){P=s.length;for(var T=0;T+6<=P;)c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),u=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,u,v),T+=6;"o24"==x&&(u+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,u,v));}else {if("o11"==x)break;if("o1234"==x||"o1235"==x||"o1236"==x||"o1237"==x)"o1234"==x&&(p=v,U=(c=u+s.shift())+s.shift(),_=g=p+s.shift(),m=g,y=v,u=(b=(S=(F=U+s.shift())+s.shift())+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,u,v)),"o1235"==x&&(c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),u=b+s.shift(),v=y+s.shift(),s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,u,v)),"o1236"==x&&(c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),_=g=p+s.shift(),m=g,b=(S=(F=U+s.shift())+s.shift())+s.shift(),y=m+s.shift(),u=b+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,u,v)),"o1237"==x&&(c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),Math.abs(b-u)>Math.abs(y-v)?u=b+s.shift():v=y+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,u,v));else if("o14"==x){if(s.length>0&&!h&&(f=s.shift()+a.nominalWidthX,h=!0),4==s.length){var k=s.shift(),G=s.shift(),D=s.shift(),B=s.shift(),L=e.CFF.glyphBySE(a,D),R=e.CFF.glyphBySE(a,B);e.U._drawCFF(a.CharStrings[L],t,a,n,o),t.x=k,t.y=G,e.U._drawCFF(a.CharStrings[R],t,a,n,o);}d&&(e.U.P.closePath(o),d=!1);}else if("o19"==x||"o20"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0,l+=i+7>>3;}else if("o21"==x)s.length>2&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),v+=s.pop(),u+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,u,v),d=!0;else if("o22"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),u+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,u,v),d=!0;else if("o25"==x){for(;s.length>6;)u+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,u,v);c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),u=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,u,v);}else if("o26"==x)for(s.length%2&&(u+=s.shift());s.length>0;)c=u,p=v+s.shift(),u=U=c+s.shift(),v=(g=p+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,u,v);else if("o27"==x)for(s.length%2&&(v+=s.shift());s.length>0;)p=v,U=(c=u+s.shift())+s.shift(),g=p+s.shift(),u=U+s.shift(),v=g,e.U.P.curveTo(o,c,p,U,g,u,v);else if("o10"==x||"o29"==x){var A="o10"==x?n:a;if(0==s.length)console.debug("error: empty stack");else {var W=s.pop(),M=A.Subrs[W+A.Bias];t.x=u,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d,e.U._drawCFF(M,t,a,n,o),u=t.x,v=t.y,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open;}}else if("o30"==x||"o31"==x){var V=s.length,N=(T=0,"o31"==x);for(T+=V-(P=-3&V);T<P;)N?(p=v,U=(c=u+s.shift())+s.shift(),v=(g=p+s.shift())+s.shift(),P-T==5?(u=U+s.shift(),T++):u=U,N=!1):(c=u,p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),u=U+s.shift(),P-T==5?(v=g+s.shift(),T++):v=g,N=!0),e.U.P.curveTo(o,c,p,U,g,u,v),T+=4;}else {if("o"==(x+"").charAt(0))throw console.debug("Unknown operation: "+x,r),x;s.push(x);}}}t.x=u,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d;};var t=e,a={Typr:t};return r.Typr=t,r.default=a,Object.defineProperty(r,"__esModule",{value:!0}),r}({}).Typr}
 
   /*!
   Custom bundle of woff2otf (https://github.com/arty-name/woff2otf) with fflate
@@ -3029,10 +3700,10 @@ void main() {
   - fflate: https://github.com/101arrowz/fflate/blob/master/LICENSE (MIT)
   - woff2otf.js: https://github.com/arty-name/woff2otf/blob/master/woff2otf.js (Apache2)
   */
-  function woff2otfFactory(){return function(r){var e=Uint8Array,n=Uint16Array,t=Uint32Array,a=new e([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),f=new e([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),i=new e([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),o=function(r,e){for(var a=new n(31),f=0;f<31;++f)a[f]=e+=1<<r[f-1];var i=new t(a[30]);for(f=1;f<30;++f)for(var o=a[f];o<a[f+1];++o)i[o]=o-a[f]<<5|f;return [a,i]},u=o(a,2),v=u[0],s=u[1];v[28]=258,s[258]=28;for(var l=o(f,0)[0],c=new n(32768),g=0;g<32768;++g){var h=(43690&g)>>>1|(21845&g)<<1;h=(61680&(h=(52428&h)>>>2|(13107&h)<<2))>>>4|(3855&h)<<4,c[g]=((65280&h)>>>8|(255&h)<<8)>>>1;}var w=function(r,e,t){for(var a=r.length,f=0,i=new n(e);f<a;++f)++i[r[f]-1];var o,u=new n(e);for(f=0;f<e;++f)u[f]=u[f-1]+i[f-1]<<1;if(t){o=new n(1<<e);var v=15-e;for(f=0;f<a;++f)if(r[f])for(var s=f<<4|r[f],l=e-r[f],g=u[r[f]-1]++<<l,h=g|(1<<l)-1;g<=h;++g)o[c[g]>>>v]=s;}else for(o=new n(a),f=0;f<a;++f)o[f]=c[u[r[f]-1]++]>>>15-r[f];return o},m=new e(288);for(g=0;g<144;++g)m[g]=8;for(g=144;g<256;++g)m[g]=9;for(g=256;g<280;++g)m[g]=7;for(g=280;g<288;++g)m[g]=8;var b=new e(32);for(g=0;g<32;++g)b[g]=5;var p=w(m,9,1),d=w(b,5,1),L=function(r){for(var e=r[0],n=1;n<r.length;++n)r[n]>e&&(e=r[n]);return e},y=function(r,e,n){var t=e/8>>0;return (r[t]|r[t+1]<<8)>>>(7&e)&n},U=function(r,e){var n=e/8>>0;return (r[n]|r[n+1]<<8|r[n+2]<<16)>>>(7&e)},O=function(r,o,u){var s=r.length,c=!o||u,g=!u||u.i;u||(u={}),o||(o=new e(3*s));var h,m=function(r){var n=o.length;if(r>n){var t=new e(Math.max(2*n,r));t.set(o),o=t;}},b=u.f||0,O=u.p||0,A=u.b||0,k=u.l,x=u.d,E=u.m,T=u.n,F=8*s;do{if(!k){u.f=b=y(r,O,1);var V=y(r,O+1,3);if(O+=3,!V){var M=r[(I=((h=O)/8>>0)+(7&h&&1)+4)-4]|r[I-3]<<8,C=I+M;if(C>s){if(g)throw "unexpected EOF";break}c&&m(A+M),o.set(r.subarray(I,C),A),u.b=A+=M,u.p=O=8*C;continue}if(1==V)k=p,x=d,E=9,T=5;else {if(2!=V)throw "invalid block type";var D=y(r,O,31)+257,S=y(r,O+10,15)+4,_=D+y(r,O+5,31)+1;O+=14;for(var j=new e(_),z=new e(19),q=0;q<S;++q)z[i[q]]=y(r,O+3*q,7);O+=3*S;var B=L(z),G=(1<<B)-1;if(!g&&O+_*(B+7)>F)break;var H=w(z,B,1);for(q=0;q<_;){var I,J=H[y(r,O,G)];if(O+=15&J,(I=J>>>4)<16)j[q++]=I;else {var K=0,N=0;for(16==I?(N=3+y(r,O,3),O+=2,K=j[q-1]):17==I?(N=3+y(r,O,7),O+=3):18==I&&(N=11+y(r,O,127),O+=7);N--;)j[q++]=K;}}var P=j.subarray(0,D),Q=j.subarray(D);E=L(P),T=L(Q),k=w(P,E,1),x=w(Q,T,1);}if(O>F)throw "unexpected EOF"}c&&m(A+131072);for(var R=(1<<E)-1,W=(1<<T)-1,X=E+T+18;g||O+X<F;){var Y=(K=k[U(r,O)&R])>>>4;if((O+=15&K)>F)throw "unexpected EOF";if(!K)throw "invalid length/literal";if(Y<256)o[A++]=Y;else {if(256==Y){k=null;break}var Z=Y-254;if(Y>264){var $=a[q=Y-257];Z=y(r,O,(1<<$)-1)+v[q],O+=$;}var rr=x[U(r,O)&W],er=rr>>>4;if(!rr)throw "invalid distance";O+=15&rr;Q=l[er];if(er>3){$=f[er];Q+=U(r,O)&(1<<$)-1,O+=$;}if(O>F)throw "unexpected EOF";c&&m(A+131072);for(var nr=A+Z;A<nr;A+=4)o[A]=o[A-Q],o[A+1]=o[A+1-Q],o[A+2]=o[A+2-Q],o[A+3]=o[A+3-Q];A=nr;}}u.l=k,u.p=O,u.b=A,k&&(b=1,u.m=E,u.d=x,u.n=T);}while(!b);return A==o.length?o:function(r,a,f){(null==a||a<0)&&(a=0),(null==f||f>r.length)&&(f=r.length);var i=new(r instanceof n?n:r instanceof t?t:e)(f-a);return i.set(r.subarray(a,f)),i}(o,0,A)};return r.convert_streams=function(r){var e=new DataView(r),n=0;function t(){var r=e.getUint16(n);return n+=2,r}function a(){var r=e.getUint32(n);return n+=4,r}function f(r){b.setUint16(p,r),p+=2;}function i(r){b.setUint32(p,r),p+=4;}for(var o={signature:a(),flavor:a(),length:a(),numTables:t(),reserved:t(),totalSfntSize:a(),majorVersion:t(),minorVersion:t(),metaOffset:a(),metaLength:a(),metaOrigLength:a(),privOffset:a(),privLength:a()},u=0;Math.pow(2,u)<=o.numTables;)u++;u--;for(var v=16*Math.pow(2,u),s=16*o.numTables-v,l=12,c=[],g=0;g<o.numTables;g++)c.push({tag:a(),offset:a(),compLength:a(),origLength:a(),origChecksum:a()}),l+=16;var h,w=new Uint8Array(12+16*c.length+c.reduce((function(r,e){return r+e.origLength+4}),0)),m=w.buffer,b=new DataView(m),p=0;return i(o.flavor),f(o.numTables),f(v),f(u),f(s),c.forEach((function(r){i(r.tag),i(r.origChecksum),i(l),i(r.origLength),r.outOffset=l,(l+=r.origLength)%4!=0&&(l+=4-l%4);})),c.forEach((function(e){var n,t=r.slice(e.offset,e.offset+e.compLength);if(e.compLength!=e.origLength){var a=new Uint8Array(e.origLength);n=new Uint8Array(t,2),O(n,a);}else a=new Uint8Array(t);w.set(a,e.outOffset);var f=0;(l=e.outOffset+e.origLength)%4!=0&&(f=4-l%4),w.set(new Uint8Array(f).buffer,e.outOffset+e.origLength),h=l+f;})),m.slice(0,h)},r}({}).convert_streams}
+  function woff2otfFactory(){return function(r){var e=Uint8Array,n=Uint16Array,t=Uint32Array,a=new e([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),i=new e([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),o=new e([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),f=function(r,e){for(var a=new n(31),i=0;i<31;++i)a[i]=e+=1<<r[i-1];var o=new t(a[30]);for(i=1;i<30;++i)for(var f=a[i];f<a[i+1];++f)o[f]=f-a[i]<<5|i;return [a,o]},u=f(a,2),v=u[0],s=u[1];v[28]=258,s[258]=28;for(var l=f(i,0)[0],c=new n(32768),g=0;g<32768;++g){var h=(43690&g)>>>1|(21845&g)<<1;h=(61680&(h=(52428&h)>>>2|(13107&h)<<2))>>>4|(3855&h)<<4,c[g]=((65280&h)>>>8|(255&h)<<8)>>>1;}var w=function(r,e,t){for(var a=r.length,i=0,o=new n(e);i<a;++i)++o[r[i]-1];var f,u=new n(e);for(i=0;i<e;++i)u[i]=u[i-1]+o[i-1]<<1;if(t){f=new n(1<<e);var v=15-e;for(i=0;i<a;++i)if(r[i])for(var s=i<<4|r[i],l=e-r[i],g=u[r[i]-1]++<<l,h=g|(1<<l)-1;g<=h;++g)f[c[g]>>>v]=s;}else for(f=new n(a),i=0;i<a;++i)r[i]&&(f[i]=c[u[r[i]-1]++]>>>15-r[i]);return f},d=new e(288);for(g=0;g<144;++g)d[g]=8;for(g=144;g<256;++g)d[g]=9;for(g=256;g<280;++g)d[g]=7;for(g=280;g<288;++g)d[g]=8;var m=new e(32);for(g=0;g<32;++g)m[g]=5;var b=w(d,9,1),p=w(m,5,1),y=function(r){for(var e=r[0],n=1;n<r.length;++n)r[n]>e&&(e=r[n]);return e},L=function(r,e,n){var t=e/8|0;return (r[t]|r[t+1]<<8)>>(7&e)&n},U=function(r,e){var n=e/8|0;return (r[n]|r[n+1]<<8|r[n+2]<<16)>>(7&e)},k=["unexpected EOF","invalid block type","invalid length/literal","invalid distance","stream finished","no stream handler",,"no callback","invalid UTF-8 data","extra field too long","date not in range 1980-2099","filename too long","stream finishing","invalid zip data"],T=function(r,e,n){var t=new Error(e||k[r]);if(t.code=r,Error.captureStackTrace&&Error.captureStackTrace(t,T),!n)throw t;return t},O=function(r,f,u){var s=r.length;if(!s||u&&!u.l&&s<5)return f||new e(0);var c=!f||u,g=!u||u.i;u||(u={}),f||(f=new e(3*s));var h,d=function(r){var n=f.length;if(r>n){var t=new e(Math.max(2*n,r));t.set(f),f=t;}},m=u.f||0,k=u.p||0,O=u.b||0,A=u.l,x=u.d,E=u.m,D=u.n,M=8*s;do{if(!A){u.f=m=L(r,k,1);var S=L(r,k+1,3);if(k+=3,!S){var V=r[(I=((h=k)/8|0)+(7&h&&1)+4)-4]|r[I-3]<<8,_=I+V;if(_>s){g&&T(0);break}c&&d(O+V),f.set(r.subarray(I,_),O),u.b=O+=V,u.p=k=8*_;continue}if(1==S)A=b,x=p,E=9,D=5;else if(2==S){var j=L(r,k,31)+257,z=L(r,k+10,15)+4,C=j+L(r,k+5,31)+1;k+=14;for(var F=new e(C),P=new e(19),q=0;q<z;++q)P[o[q]]=L(r,k+3*q,7);k+=3*z;var B=y(P),G=(1<<B)-1,H=w(P,B,1);for(q=0;q<C;){var I,J=H[L(r,k,G)];if(k+=15&J,(I=J>>>4)<16)F[q++]=I;else {var K=0,N=0;for(16==I?(N=3+L(r,k,3),k+=2,K=F[q-1]):17==I?(N=3+L(r,k,7),k+=3):18==I&&(N=11+L(r,k,127),k+=7);N--;)F[q++]=K;}}var Q=F.subarray(0,j),R=F.subarray(j);E=y(Q),D=y(R),A=w(Q,E,1),x=w(R,D,1);}else T(1);if(k>M){g&&T(0);break}}c&&d(O+131072);for(var W=(1<<E)-1,X=(1<<D)-1,Y=k;;Y=k){var Z=(K=A[U(r,k)&W])>>>4;if((k+=15&K)>M){g&&T(0);break}if(K||T(2),Z<256)f[O++]=Z;else {if(256==Z){Y=k,A=null;break}var $=Z-254;if(Z>264){var rr=a[q=Z-257];$=L(r,k,(1<<rr)-1)+v[q],k+=rr;}var er=x[U(r,k)&X],nr=er>>>4;er||T(3),k+=15&er;R=l[nr];if(nr>3){rr=i[nr];R+=U(r,k)&(1<<rr)-1,k+=rr;}if(k>M){g&&T(0);break}c&&d(O+131072);for(var tr=O+$;O<tr;O+=4)f[O]=f[O-R],f[O+1]=f[O+1-R],f[O+2]=f[O+2-R],f[O+3]=f[O+3-R];O=tr;}}u.l=A,u.p=Y,u.b=O,A&&(m=1,u.m=E,u.d=x,u.n=D);}while(!m);return O==f.length?f:function(r,a,i){(null==a||a<0)&&(a=0),(null==i||i>r.length)&&(i=r.length);var o=new(r instanceof n?n:r instanceof t?t:e)(i-a);return o.set(r.subarray(a,i)),o}(f,0,O)},A=new e(0);var x="undefined"!=typeof TextDecoder&&new TextDecoder;try{x.decode(A,{stream:!0}),1;}catch(r){}return r.convert_streams=function(r){var e=new DataView(r),n=0;function t(){var r=e.getUint16(n);return n+=2,r}function a(){var r=e.getUint32(n);return n+=4,r}function i(r){m.setUint16(b,r),b+=2;}function o(r){m.setUint32(b,r),b+=4;}for(var f={signature:a(),flavor:a(),length:a(),numTables:t(),reserved:t(),totalSfntSize:a(),majorVersion:t(),minorVersion:t(),metaOffset:a(),metaLength:a(),metaOrigLength:a(),privOffset:a(),privLength:a()},u=0;Math.pow(2,u)<=f.numTables;)u++;u--;for(var v=16*Math.pow(2,u),s=16*f.numTables-v,l=12,c=[],g=0;g<f.numTables;g++)c.push({tag:a(),offset:a(),compLength:a(),origLength:a(),origChecksum:a()}),l+=16;var h,w=new Uint8Array(12+16*c.length+c.reduce((function(r,e){return r+e.origLength+4}),0)),d=w.buffer,m=new DataView(d),b=0;return o(f.flavor),i(f.numTables),i(v),i(u),i(s),c.forEach((function(r){o(r.tag),o(r.origChecksum),o(l),o(r.origLength),r.outOffset=l,(l+=r.origLength)%4!=0&&(l+=4-l%4);})),c.forEach((function(e){var n,t=r.slice(e.offset,e.offset+e.compLength);if(e.compLength!=e.origLength){var a=new Uint8Array(e.origLength);n=new Uint8Array(t,2),O(n,a);}else a=new Uint8Array(t);w.set(a,e.outOffset);var i=0;(l=e.outOffset+e.origLength)%4!=0&&(i=4-l%4),w.set(new Uint8Array(i).buffer,e.outOffset+e.origLength),h=l+i;})),d.slice(0,h)},Object.defineProperty(r,"__esModule",{value:!0}),r}({}).convert_streams}
 
   /**
-   * An adapter that allows Typr.js to be used as if it were (a subset of) the OpenType.js API.
+   * A factory wrapper parsing a font file using Typr.
    * Also adds support for WOFF files (not WOFF2).
    */
 
@@ -3193,6 +3864,17 @@ void main() {
               if (!glyphObj) {
                 const {cmds, crds} = Typr.U.glyphToPath(typrFont, glyphIndex);
 
+                // Build path string
+                let path = '';
+                let crdsIdx = 0;
+                for (let i = 0, len = cmds.length; i < len; i++) {
+                  const numArgs = cmdArgLengths[cmds[i]];
+                  path += cmds[i];
+                  for (let j = 1; j <= numArgs; j++) {
+                    path += (j > 1 ? ',' : '') + crds[crdsIdx++];
+                  }
+                }
+
                 // Find extents - Glyf gives this in metadata but not CFF, and Typr doesn't
                 // normalize the two, so it's simplest just to iterate ourselves.
                 let xMin, yMin, xMax, yMax;
@@ -3218,20 +3900,21 @@ void main() {
                   yMin,
                   xMax,
                   yMax,
+                  path,
                   pathCommandCount: cmds.length,
-                  forEachPathCommand(callback) {
-                    let argsIndex = 0;
-                    const argsArray = [];
-                    for (let i = 0, len = cmds.length; i < len; i++) {
-                      const numArgs = cmdArgLengths[cmds[i]];
-                      argsArray.length = 1 + numArgs;
-                      argsArray[0] = cmds[i];
-                      for (let j = 1; j <= numArgs; j++) {
-                        argsArray[j] = crds[argsIndex++];
-                      }
-                      callback.apply(null, argsArray);
-                    }
-                  }
+                  // forEachPathCommand(callback) {
+                  //   let argsIndex = 0
+                  //   const argsArray = []
+                  //   for (let i = 0, len = cmds.length; i < len; i++) {
+                  //     const numArgs = cmdArgLengths[cmds[i]]
+                  //     argsArray.length = 1 + numArgs
+                  //     argsArray[0] = cmds[i]
+                  //     for (let j = 1; j <= numArgs; j++) {
+                  //       argsArray[j] = crds[argsIndex++]
+                  //     }
+                  //     callback.apply(null, argsArray)
+                  //   }
+                  // }
                 };
               }
 
@@ -3284,9 +3967,6 @@ void main() {
     }
   });
 
-  // import fontParser from './worker/FontParser_OpenType.js'
-
-
   const CONFIG = {
     defaultFontURL: 'https://fonts.gstatic.com/s/roboto/v18/KFOmCnqEu92Fr1Mu4mxM.woff', //Roboto Regular
     sdfGlyphSize: 64,
@@ -3296,12 +3976,21 @@ void main() {
   };
   const tempColor = /*#__PURE__*/new THREE.Color();
 
+  function now$1() {
+    return (self.performance || Date).now()
+  }
+
   /**
-   * Repository for all font SDF atlas textures
+   * Repository for all font SDF atlas textures and their glyph mappings. There is a separate atlas for
+   * each sdfGlyphSize. Each atlas has a single Texture that holds all glyphs for all fonts.
    *
    *   {
-   *     [font]: {
-   *       sdfTexture: DataTexture
+   *     [sdfGlyphSize]: {
+   *       glyphCount: number,
+   *       sdfGlyphSize: number,
+   *       sdfTexture: Texture,
+   *       contextLost: boolean,
+   *       glyphsByFont: Map<fontURL, Map<glyphID, {path, atlasIndex, sdfViewBox}>>
    *     }
    *   }
    */
@@ -3310,14 +3999,14 @@ void main() {
   /**
    * @typedef {object} TroikaTextRenderInfo - Format of the result from `getTextRenderInfo`.
    * @property {object} parameters - The normalized input arguments to the render call.
-   * @property {DataTexture} sdfTexture - The SDF atlas texture.
+   * @property {Texture} sdfTexture - The SDF atlas texture.
    * @property {number} sdfGlyphSize - The size of each glyph's SDF; see `configureTextBuilder`.
    * @property {number} sdfExponent - The exponent used in encoding the SDF's values; see `configureTextBuilder`.
    * @property {Float32Array} glyphBounds - List of [minX, minY, maxX, maxY] quad bounds for each glyph.
    * @property {Float32Array} glyphAtlasIndices - List holding each glyph's index in the SDF atlas.
    * @property {Uint8Array} [glyphColors] - List holding each glyph's [r, g, b] color, if `colorRanges` was supplied.
-   * @property {Float32Array} [caretPositions] - A list of caret positions for all glyphs; this is
-   *           the bottom [x,y] of the cursor position before each char, plus one after the last char.
+   * @property {Float32Array} [caretPositions] - A list of caret positions for all characters in the string; each is
+   *           three elements: the starting X, the ending X, and the bottom Y for the caret.
    * @property {number} [caretHeight] - An appropriate height for all selection carets.
    * @property {number} ascender - The font's ascender metric.
    * @property {number} descender - The font's descender metric.
@@ -3333,7 +4022,7 @@ void main() {
    * @property {Array<object>} chunkedBounds - List of bounding rects for each consecutive set of N glyphs,
    *           in the format `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`.
    * @property {object} timings - Timing info for various parts of the rendering logic including SDF
-   *           generation, layout, etc.
+   *           generation, typesetting, etc.
    * @frozen
    */
 
@@ -3350,6 +4039,7 @@ void main() {
    */
   function getTextRenderInfo(args, callback) {
     args = assign({}, args);
+    const totalStart = now$1();
 
     // Apply default font here to avoid a 'null' atlas, and convert relative
     // URLs to absolute so they can be resolved in the worker
@@ -3377,92 +4067,216 @@ void main() {
 
     Object.freeze(args);
 
-    // Init the atlas for this font if needed
+    // Init the atlas if needed
     const {textureWidth, sdfExponent} = CONFIG;
     const {sdfGlyphSize} = args;
-    let atlasKey = `${args.font}@${sdfGlyphSize}`;
-    let atlas = atlases[atlasKey];
+    const glyphsPerRow = (textureWidth / sdfGlyphSize * 4);
+    let atlas = atlases[sdfGlyphSize];
     if (!atlas) {
-      atlas = atlases[atlasKey] = {
-        sdfTexture: new THREE.DataTexture(
-          new Uint8Array(sdfGlyphSize * textureWidth * 4),
-          textureWidth,
-          sdfGlyphSize,
-          THREE.RGBAFormat,
-          undefined,
+      const canvas = document.createElement('canvas');
+      canvas.width = textureWidth;
+      canvas.height = sdfGlyphSize * 256 / glyphsPerRow; // start tall enough to fit 256 glyphs
+      atlas = atlases[sdfGlyphSize] = {
+        glyphCount: 0,
+        sdfGlyphSize,
+        sdfTexture: new THREE.CanvasTexture(
+          canvas,
           undefined,
           undefined,
           undefined,
           THREE.LinearFilter,
           THREE.LinearFilter
-        )
+        ),
+        contextLost: false,
+        glyphsByFont: new Map()
       };
-      atlas.sdfTexture.font = args.font;
+      initContextLossHandling(atlas);
     }
 
-    // Issue request to the FontProcessor in the worker
-    processInWorker(args).then(result => {
-      // If the response has newGlyphs, copy them into the atlas texture at the specified indices
-      if (result.newGlyphSDFs) {
-        result.newGlyphSDFs.forEach(({textureData, atlasIndex}) => {
-          const texImg = atlas.sdfTexture.image;
+    const {sdfTexture} = atlas;
+    let fontGlyphs = atlas.glyphsByFont.get(args.font);
+    if (!fontGlyphs) {
+      atlas.glyphsByFont.set(args.font, fontGlyphs = new Map());
+    }
 
-          // Grow the texture by power of 2 if needed
-          while (texImg.data.length < (atlasIndex + 1) * sdfGlyphSize * sdfGlyphSize) {
-            const biggerArray = new Uint8Array(texImg.data.length * 2);
-            biggerArray.set(texImg.data);
-            texImg.data = biggerArray;
-            texImg.height *= 2;
-          }
+    // Issue request to the typesetting engine in the worker
+    typesetInWorker(args).then(result => {
+      const {glyphIds, glyphPositions, fontSize, unitsPerEm, timings} = result;
+      const neededSDFs = [];
+      const glyphBounds = new Float32Array(glyphIds.length * 4);
+      const fontSizeMult = fontSize / unitsPerEm;
+      let boundsIdx = 0;
+      let positionsIdx = 0;
+      const quadsStart = now$1();
+      glyphIds.forEach((glyphId, i) => {
+        let glyphInfo = fontGlyphs.get(glyphId);
 
-          // Insert the new glyph's data into the full texture image at the correct offsets
-          // Glyphs are packed sequentially into the R,G,B,A channels of a square, advancing
-          // to the next square every 4 glyphs.
-          const squareIndex = Math.floor(atlasIndex / 4);
-          const cols = texImg.width / sdfGlyphSize;
-          const baseStartIndex = Math.floor(squareIndex / cols) * texImg.width * sdfGlyphSize * 4 //full rows
-            + (squareIndex % cols) * sdfGlyphSize * 4 //partial row
-            + (atlasIndex % 4); //color channel
-          for (let y = 0; y < sdfGlyphSize; y++) {
-            const srcStartIndex = y * sdfGlyphSize;
-            const rowStartIndex = baseStartIndex + (y * texImg.width * 4);
-            for (let x = 0; x < sdfGlyphSize; x++) {
-              texImg.data[rowStartIndex + x * 4] = textureData[srcStartIndex + x];
-            }
-          }
-        });
-        atlas.sdfTexture.needsUpdate = true;
+        // If this is a glyphId not seen before, add it to the atlas
+        if (!glyphInfo) {
+          const {path, pathBounds} = result.glyphData[glyphId];
+
+          // Margin around path edges in SDF, based on a percentage of the glyph's max dimension.
+          // Note we add an extra 0.5 px over the configured value because the outer 0.5 doesn't contain
+          // useful interpolated values and will be ignored anyway.
+          const fontUnitsMargin = Math.max(pathBounds[2] - pathBounds[0], pathBounds[3] - pathBounds[1])
+            / sdfGlyphSize * (CONFIG.sdfMargin * sdfGlyphSize + 0.5);
+
+          const atlasIndex = atlas.glyphCount++;
+          const sdfViewBox = [
+            pathBounds[0] - fontUnitsMargin,
+            pathBounds[1] - fontUnitsMargin,
+            pathBounds[2] + fontUnitsMargin,
+            pathBounds[3] + fontUnitsMargin,
+          ];
+          fontGlyphs.set(glyphId, (glyphInfo = { path, atlasIndex, sdfViewBox }));
+
+          // Collect those that need SDF generation
+          neededSDFs.push(glyphInfo);
+        }
+
+        // Calculate bounds for renderable quads
+        // TODO can we get this back off the main thread?
+        const {sdfViewBox} = glyphInfo;
+        const posX = glyphPositions[positionsIdx++];
+        const posY = glyphPositions[positionsIdx++];
+        glyphBounds[boundsIdx++] = posX + sdfViewBox[0] * fontSizeMult;
+        glyphBounds[boundsIdx++] = posY + sdfViewBox[1] * fontSizeMult;
+        glyphBounds[boundsIdx++] = posX + sdfViewBox[2] * fontSizeMult;
+        glyphBounds[boundsIdx++] = posY + sdfViewBox[3] * fontSizeMult;
+
+        // Convert glyphId to SDF index for the shader
+        glyphIds[i] = glyphInfo.atlasIndex;
+      });
+      timings.quads = (timings.quads || 0) + (now$1() - quadsStart);
+
+      const sdfStart = now$1();
+      timings.sdf = {};
+
+      // Grow the texture height by power of 2 if needed
+      const currentHeight = sdfTexture.image.height;
+      const neededRows = Math.ceil(atlas.glyphCount / glyphsPerRow);
+      const neededHeight = Math.pow(2, Math.ceil(Math.log2(neededRows * sdfGlyphSize)));
+      if (neededHeight > currentHeight) {
+        // Since resizing the canvas clears its render buffer, it needs special handling to copy the old contents over
+        console.info(`Increasing SDF texture size ${currentHeight}->${neededHeight}`);
+        resizeWebGLCanvasWithoutClearing(sdfTexture.image, textureWidth, neededHeight);
+        // As of Three r136 textures cannot be resized, we must recreate it
+        sdfTexture.dispose();
       }
 
-      // Invoke callback with the text layout arrays and updated texture
-      callback(Object.freeze({
-        parameters: args,
-        sdfTexture: atlas.sdfTexture,
-        sdfGlyphSize,
-        sdfExponent,
-        glyphBounds: result.glyphBounds,
-        glyphAtlasIndices: result.glyphAtlasIndices,
-        glyphColors: result.glyphColors,
-        caretPositions: result.caretPositions,
-        caretHeight: result.caretHeight,
-        chunkedBounds: result.chunkedBounds,
-        ascender: result.ascender,
-        descender: result.descender,
-        lineHeight: result.lineHeight,
-        topBaseline: result.topBaseline,
-        blockBounds: result.blockBounds,
-        visibleBounds: result.visibleBounds,
-        timings: result.timings,
-        get totalBounds() {
-          console.log('totalBounds deprecated, use blockBounds instead');
-          return result.blockBounds
-        },
-        get totalBlockSize() {
-          console.log('totalBlockSize deprecated, use blockBounds instead');
-          const [x0, y0, x1, y1] = result.blockBounds;
-          return [x1 - x0, y1 - y0]
+      DefaultThenable.all(neededSDFs.map(glyphInfo =>
+        generateGlyphSDF(glyphInfo, atlas, args.gpuAccelerateSDF).then(({timing}) => {
+          timings.sdf[glyphInfo.atlasIndex] = timing;
+        })
+      )).then(() => {
+        timings.sdfTotal = now$1() - sdfStart;
+        timings.total = now$1() - totalStart;
+        // console.log(`SDF - ${timings.sdfTotal}, Total - ${timings.total - timings.fontLoad}`)
+        if (neededSDFs.length && !atlas.contextLost) {
+          sdfTexture.needsUpdate = true;
         }
-      }));
+
+        // Invoke callback with the text layout arrays and updated texture
+        callback(Object.freeze({
+          parameters: args,
+          sdfTexture,
+          sdfGlyphSize,
+          sdfExponent,
+          glyphBounds,
+          glyphAtlasIndices: glyphIds,
+          glyphColors: result.glyphColors,
+          caretPositions: result.caretPositions,
+          caretHeight: result.caretHeight,
+          chunkedBounds: result.chunkedBounds,
+          ascender: result.ascender,
+          descender: result.descender,
+          lineHeight: result.lineHeight,
+          topBaseline: result.topBaseline,
+          blockBounds: result.blockBounds,
+          visibleBounds: result.visibleBounds,
+          timings: result.timings,
+          get totalBounds() {
+            console.log('totalBounds deprecated, use blockBounds instead');
+            return result.blockBounds
+          },
+          get totalBlockSize() {
+            console.log('totalBlockSize deprecated, use blockBounds instead');
+            const [x0, y0, x1, y1] = result.blockBounds;
+            return [x1 - x0, y1 - y0]
+          }
+        }));
+      });
+    });
+
+    // While the typesetting request is being handled, go ahead and make sure the atlas canvas context is
+    // "warmed up"; the first request will be the longest due to shader program compilation so this gets
+    // a head start on that process before SDFs actually start getting processed.
+    DefaultThenable.all([]).then(() => {
+      if (!atlas.contextLost) {
+        warmUpSDFCanvas(sdfTexture.image);
+      }
+    });
+  }
+
+  function generateGlyphSDF({path, atlasIndex, sdfViewBox}, {sdfGlyphSize, sdfTexture, contextLost}, useGPU) {
+    if (contextLost) {
+      // If the context is lost there's nothing we can do, just quit silently and let it
+      // get regenerated when the context is restored
+      return Promise.resolve({timing: -1})
+    }
+    const {textureWidth, sdfExponent} = CONFIG;
+    const maxDist = Math.max(sdfViewBox[2] - sdfViewBox[0], sdfViewBox[3] - sdfViewBox[1]);
+    const squareIndex = Math.floor(atlasIndex / 4);
+    const x = squareIndex % (textureWidth / sdfGlyphSize) * sdfGlyphSize;
+    const y = Math.floor(squareIndex / (textureWidth / sdfGlyphSize)) * sdfGlyphSize;
+    const channel = atlasIndex % 4;
+    return generateSDF(sdfGlyphSize, sdfGlyphSize, path, sdfViewBox, maxDist, sdfExponent, sdfTexture.image, x, y, channel, useGPU)
+  }
+
+  function initContextLossHandling(atlas) {
+    const canvas = atlas.sdfTexture.image;
+
+    /*
+    // Begin context loss simulation
+    if (!window.WebGLDebugUtils) {
+      let script = document.getElementById('WebGLDebugUtilsScript')
+      if (!script) {
+        script = document.createElement('script')
+        script.id = 'WebGLDebugUtils'
+        document.head.appendChild(script)
+        script.src = 'https://cdn.jsdelivr.net/gh/KhronosGroup/WebGLDeveloperTools@b42e702/src/debug/webgl-debug.js'
+      }
+      script.addEventListener('load', () => {
+        initContextLossHandling(atlas)
+      })
+      return
+    }
+    window.WebGLDebugUtils.makeLostContextSimulatingCanvas(canvas)
+    canvas.loseContextInNCalls(500)
+    canvas.addEventListener('webglcontextrestored', (event) => {
+      canvas.loseContextInNCalls(5000)
+    })
+    // End context loss simulation
+    */
+
+    canvas.addEventListener('webglcontextlost', (event) => {
+      console.log('Context Lost', event);
+      event.preventDefault();
+      atlas.contextLost = true;
+    });
+    canvas.addEventListener('webglcontextrestored', (event) => {
+      console.log('Context Restored', event);
+      atlas.contextLost = false;
+      // Regenerate all glyphs into the restored canvas:
+      const promises = [];
+      atlas.glyphsByFont.forEach(glyphMap => {
+        glyphMap.forEach(glyph => {
+          promises.push(generateGlyphSDF(glyph, atlas, true));
+        });
+      });
+      DefaultThenable.all(promises).then(() => {
+        atlas.sdfTexture.needsUpdate = true;
+      });
     });
   }
 
@@ -3488,46 +4302,44 @@ void main() {
   }
 
 
-  const fontProcessorWorkerModule = /*#__PURE__*/defineWorkerModule({
-    name: 'FontProcessor',
+  const typesetterWorkerModule = /*#__PURE__*/defineWorkerModule({
+    name: 'Typesetter',
     dependencies: [
       CONFIG,
       workerModule,
-      createGlyphSegmentsIndex,
-      createSDFGenerator,
-      createFontProcessor,
+      createTypesetter,
       bidiFactory
     ],
-    init(config, fontParser, createGlyphSegmentsIndex, createSDFGenerator, createFontProcessor, bidiFactory) {
-      const {sdfExponent, sdfMargin, defaultFontURL} = config;
-      const sdfGenerator = createSDFGenerator(createGlyphSegmentsIndex, { sdfExponent, sdfMargin });
-      return createFontProcessor(fontParser, sdfGenerator, bidiFactory(), { defaultFontURL })
+    init(config, fontParser, createTypesetter, bidiFactory) {
+      const {defaultFontURL} = config;
+      return createTypesetter(fontParser, bidiFactory(), { defaultFontURL })
     }
   });
 
-  const processInWorker = /*#__PURE__*/defineWorkerModule({
-    name: 'TextBuilder',
-    dependencies: [fontProcessorWorkerModule, ThenableWorkerModule],
-    init(fontProcessor, Thenable) {
+  const typesetInWorker = /*#__PURE__*/defineWorkerModule({
+    name: 'Typesetter',
+    dependencies: [
+      typesetterWorkerModule,
+      ThenableWorkerModule
+    ],
+    init(typesetter, Thenable) {
       return function(args) {
         const thenable = new Thenable();
-        fontProcessor.process(args, thenable.resolve);
+        typesetter.typeset(args, thenable.resolve);
         return thenable
       }
     },
     getTransferables(result) {
       // Mark array buffers as transferable to avoid cloning during postMessage
       const transferables = [
-        result.glyphBounds.buffer,
-        result.glyphAtlasIndices.buffer
+        result.glyphPositions.buffer,
+        result.glyphIds.buffer
       ];
       if (result.caretPositions) {
         transferables.push(result.caretPositions.buffer);
       }
-      if (result.newGlyphSDFs) {
-        result.newGlyphSDFs.forEach(d => {
-          transferables.push(d.textureData.buffer);
-        });
+      if (result.glyphColors) {
+        transferables.push(result.glyphColors.buffer);
       }
       return transferables
     }
@@ -3539,11 +4351,32 @@ void main() {
     function getTemplateGeometry(detail) {
       let geom = templateGeometries[detail];
       if (!geom) {
-        geom = templateGeometries[detail] = new THREE.PlaneBufferGeometry(1, 1, detail, detail).translate(0.5, 0.5, 0);
+        // Geometry is two planes back-to-back, which will always be rendered FrontSide only but
+        // appear as DoubleSide by default. FrontSide/BackSide are emulated using drawRange.
+        // We do it this way to avoid the performance hit of two draw calls for DoubleSide materials
+        // introduced by Three.js in r130 - see https://github.com/mrdoob/three.js/pull/21967
+        const front = new THREE.PlaneBufferGeometry(1, 1, detail, detail);
+        const back = front.clone();
+        const frontAttrs = front.attributes;
+        const backAttrs = back.attributes;
+        const combined = new THREE.BufferGeometry();
+        const vertCount = frontAttrs.uv.count;
+        for (let i = 0; i < vertCount; i++) {
+          backAttrs.position.array[i * 3] *= -1; // flip position x
+          backAttrs.normal.array[i * 3 + 2] *= -1; // flip normal z
+        }
+  ['position', 'normal', 'uv'].forEach(name => {
+          combined.setAttribute(name, new THREE.Float32BufferAttribute(
+            [...frontAttrs[name].array, ...backAttrs[name].array],
+            frontAttrs[name].itemSize)
+          );
+        });
+        combined.setIndex([...front.index.array, ...back.index.array.map(n => n + vertCount)]);
+        combined.translate(0.5, 0.5, 0);
+        geom = templateGeometries[detail] = combined;
       }
       return geom
     }
-    new THREE.Vector3();
 
     const glyphBoundsAttrName = 'aTroikaGlyphBounds';
     const glyphIndexAttrName = 'aTroikaGlyphIndex';
@@ -3604,6 +4437,13 @@ void main() {
 
       computeBoundingBox() {
         // No-op; we'll sync the boundingBox proactively when needed.
+      }
+
+      // Since our base geometry contains triangles for both front and back sides, we can emulate
+      // the "side" by restricting the draw range.
+      setSide(side) {
+        const verts = this.getIndex().count;
+        this.setDrawRange(side === THREE.BackSide ? verts / 2 : 0, side === THREE.DoubleSide ? verts : verts / 2);
       }
 
       set detail(detail) {
@@ -3843,7 +4683,7 @@ varying float vTroikaTextureChannel;
 varying vec2 vTroikaGlyphDimensions;
 
 float troikaSdfValueToSignedDistance(float alpha) {
-  // Inverse of encoding in SDFGenerator.js
+  // Inverse of exponential encoding in webgl-sdf-generator
   ${''/* TODO - there's some slight inaccuracy here when dealing with interpolated alpha values; those
     are linearly interpolated where the encoding is exponential. Look into improving this by rounding
     to nearest 2 whole texels, decoding those exponential values, and linearly interpolating the result.
@@ -3931,10 +4771,10 @@ float troikaGetEdgeAlpha(float distance, float distanceOffset, float aaDist) {
   // language=GLSL prefix="void main() {" suffix="}"
   const FRAGMENT_TRANSFORM = `
 float aaDist = troikaGetAADist();
-float distance = troikaGetFragDistValue();
+float fragDistance = troikaGetFragDistValue();
 float edgeAlpha = uTroikaSDFDebug ?
   troikaGlyphUvToSdfValue(vTroikaGlyphUV) :
-  troikaGetEdgeAlpha(distance, uTroikaDistanceOffset, max(aaDist, uTroikaBlurRadius));
+  troikaGetEdgeAlpha(fragDistance, uTroikaDistanceOffset, max(aaDist, uTroikaBlurRadius));
 
 #if !defined(IS_DEPTH_MATERIAL) && !defined(IS_DISTANCE_MATERIAL)
 vec4 fillRGBA = gl_FragColor;
@@ -3944,7 +4784,7 @@ if (fillRGBA.a == 0.0) fillRGBA.rgb = strokeRGBA.rgb;
 gl_FragColor = mix(fillRGBA, strokeRGBA, smoothstep(
   -uTroikaStrokeWidth - aaDist,
   -uTroikaStrokeWidth + aaDist,
-  distance
+  fragDistance
 ));
 gl_FragColor.a *= edgeAlpha;
 #endif
@@ -4166,8 +5006,7 @@ if (edgeAlpha == 0.0) {
 
         /**
          * @member {string} font
-         * URL of a custom font to be used. Font files can be any of the formats supported by
-         * OpenType (see https://github.com/opentypejs/opentype.js).
+         * URL of a custom font to be used. Font files can be in .ttf, .otf, or .woff (not .woff2) formats.
          * Defaults to the Roboto font loaded from Google Fonts.
          */
         this.font = null; //will use default from TextBuilder
@@ -4395,6 +5234,16 @@ if (edgeAlpha == 0.0) {
          */
         this.sdfGlyphSize = null;
 
+        /**
+         * @member {boolean} gpuAccelerateSDF
+         * When `true`, the SDF generation process will be GPU-accelerated with WebGL when possible,
+         * making it much faster especially for complex glyphs, and falling back to a JavaScript version
+         * executed in web workers when support isn't available. It should automatically detect support,
+         * but it's still somewhat experimental, so you can set it to `false` to force it to use the JS
+         * version if you encounter issues with it.
+         */
+        this.gpuAccelerateSDF = true;
+
         this.debugSDF = false;
       }
 
@@ -4431,7 +5280,8 @@ if (edgeAlpha == 0.0) {
               anchorY: this.anchorY,
               colorRanges: this.colorRanges,
               includeCaretPositions: true, //TODO parameterize
-              sdfGlyphSize: this.sdfGlyphSize
+              sdfGlyphSize: this.sdfGlyphSize,
+              gpuAccelerateSDF: this.gpuAccelerateSDF,
             }, textRenderInfo => {
               this._isSyncing = false;
 
@@ -4478,6 +5328,22 @@ if (edgeAlpha == 0.0) {
         // This may not always be a text material, e.g. if there's a scene.overrideMaterial present
         if (material.isTroikaTextMaterial) {
           this._prepareForRender(material);
+        }
+
+        // We need to force the material to FrontSide to avoid the double-draw-call performance hit
+        // introduced in Three.js r130: https://github.com/mrdoob/three.js/pull/21967 - The sidedness
+        // is instead applied via drawRange in the GlyphsGeometry.
+        material._hadOwnSide = material.hasOwnProperty('side');
+        this.geometry.setSide(material._actualSide = material.side);
+        material.side = THREE.FrontSide;
+      }
+
+      onAfterRender(renderer, scene, camera, geometry, material, group) {
+        // Restore original material side
+        if (material._hadOwnSide) {
+          material.side = material._actualSide;
+        } else {
+          delete material.side; // back to inheriting from base material
         }
       }
 
