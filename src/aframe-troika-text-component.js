@@ -104,12 +104,19 @@ aframe.registerComponent(COMPONENT_NAME, {
     var data = this.data
     var mesh = this.troikaTextMesh
     var entity = this.troikaTextEntity
+    var font = data.font
 
     // Update the text mesh
     mesh.text = (data.value || '')
       .replace(/\\n/g, '\n')
       .replace(/\\t/g, '\t')
     mesh.textAlign = data.align
+
+    // Retrieve font path if preloaded in <a-assets> with unique id
+    if (data.font.startsWith('#')) {
+      const assetItem = document.querySelector(data.font);
+      font = assetItem.getAttribute('src');
+    }
 
     mesh.anchorX = anchorMapping[data.anchor === 'align' ? data.align : data.anchor] || 'center'
     mesh.anchorY = baselineMapping[data.baseline] || 'middle'
@@ -119,7 +126,7 @@ aframe.registerComponent(COMPONENT_NAME, {
     mesh.depthOffset = data.depthOffset || 0
     mesh.direction = data.direction
     mesh.fillOpacity = data.fillOpacity
-    mesh.font = data.font //TODO allow aframe stock font names
+    mesh.font = font //TODO allow aframe stock font names
     mesh.fontSize = data.fontSize
     mesh.letterSpacing = data.letterSpacing || 0
     mesh.lineHeight = data.lineHeight || 'normal'
