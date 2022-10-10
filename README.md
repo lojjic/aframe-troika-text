@@ -33,7 +33,7 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | depthOffset           | depth-offset           | Depth buffer offset to help prevent z-fighting. Negative numbers are closer to camera, positives further.   | 0                               |
 | direction             | direction              | Main bidi direction of the text: 'auto', 'ltr', or 'rtl'                                                    | 'auto'                          |
 | fillOpacity           | fill-opacity           | Opacity of the glyph's fill.                                                                                | 1                               |
-| font                  | font                   | URL to a font file - can be a .ttf, .otf, or .woff (no .woff2)                                              | Roboto loaded from Google Fonts |
+| font                  | font                   | URL to a font file - can be a .ttf, .otf, or .woff (no .woff2) or an `<a-asset-item>` id such as `#font`.   | Roboto loaded from Google Fonts |
 | fontSize              | font-size              | Em-height at which to render the font, in meters.                                                           | 0.2                             |
 | letterSpacing         | letter-spacing         | Letter spacing in meters.                                                                                   | 0                               |
 | lineHeight            | line-height            | Line height as a multiple of the fontSize.                                                                  | *derived from font metrics*     |
