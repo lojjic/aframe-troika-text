@@ -12,215 +12,17 @@
           var d = Object.getOwnPropertyDescriptor(e, k);
           Object.defineProperty(n, k, d.get ? d : {
             enumerable: true,
-            get: function () {
-              return e[k];
-            }
+            get: function () { return e[k]; }
           });
         }
       });
     }
-    n['default'] = e;
+    n["default"] = e;
     return Object.freeze(n);
   }
 
   var THREE__namespace = /*#__PURE__*/_interopNamespace(THREE);
   var aframe__default = /*#__PURE__*/_interopDefaultLegacy(aframe);
-
-  /**
-   * Lightweight thenable implementation that is entirely self-contained within a single
-   * function with no external dependencies so it can be easily shipped across to a WorkerModule.
-   *
-   * This implementation conforms fully to the Promises/A+ spec so it can safely interoperate
-   * with other thenable implementations. https://github.com/promises-aplus/promises-spec
-   *
-   * *However*, it is _not_ a full implementation of ES2015 Promises, e.g. it does not
-   * have the same constructor signature and does not expose a `catch` method or the static
-   * `resolve`/`reject`/`all`/`race` initializer methods. If you need to hand a Thenable
-   * instance off to consuming code that may expect a true Promise, you'll want to wrap it
-   * in a native-or-polyfilled Promise first.
-   *
-   * (Why yet another Promises/A+ implementation? Great question. We needed a polyfill-like
-   * thing that was (a) wrapped in a single function for easy serialization across to a Worker,
-   * and (b) was as small as possible -- at ~900B minified (~500B gzipped) this is the smallest
-   * implementation I've found. And also, exercises like this are challenging and fun.)
-   */
-  function BespokeThenable() {
-    var state = 0; // 0=pending, 1=fulfilled, -1=rejected
-    var queue = [];
-    var value;
-    var scheduled = 0;
-    var completeCalled = 0;
-
-    function then(onResolve, onReject) {
-      var nextThenable = BespokeThenable();
-
-      function handleNext() {
-        var cb = state > 0 ? onResolve : onReject;
-        if (isFn(cb)) {
-          try {
-            var result = cb(value);
-            if (result === nextThenable) {
-              recursiveError();
-            }
-            var resultThen = getThenableThen(result);
-            if (resultThen) {
-              resultThen.call(result, nextThenable.resolve, nextThenable.reject);
-            } else {
-              nextThenable.resolve(result);
-            }
-          } catch (err) {
-            nextThenable.reject(err);
-          }
-        } else {
-          nextThenable[state > 0 ? 'resolve' : 'reject'](value);
-        }
-      }
-
-      queue.push(handleNext);
-      if (state) {
-        scheduleQueueFlush();
-      }
-      return nextThenable
-    }
-
-    var resolve = oneTime(function (val) {
-      if (!completeCalled) {
-        complete(1, val);
-      }
-    });
-
-    var reject = oneTime(function (reason) {
-      if (!completeCalled) {
-        complete(-1, reason);
-      }
-    });
-
-    function complete(st, val) {
-      completeCalled++;
-      var ignoreThrow = 0;
-      try {
-        if (val === thenableObj) {
-          recursiveError();
-        }
-        var valThen = st > 0 && getThenableThen(val);
-        if (valThen) {
-          valThen.call(val, oneTime(function (v) {
-            ignoreThrow++;
-            complete(1, v);
-          }), oneTime(function (v) {
-            ignoreThrow++;
-            complete(-1, v);
-          }));
-        } else {
-          state = st;
-          value = val;
-          scheduleQueueFlush();
-        }
-      } catch(e) {
-        if (!state && !ignoreThrow) {
-          complete(-1, e);
-        }
-      }
-    }
-
-    function scheduleQueueFlush() {
-      if (!scheduled) {
-        setTimeout(flushQueue, 0); //TODO setImmediate or postMessage approach if available?
-        scheduled = 1;
-      }
-    }
-
-    function flushQueue() {
-      var q = queue;
-      scheduled = 0;
-      queue = [];
-      q.forEach(callIt);
-    }
-
-    function callIt(fn) {
-      fn();
-    }
-
-    function getThenableThen(val) {
-      var valThen = val && (isFn(val) || typeof val === 'object') && val.then;
-      return isFn(valThen) && valThen
-    }
-
-    function oneTime(fn) {
-      var called = 0;
-      return function() {
-        var args = [], len = arguments.length;
-        while ( len-- ) args[ len ] = arguments[ len ];
-
-        if (!called++) {
-          fn.apply(this, args);
-        }
-      }
-    }
-
-    function recursiveError() {
-      throw new TypeError('Chaining cycle detected')
-    }
-
-    var isFn = function (v) { return typeof v === 'function'; };
-
-    var thenableObj = {
-      then: then,
-      resolve: resolve,
-      reject: reject
-    };
-    return thenableObj
-  }
-
-
-  /**
-   * Thenable implementation that uses a native Promise under the covers. This implementation
-   * is preferred if Promise is available, for better performance and dev tools integration.
-   * @constructor
-   */
-  function NativePromiseThenable() {
-    var resolve, reject;
-    var promise = new Promise(function (res, rej) {
-      resolve = res;
-      reject = rej;
-    });
-    return {
-      then: promise.then.bind(promise),
-      resolve: resolve,
-      reject: reject
-    }
-  }
-
-  /**
-   * Promise.all() impl:
-   */
-  BespokeThenable.all = NativePromiseThenable.all = function(items) {
-    var resultCount = 0;
-    var results = [];
-    var out = DefaultThenable();
-    if (items.length === 0) {
-      out.resolve([]);
-    } else {
-      items.forEach(function (item, i) {
-        var itemThenable = DefaultThenable();
-        itemThenable.resolve(item);
-        itemThenable.then(function (res) {
-          resultCount++;
-          results[i] = res;
-          if (resultCount === items.length) {
-            out.resolve(results);
-          }
-        }, out.reject);
-      });
-    }
-    return out
-  };
-
-
-  /**
-   * Choose the best Thenable implementation and export it as the default.
-   */
-  var DefaultThenable = typeof Promise === 'function' ? NativePromiseThenable : BespokeThenable;
 
   /**
    * Main content for the worker that handles the loading and execution of
@@ -412,14 +214,14 @@
       ) : [];
 
       // Invoke init with the resolved dependencies
-      var initThenable = DefaultThenable.all(dependencies).then(function (deps) {
+      var initPromise = Promise.all(dependencies).then(function (deps) {
         return init.apply(null, deps)
       });
 
       // Cache the resolved promise for subsequent calls
-      moduleFunc._getInitResult = function () { return initThenable; };
+      moduleFunc._getInitResult = function () { return initPromise; };
 
-      return initThenable
+      return initPromise
     };
     return moduleFunc
   }
@@ -491,7 +293,7 @@
     }
     var id = "workerModule" + (++_workerModuleId);
     var name = options.name || id;
-    var registrationThenable = null;
+    var registrationPromise = null;
 
     dependencies = dependencies && dependencies.map(function (dep) {
       // Wrap raw functions as worker modules with no dependencies
@@ -516,17 +318,17 @@
       while ( len-- ) args[ len ] = arguments[ len ];
 
       // Register this module if needed
-      if (!registrationThenable) {
-        registrationThenable = callWorker(workerId,'registerModule', moduleFunc.workerModuleData);
+      if (!registrationPromise) {
+        registrationPromise = callWorker(workerId,'registerModule', moduleFunc.workerModuleData);
         var unregister = function () {
-          registrationThenable = null;
+          registrationPromise = null;
           registeredModules[workerId].delete(unregister);
         }
         ;(registeredModules[workerId] || (registeredModules[workerId] = new Set())).add(unregister);
       }
 
-      // Invoke the module, returning a thenable
-      return registrationThenable.then(function (ref) {
+      // Invoke the module, returning a promise
+      return registrationPromise.then(function (ref) {
         var isCallable = ref.isCallable;
 
         if (isCallable) {
@@ -614,35 +416,22 @@
 
   // Issue a call to the worker with a callback to handle the response
   function callWorker(workerId, action, data) {
-    var thenable = DefaultThenable();
-    var messageId = ++_messageId;
-    openRequests[messageId] = function (response) {
-      if (response.success) {
-        thenable.resolve(response.result);
-      } else {
-        thenable.reject(new Error(("Error in worker " + action + " call: " + (response.error))));
-      }
-    };
-    getWorker(workerId).postMessage({
-      messageId: messageId,
-      action: action,
-      data: data
-    });
-    return thenable
+    return new Promise(function (resolve, reject) {
+      var messageId = ++_messageId;
+      openRequests[messageId] = function (response) {
+        if (response.success) {
+          resolve(response.result);
+        } else {
+          reject(new Error(("Error in worker " + action + " call: " + (response.error))));
+        }
+      };
+      getWorker(workerId).postMessage({
+        messageId: messageId,
+        action: action,
+        data: data
+      });
+    })
   }
-
-  /**
-   * Just the {@link Thenable} function wrapped as a worker module. If another worker
-   * module needs Thenable as a dependency, it's better to pass this module rather than
-   * the raw function in its `dependencies` array so it only gets registered once.
-   */
-  var ThenableWorkerModule = /*#__PURE__*/defineWorkerModule({
-    name: 'Thenable',
-    dependencies: [DefaultThenable],
-    init: function(Thenable) {
-      return Thenable
-    }
-  });
 
   function SDFGenerator() {
   var exports = (function (exports) {
@@ -2929,6 +2718,9 @@ void main() {
    *     unitsPerEm: number,
    *     ascender: number,
    *     descender: number,
+   *     capHeight: number,
+   *     xHeight: number,
+   *     lineGap: number,
    *     forEachGlyph(string, fontSize, letterSpacing, callback) {
    *       //invokes callback for each glyph to render, passing it an object:
    *       callback({
@@ -2938,14 +2730,8 @@ void main() {
    *         yMin: number,
    *         xMax: number,
    *         yMax: number,
-   *         pathCommandCount: number,
-   *         forEachPathCommand(callback) {
-   *           //invokes callback for each path command, with args:
-   *           callback(
-   *             type: 'M|L|C|Q|Z',
-   *             ...args //0 to 6 args depending on the type
-   *           )
-   *         }
+   *         path: string,
+   *         pathCommandCount: number
    *       })
    *     }
    *   }
@@ -2969,9 +2755,12 @@ void main() {
     // Set of Unicode Default_Ignorable_Code_Point characters, these will not produce visible glyphs
     const DEFAULT_IGNORABLE_CHARS = /[\u00AD\u034F\u061C\u115F-\u1160\u17B4-\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFF8]/;
 
+    // This regex (instead of /\s/) allows us to select all whitespace EXCEPT for non-breaking white spaces
+    const lineBreakingWhiteSpace = `[^\\S\\u00A0]`;
+
     // Incomplete set of characters that allow line breaking after them
     // In the future we may consider a full Unicode line breaking algorithm impl: https://www.unicode.org/reports/tr14
-    const BREAK_AFTER_CHARS = /[\s\-\u007C\u00AD\u2010\u2012-\u2014\u2027\u2056\u2E17\u2E40]/;
+    const BREAK_AFTER_CHARS = new RegExp(`${lineBreakingWhiteSpace}|[\\-\\u007C\\u00AD\\u2010\\u2012-\\u2014\\u2027\\u2056\\u2E17\\u2E40]`);
 
     /**
      * Load a given font url
@@ -3093,7 +2882,7 @@ void main() {
         let maxLineWidth = 0;
         let renderableGlyphCount = 0;
         let canWrap = whiteSpace !== 'nowrap';
-        const {ascender, descender, unitsPerEm} = fontObj;
+        const {ascender, descender, unitsPerEm, lineGap, capHeight, xHeight} = fontObj;
         timings.fontLoad = now() - mainStart;
         const typesetStart = now();
 
@@ -3104,7 +2893,7 @@ void main() {
         // Determine appropriate value for 'normal' line height based on the font's actual metrics
         // TODO this does not guarantee individual glyphs won't exceed the line height, e.g. Roboto; should we use yMin/Max instead?
         if (lineHeight === 'normal') {
-          lineHeight = (ascender - descender) / unitsPerEm;
+          lineHeight = (ascender - descender + lineGap) / unitsPerEm;
         }
 
         // Determine line height and leading adjustments
@@ -3127,7 +2916,7 @@ void main() {
 
           // Calc isWhitespace and isEmpty once per glyphObj
           if (!('isEmpty' in glyphObj)) {
-            glyphObj.isWhitespace = !!char && /\s/.test(char);
+            glyphObj.isWhitespace = !!char && new RegExp(lineBreakingWhiteSpace).test(char);
             glyphObj.canBreakAfter = !!char && BREAK_AFTER_CHARS.test(char);
             glyphObj.isEmpty = glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax || DEFAULT_IGNORABLE_CHARS.test(char);
           }
@@ -3222,6 +3011,8 @@ void main() {
             let height = lines.length * lineHeight;
             anchorYOffset = anchorY === 'top' ? 0 :
               anchorY === 'top-baseline' ? -topBaseline :
+              anchorY === 'top-cap' ? -topBaseline - capHeight * fontSizeMult :
+              anchorY === 'top-ex' ? -topBaseline - xHeight * fontSizeMult :
               anchorY === 'middle' ? height / 2 :
               anchorY === 'bottom' ? height :
               anchorY === 'bottom-baseline' ? height - halfLeading + descender * fontSizeMult :
@@ -3454,6 +3245,8 @@ void main() {
           unitsPerEm, //font units per em
           ascender: ascender * fontSizeMult, //font ascender
           descender: descender * fontSizeMult, //font descender
+          capHeight: capHeight * fontSizeMult, //font cap-height
+          xHeight: xHeight * fontSizeMult, //font x-height
           lineHeight, //computed line height
           topBaseline, //y coordinate of the top line's baseline
           blockBounds: [ //bounds for the whole block of text, including vertical padding for lineHeight
@@ -3462,7 +3255,7 @@ void main() {
             anchorXOffset + maxLineWidth,
             anchorYOffset
           ],
-          visibleBounds, //total bounds of visible text paths, may be larger or smaller than totalBounds
+          visibleBounds, //total bounds of visible text paths, may be larger or smaller than blockBounds
           timings
         });
       });
@@ -3553,7 +3346,7 @@ void main() {
 
   const now = () => (self.performance || Date).now();
 
-  const mainThreadGenerator = SDFGenerator();
+  const mainThreadGenerator = /*#__PURE__*/ SDFGenerator();
 
   let warned;
 
@@ -3582,101 +3375,100 @@ void main() {
     )
   }
 
+  const queue = [];
+  const chunkTimeBudget = 5; // ms
+  let timer = 0;
+
+  function nextChunk() {
+    const start = now();
+    while (queue.length && now() - start < chunkTimeBudget) {
+      queue.shift()();
+    }
+    timer = queue.length ? setTimeout(nextChunk, 0) : 0;
+  }
+
   /**
    * WebGL-based implementation executed on the main thread. Requests are executed in time-bounded
    * macrotask chunks to allow render frames to execute in between.
    */
-  const generateSDF_GL = /*#__PURE__*/function() {
-    const queue = [];
-    const chunkTimeBudget = 5; //ms
-    let timer = 0;
-    function nextChunk() {
-      const start = now();
-      while (queue.length && now() - start < chunkTimeBudget) {
-        queue.shift()();
-      }
-      timer = queue.length ? setTimeout(nextChunk, 0) : 0;
-    }
-    return (...args) => {
-      const thenable = DefaultThenable();
+  const generateSDF_GL = (...args) => {
+    return new Promise((resolve, reject) => {
       queue.push(() => {
         const start = now();
         try {
           mainThreadGenerator.webgl.generateIntoCanvas(...args);
-          thenable.resolve({timing: now() - start});
-        } catch(err) {
-          thenable.reject(err);
+          resolve({ timing: now() - start });
+        } catch (err) {
+          reject(err);
         }
       });
       if (!timer) {
         timer = setTimeout(nextChunk, 0);
       }
-      return thenable
-    }
-  }();
+    })
+  };
+
+  const threadCount = 4; // how many workers to spawn
+  const idleTimeout = 2000; // workers will be terminated after being idle this many milliseconds
+  const threads = {};
+  let callNum = 0;
 
   /**
    * Fallback JS-based implementation, fanned out to a number of worker threads for parallelism
    */
-  const generateSDF_JS_Worker = /*#__PURE__*/function() {
-    const threadCount = 4; //how many workers to spawn
-    const idleTimeout = 2000; //workers will be terminated after being idle this many milliseconds
-    const threads = {};
-    let callNum = 0;
-    return function(width, height, path, viewBox, distance, exponent, canvas, x, y, channel) {
-      const workerId = 'TroikaTextSDFGenerator_JS_' + ((callNum++) % threadCount);
-      let thread = threads[workerId];
-      if (!thread) {
-        thread = threads[workerId] = {
-          workerModule: defineWorkerModule({
-            name: workerId,
-            workerId,
-            dependencies: [
-              SDFGenerator,
-              now
-            ],
-            init(_createSDFGenerator, now) {
-              const generate = _createSDFGenerator().javascript.generate;
-              return function (...args) {
-                const start = now();
-                const textureData = generate(...args);
-                return {
-                  textureData,
-                  timing: now() - start
-                }
+  function generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel) {
+    const workerId = 'TroikaTextSDFGenerator_JS_' + ((callNum++) % threadCount);
+    let thread = threads[workerId];
+    if (!thread) {
+      thread = threads[workerId] = {
+        workerModule: defineWorkerModule({
+          name: workerId,
+          workerId,
+          dependencies: [
+            SDFGenerator,
+            now
+          ],
+          init(_createSDFGenerator, now) {
+            const generate = _createSDFGenerator().javascript.generate;
+            return function (...args) {
+              const start = now();
+              const textureData = generate(...args);
+              return {
+                textureData,
+                timing: now() - start
               }
-            },
-            getTransferables(result) {
-              return [result.textureData.buffer]
             }
-          }),
-          requests: 0,
-          idleTimer: null
-        };
-      }
-
-      thread.requests++;
-      clearTimeout(thread.idleTimer);
-      return thread.workerModule(width, height, path, viewBox, distance, exponent)
-        .then(({textureData, timing}) => {
-          // copy result data into the canvas
-          const start = now();
-          // expand single-channel data into rgba
-          const imageData = new Uint8Array(textureData.length * 4);
-          for (let i = 0; i < textureData.length; i++) {
-            imageData[i * 4 + channel] = textureData[i];
+          },
+          getTransferables(result) {
+            return [result.textureData.buffer]
           }
-          mainThreadGenerator.webglUtils.renderImageData(canvas, imageData, x, y, width, height, 1 << (3 - channel));
-          timing += now() - start;
-
-          // clean up workers after a while
-          if (--thread.requests === 0) {
-            thread.idleTimer = setTimeout(() => { terminateWorker(workerId); }, idleTimeout);
-          }
-          return {timing}
-        })
+        }),
+        requests: 0,
+        idleTimer: null
+      };
     }
-  }();
+
+    thread.requests++;
+    clearTimeout(thread.idleTimer);
+    return thread.workerModule(width, height, path, viewBox, distance, exponent)
+      .then(({ textureData, timing }) => {
+        // copy result data into the canvas
+        const start = now();
+        // expand single-channel data into rgba
+        const imageData = new Uint8Array(textureData.length * 4);
+        for (let i = 0; i < textureData.length; i++) {
+          imageData[i * 4 + channel] = textureData[i];
+        }
+        mainThreadGenerator.webglUtils.renderImageData(canvas, imageData, x, y, width, height, 1 << (3 - channel));
+        timing += now() - start;
+
+        // clean up workers after a while
+        if (--thread.requests === 0) {
+          thread.idleTimer = setTimeout(() => { terminateWorker(workerId); }, idleTimeout);
+        }
+        return { timing }
+      })
+  }
 
   function warmUpSDFCanvas(canvas) {
     if (!canvas._warm) {
@@ -3691,7 +3483,7 @@ void main() {
   Custom build of Typr.ts (https://github.com/fredli74/Typr.ts) for use in Troika text rendering.
   Original MIT license applies: https://github.com/fredli74/Typr.ts/blob/master/LICENSE
   */
-  function typrFactory(){return "undefined"==typeof window&&(self.window=self),function(r){var e={parse:function(r){var t=e._bin,a=new Uint8Array(r);if("ttcf"==t.readASCII(a,0,4)){var n=4;t.readUshort(a,n),n+=2,t.readUshort(a,n),n+=2;var o=t.readUint(a,n);n+=4;for(var s=[],i=0;i<o;i++){var h=t.readUint(a,n);n+=4,s.push(e._readFont(a,h));}return s}return [e._readFont(a,0)]},_readFont:function(r,t){var a=e._bin,n=t;a.readFixed(r,t),t+=4;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2;for(var s=["cmap","head","hhea","maxp","hmtx","name","OS/2","post","loca","glyf","kern","CFF ","GPOS","GSUB","SVG "],i={_data:r,_offset:n},h={},f=0;f<o;f++){var d=a.readASCII(r,t,4);t+=4,a.readUint(r,t),t+=4;var l=a.readUint(r,t);t+=4;var u=a.readUint(r,t);t+=4,h[d]={offset:l,length:u};}for(f=0;f<s.length;f++){var v=s[f];h[v]&&(i[v.trim()]=e[v.trim()].parse(r,h[v].offset,h[v].length,i));}return i},_tabOffset:function(r,t,a){for(var n=e._bin,o=n.readUshort(r,a+4),s=a+12,i=0;i<o;i++){var h=n.readASCII(r,s,4);s+=4,n.readUint(r,s),s+=4;var f=n.readUint(r,s);if(s+=4,n.readUint(r,s),s+=4,h==t)return f}return 0}};e._bin={readFixed:function(r,e){return (r[e]<<8|r[e+1])+(r[e+2]<<8|r[e+3])/65540},readF2dot14:function(r,t){return e._bin.readShort(r,t)/16384},readInt:function(r,t){return e._bin._view(r).getInt32(t)},readInt8:function(r,t){return e._bin._view(r).getInt8(t)},readShort:function(r,t){return e._bin._view(r).getInt16(t)},readUshort:function(r,t){return e._bin._view(r).getUint16(t)},readUshorts:function(r,t,a){for(var n=[],o=0;o<a;o++)n.push(e._bin.readUshort(r,t+2*o));return n},readUint:function(r,t){return e._bin._view(r).getUint32(t)},readUint64:function(r,t){return 4294967296*e._bin.readUint(r,t)+e._bin.readUint(r,t+4)},readASCII:function(r,e,t){for(var a="",n=0;n<t;n++)a+=String.fromCharCode(r[e+n]);return a},readUnicode:function(r,e,t){for(var a="",n=0;n<t;n++){var o=r[e++]<<8|r[e++];a+=String.fromCharCode(o);}return a},_tdec:"undefined"!=typeof window&&window.TextDecoder?new window.TextDecoder:null,readUTF8:function(r,t,a){var n=e._bin._tdec;return n&&0==t&&a==r.length?n.decode(r):e._bin.readASCII(r,t,a)},readBytes:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(r[e+n]);return a},readASCIIArray:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(String.fromCharCode(r[e+n]));return a},_view:function(r){return r._dataView||(r._dataView=r.buffer?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(new Uint8Array(r).buffer))}},e._lctf={},e._lctf.parse=function(r,t,a,n,o){var s=e._bin,i={},h=t;s.readFixed(r,t),t+=4;var f=s.readUshort(r,t);t+=2;var d=s.readUshort(r,t);t+=2;var l=s.readUshort(r,t);return t+=2,i.scriptList=e._lctf.readScriptList(r,h+f),i.featureList=e._lctf.readFeatureList(r,h+d),i.lookupList=e._lctf.readLookupList(r,h+l,o),i},e._lctf.readLookupList=function(r,t,a){var n=e._bin,o=t,s=[],i=n.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=n.readUshort(r,t);t+=2;var d=e._lctf.readLookupTable(r,o+f,a);s.push(d);}return s},e._lctf.readLookupTable=function(r,t,a){var n=e._bin,o=t,s={tabs:[]};s.ltype=n.readUshort(r,t),t+=2,s.flag=n.readUshort(r,t),t+=2;var i=n.readUshort(r,t);t+=2;for(var h=s.ltype,f=0;f<i;f++){var d=n.readUshort(r,t);t+=2;var l=a(r,h,o+d,s);s.tabs.push(l);}return s},e._lctf.numOfOnes=function(r){for(var e=0,t=0;t<32;t++)0!=(r>>>t&1)&&e++;return e},e._lctf.readClassDef=function(r,t){var a=e._bin,n=[],o=a.readUshort(r,t);if(t+=2,1==o){var s=a.readUshort(r,t);t+=2;var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++)n.push(s+h),n.push(s+h),n.push(a.readUshort(r,t)),t+=2;}if(2==o){var f=a.readUshort(r,t);t+=2;for(h=0;h<f;h++)n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2;}return n},e._lctf.getInterval=function(r,e){for(var t=0;t<r.length;t+=3){var a=r[t],n=r[t+1];if(r[t+2],a<=e&&e<=n)return t}return -1},e._lctf.readCoverage=function(r,t){var a=e._bin,n={};n.fmt=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,1==n.fmt&&(n.tab=a.readUshorts(r,t,o)),2==n.fmt&&(n.tab=a.readUshorts(r,t,3*o)),n},e._lctf.coverageIndex=function(r,t){var a=r.tab;if(1==r.fmt)return a.indexOf(t);if(2==r.fmt){var n=e._lctf.getInterval(a,t);if(-1!=n)return a[n+2]+(t-a[n])}return -1},e._lctf.readFeatureList=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2;var d=e._lctf.readFeatureTable(r,n+f);d.tag=h.trim(),o.push(d);}return o},e._lctf.readFeatureTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,s>0&&(o.featureParams=n+s);var i=a.readUshort(r,t);t+=2,o.tab=[];for(var h=0;h<i;h++)o.tab.push(a.readUshort(r,t+2*h));return o},e._lctf.readScriptList=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2,o[h.trim()]=e._lctf.readScriptTable(r,n+f);}return o},e._lctf.readScriptTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,o.default=e._lctf.readLangSysTable(r,n+s);var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=a.readASCII(r,t,4);t+=4;var d=a.readUshort(r,t);t+=2,o[f.trim()]=e._lctf.readLangSysTable(r,n+d);}return o},e._lctf.readLangSysTable=function(r,t){var a=e._bin,n={};a.readUshort(r,t),t+=2,n.reqFeature=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,n.features=a.readUshorts(r,t,o),n},e.CFF={},e.CFF.parse=function(r,t,a){var n=e._bin;(r=new Uint8Array(r.buffer,t,a))[t=0],r[++t],r[++t],r[++t],t++;var o=[];t=e.CFF.readIndex(r,t,o);for(var s=[],i=0;i<o.length-1;i++)s.push(n.readASCII(r,t+o[i],o[i+1]-o[i]));t+=o[o.length-1];var h=[];t=e.CFF.readIndex(r,t,h);var f=[];for(i=0;i<h.length-1;i++)f.push(e.CFF.readDict(r,t+h[i],t+h[i+1]));t+=h[h.length-1];var d=f[0],l=[];t=e.CFF.readIndex(r,t,l);var u=[];for(i=0;i<l.length-1;i++)u.push(n.readASCII(r,t+l[i],l[i+1]-l[i]));if(t+=l[l.length-1],e.CFF.readSubrs(r,t,d),d.CharStrings){t=d.CharStrings;l=[];t=e.CFF.readIndex(r,t,l);var v=[];for(i=0;i<l.length-1;i++)v.push(n.readBytes(r,t+l[i],l[i+1]-l[i]));d.CharStrings=v;}if(d.ROS){t=d.FDArray;var c=[];t=e.CFF.readIndex(r,t,c),d.FDArray=[];for(i=0;i<c.length-1;i++){var p=e.CFF.readDict(r,t+c[i],t+c[i+1]);e.CFF._readFDict(r,p,u),d.FDArray.push(p);}t+=c[c.length-1],t=d.FDSelect,d.FDSelect=[];var U=r[t];if(t++,3!=U)throw U;var g=n.readUshort(r,t);t+=2;for(i=0;i<g+1;i++)d.FDSelect.push(n.readUshort(r,t),r[t+2]),t+=3;}return d.Encoding&&(d.Encoding=e.CFF.readEncoding(r,d.Encoding,d.CharStrings.length)),d.charset&&(d.charset=e.CFF.readCharset(r,d.charset,d.CharStrings.length)),e.CFF._readFDict(r,d,u),d},e.CFF._readFDict=function(r,t,a){var n;for(var o in t.Private&&(n=t.Private[1],t.Private=e.CFF.readDict(r,n,n+t.Private[0]),t.Private.Subrs&&e.CFF.readSubrs(r,n+t.Private.Subrs,t.Private)),t)-1!=["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(o)&&(t[o]=a[t[o]-426+35]);},e.CFF.readSubrs=function(r,t,a){var n=e._bin,o=[];t=e.CFF.readIndex(r,t,o);var s,i=o.length;s=i<1240?107:i<33900?1131:32768,a.Bias=s,a.Subrs=[];for(var h=0;h<o.length-1;h++)a.Subrs.push(n.readBytes(r,t+o[h],o[h+1]-o[h]));},e.CFF.tableSE=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,0,111,112,113,114,0,115,116,117,118,119,120,121,122,0,123,0,124,125,126,127,128,129,130,131,0,132,133,0,134,135,136,137,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,138,0,139,0,0,0,0,140,141,142,143,0,0,0,0,0,144,0,0,0,145,0,0,146,147,148,149,0,0,0,0],e.CFF.glyphByUnicode=function(r,e){for(var t=0;t<r.charset.length;t++)if(r.charset[t]==e)return t;return -1},e.CFF.glyphBySE=function(r,t){return t<0||t>255?-1:e.CFF.glyphByUnicode(r,e.CFF.tableSE[t])},e.CFF.readEncoding=function(r,t,a){e._bin;var n=[".notdef"],o=r[t];if(t++,0!=o)throw "error: unknown encoding format: "+o;var s=r[t];t++;for(var i=0;i<s;i++)n.push(r[t+i]);return n},e.CFF.readCharset=function(r,t,a){var n=e._bin,o=[".notdef"],s=r[t];if(t++,0==s)for(var i=0;i<a;i++){var h=n.readUshort(r,t);t+=2,o.push(h);}else {if(1!=s&&2!=s)throw "error: format: "+s;for(;o.length<a;){h=n.readUshort(r,t);t+=2;var f=0;1==s?(f=r[t],t++):(f=n.readUshort(r,t),t+=2);for(i=0;i<=f;i++)o.push(h),h++;}}return o},e.CFF.readIndex=function(r,t,a){var n=e._bin,o=n.readUshort(r,t)+1,s=r[t+=2];if(t++,1==s)for(var i=0;i<o;i++)a.push(r[t+i]);else if(2==s)for(i=0;i<o;i++)a.push(n.readUshort(r,t+2*i));else if(3==s)for(i=0;i<o;i++)a.push(16777215&n.readUint(r,t+3*i-1));else if(1!=o)throw "unsupported offset size: "+s+", count: "+o;return (t+=o*s)-1},e.CFF.getCharString=function(r,t,a){var n=e._bin,o=r[t],s=r[t+1];r[t+2],r[t+3],r[t+4];var i=1,h=null,f=null;o<=20&&(h=o,i=1),12==o&&(h=100*o+s,i=2),21<=o&&o<=27&&(h=o,i=1),28==o&&(f=n.readShort(r,t+1),i=3),29<=o&&o<=31&&(h=o,i=1),32<=o&&o<=246&&(f=o-139,i=1),247<=o&&o<=250&&(f=256*(o-247)+s+108,i=2),251<=o&&o<=254&&(f=256*-(o-251)-s-108,i=2),255==o&&(f=n.readInt(r,t+1)/65535,i=5),a.val=null!=f?f:"o"+h,a.size=i;},e.CFF.readCharString=function(r,t,a){for(var n=t+a,o=e._bin,s=[];t<n;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,l=null;i<=20&&(d=i,f=1),12==i&&(d=100*i+h,f=2),19!=i&&20!=i||(d=i,f=2),21<=i&&i<=27&&(d=i,f=1),28==i&&(l=o.readShort(r,t+1),f=3),29<=i&&i<=31&&(d=i,f=1),32<=i&&i<=246&&(l=i-139,f=1),247<=i&&i<=250&&(l=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(l=256*-(i-251)-h-108,f=2),255==i&&(l=o.readInt(r,t+1)/65535,f=5),s.push(null!=l?l:"o"+d),t+=f;}return s},e.CFF.readDict=function(r,t,a){for(var n=e._bin,o={},s=[];t<a;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,l=null;if(28==i&&(l=n.readShort(r,t+1),f=3),29==i&&(l=n.readInt(r,t+1),f=5),32<=i&&i<=246&&(l=i-139,f=1),247<=i&&i<=250&&(l=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(l=256*-(i-251)-h-108,f=2),255==i)throw l=n.readInt(r,t+1)/65535,f=5,"unknown number";if(30==i){var u=[];for(f=1;;){var v=r[t+f];f++;var c=v>>4,p=15&v;if(15!=c&&u.push(c),15!=p&&u.push(p),15==p)break}for(var U="",g=[0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"],S=0;S<u.length;S++)U+=g[u[S]];l=parseFloat(U);}if(i<=21)if(d=["version","Notice","FullName","FamilyName","Weight","FontBBox","BlueValues","OtherBlues","FamilyBlues","FamilyOtherBlues","StdHW","StdVW","escape","UniqueID","XUID","charset","Encoding","CharStrings","Private","Subrs","defaultWidthX","nominalWidthX"][i],f=1,12==i)d=["Copyright","isFixedPitch","ItalicAngle","UnderlinePosition","UnderlineThickness","PaintType","CharstringType","FontMatrix","StrokeWidth","BlueScale","BlueShift","BlueFuzz","StemSnapH","StemSnapV","ForceBold",0,0,"LanguageGroup","ExpansionFactor","initialRandomSeed","SyntheticBase","PostScript","BaseFontName","BaseFontBlend",0,0,0,0,0,0,"ROS","CIDFontVersion","CIDFontRevision","CIDFontType","CIDCount","UIDBase","FDArray","FDSelect","FontName"][h],f=2;null!=d?(o[d]=1==s.length?s[0]:s,s=[]):s.push(l),t+=f;}return o},e.cmap={},e.cmap.parse=function(r,t,a){r=new Uint8Array(r.buffer,t,a),t=0;var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2;var i=[];o.tables=[];for(var h=0;h<s;h++){var f=n.readUshort(r,t);t+=2;var d=n.readUshort(r,t);t+=2;var l=n.readUint(r,t);t+=4;var u="p"+f+"e"+d,v=i.indexOf(l);if(-1==v){var c;v=o.tables.length,i.push(l);var p=n.readUshort(r,l);0==p?c=e.cmap.parse0(r,l):4==p?c=e.cmap.parse4(r,l):6==p?c=e.cmap.parse6(r,l):12==p?c=e.cmap.parse12(r,l):console.debug("unknown format: "+p,f,d,l),o.tables.push(c);}if(null!=o[u])throw "multiple tables for one platform+encoding";o[u]=v;}return o},e.cmap.parse0=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,n.map=[];for(var s=0;s<o-6;s++)n.map.push(r[t+s]);return n},e.cmap.parse4=function(r,t){var a=e._bin,n=t,o={};o.format=a.readUshort(r,t),t+=2;var s=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2;var i=a.readUshort(r,t);t+=2;var h=i/2;o.searchRange=a.readUshort(r,t),t+=2,o.entrySelector=a.readUshort(r,t),t+=2,o.rangeShift=a.readUshort(r,t),t+=2,o.endCount=a.readUshorts(r,t,h),t+=2*h,t+=2,o.startCount=a.readUshorts(r,t,h),t+=2*h,o.idDelta=[];for(var f=0;f<h;f++)o.idDelta.push(a.readShort(r,t)),t+=2;for(o.idRangeOffset=a.readUshorts(r,t,h),t+=2*h,o.glyphIdArray=[];t<n+s;)o.glyphIdArray.push(a.readUshort(r,t)),t+=2;return o},e.cmap.parse6=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,n.firstCode=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,n.glyphIdArray=[];for(var s=0;s<o;s++)n.glyphIdArray.push(a.readUshort(r,t)),t+=2;return n},e.cmap.parse12=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,t+=2,a.readUint(r,t),t+=4,a.readUint(r,t),t+=4;var o=a.readUint(r,t);t+=4,n.groups=[];for(var s=0;s<o;s++){var i=t+12*s,h=a.readUint(r,i+0),f=a.readUint(r,i+4),d=a.readUint(r,i+8);n.groups.push([h,f,d]);}return n},e.glyf={},e.glyf.parse=function(r,e,t,a){for(var n=[],o=0;o<a.maxp.numGlyphs;o++)n.push(null);return n},e.glyf._parseGlyf=function(r,t){var a=e._bin,n=r._data,o=e._tabOffset(n,"glyf",r._offset)+r.loca[t];if(r.loca[t]==r.loca[t+1])return null;var s={};if(s.noc=a.readShort(n,o),o+=2,s.xMin=a.readShort(n,o),o+=2,s.yMin=a.readShort(n,o),o+=2,s.xMax=a.readShort(n,o),o+=2,s.yMax=a.readShort(n,o),o+=2,s.xMin>=s.xMax||s.yMin>=s.yMax)return null;if(s.noc>0){s.endPts=[];for(var i=0;i<s.noc;i++)s.endPts.push(a.readUshort(n,o)),o+=2;var h=a.readUshort(n,o);if(o+=2,n.length-o<h)return null;s.instructions=a.readBytes(n,o,h),o+=h;var f=s.endPts[s.noc-1]+1;s.flags=[];for(i=0;i<f;i++){var d=n[o];if(o++,s.flags.push(d),0!=(8&d)){var l=n[o];o++;for(var u=0;u<l;u++)s.flags.push(d),i++;}}s.xs=[];for(i=0;i<f;i++){var v=0!=(2&s.flags[i]),c=0!=(16&s.flags[i]);v?(s.xs.push(c?n[o]:-n[o]),o++):c?s.xs.push(0):(s.xs.push(a.readShort(n,o)),o+=2);}s.ys=[];for(i=0;i<f;i++){v=0!=(4&s.flags[i]),c=0!=(32&s.flags[i]);v?(s.ys.push(c?n[o]:-n[o]),o++):c?s.ys.push(0):(s.ys.push(a.readShort(n,o)),o+=2);}var p=0,U=0;for(i=0;i<f;i++)p+=s.xs[i],U+=s.ys[i],s.xs[i]=p,s.ys[i]=U;}else {var g;s.parts=[];do{g=a.readUshort(n,o),o+=2;var S={m:{a:1,b:0,c:0,d:1,tx:0,ty:0},p1:-1,p2:-1};if(s.parts.push(S),S.glyphIndex=a.readUshort(n,o),o+=2,1&g){var m=a.readShort(n,o);o+=2;var b=a.readShort(n,o);o+=2;}else {m=a.readInt8(n,o);o++;b=a.readInt8(n,o);o++;}2&g?(S.m.tx=m,S.m.ty=b):(S.p1=m,S.p2=b),8&g?(S.m.a=S.m.d=a.readF2dot14(n,o),o+=2):64&g?(S.m.a=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2):128&g&&(S.m.a=a.readF2dot14(n,o),o+=2,S.m.b=a.readF2dot14(n,o),o+=2,S.m.c=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2);}while(32&g);if(256&g){var y=a.readUshort(n,o);o+=2,s.instr=[];for(i=0;i<y;i++)s.instr.push(n[o]),o++;}}return s},e.GPOS={},e.GPOS.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GPOS.subt)},e.GPOS.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1==t||2==t||3==t||7==t||8==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,h+s);}if(1==t&&1==i.fmt){var f=o.readUshort(r,a);a+=2;var d=e._lctf.numOfOnes(f);0!=f&&(i.pos=e.GPOS.readValueRecord(r,a,f));}else if(2==t&&i.fmt>=1&&i.fmt<=2){f=o.readUshort(r,a);a+=2;var l=o.readUshort(r,a);a+=2;d=e._lctf.numOfOnes(f);var u=e._lctf.numOfOnes(l);if(1==i.fmt){i.pairsets=[];var v=o.readUshort(r,a);a+=2;for(var c=0;c<v;c++){var p=s+o.readUshort(r,a);a+=2;var U=o.readUshort(r,p);p+=2;for(var g=[],S=0;S<U;S++){var m=o.readUshort(r,p);p+=2,0!=f&&(x=e.GPOS.readValueRecord(r,p,f),p+=2*d),0!=l&&(P=e.GPOS.readValueRecord(r,p,l),p+=2*u),g.push({gid2:m,val1:x,val2:P});}i.pairsets.push(g);}}if(2==i.fmt){var b=o.readUshort(r,a);a+=2;var y=o.readUshort(r,a);a+=2;var F=o.readUshort(r,a);a+=2;var _=o.readUshort(r,a);a+=2,i.classDef1=e._lctf.readClassDef(r,s+b),i.classDef2=e._lctf.readClassDef(r,s+y),i.matrix=[];for(c=0;c<F;c++){var C=[];for(S=0;S<_;S++){var x=null,P=null;0!=f&&(x=e.GPOS.readValueRecord(r,a,f),a+=2*d),0!=l&&(P=e.GPOS.readValueRecord(r,a,l),a+=2*u),C.push({val1:x,val2:P});}i.matrix.push(C);}}}else {if(9==t&&1==i.fmt){var I=o.readUshort(r,a);a+=2;var w=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=I;else if(n.ltype!=I)throw "invalid extension substitution";return e.GPOS.subt(r,n.ltype,s+w)}console.debug("unsupported GPOS table LookupType",t,"format",i.fmt);}return i},e.GPOS.readValueRecord=function(r,t,a){var n=e._bin,o=[];return o.push(1&a?n.readShort(r,t):0),t+=1&a?2:0,o.push(2&a?n.readShort(r,t):0),t+=2&a?2:0,o.push(4&a?n.readShort(r,t):0),t+=4&a?2:0,o.push(8&a?n.readShort(r,t):0),t+=8&a?2:0,o},e.GSUB={},e.GSUB.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GSUB.subt)},e.GSUB.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1!=t&&4!=t&&5!=t&&6!=t)return null;if(1==t||4==t||5==t&&i.fmt<=2||6==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,s+h);}if(1==t&&i.fmt>=1&&i.fmt<=2){if(1==i.fmt)i.delta=o.readShort(r,a),a+=2;else if(2==i.fmt){var f=o.readUshort(r,a);a+=2,i.newg=o.readUshorts(r,a,f),a+=2*i.newg.length;}}else if(4==t){i.vals=[];f=o.readUshort(r,a);a+=2;for(var d=0;d<f;d++){var l=o.readUshort(r,a);a+=2,i.vals.push(e.GSUB.readLigatureSet(r,s+l));}}else if(5==t&&2==i.fmt){if(2==i.fmt){var u=o.readUshort(r,a);a+=2,i.cDef=e._lctf.readClassDef(r,s+u),i.scset=[];var v=o.readUshort(r,a);a+=2;for(d=0;d<v;d++){var c=o.readUshort(r,a);a+=2,i.scset.push(0==c?null:e.GSUB.readSubClassSet(r,s+c));}}}else if(6==t&&3==i.fmt){if(3==i.fmt){for(d=0;d<3;d++){f=o.readUshort(r,a);a+=2;for(var p=[],U=0;U<f;U++)p.push(e._lctf.readCoverage(r,s+o.readUshort(r,a+2*U)));a+=2*f,0==d&&(i.backCvg=p),1==d&&(i.inptCvg=p),2==d&&(i.ahedCvg=p);}f=o.readUshort(r,a);a+=2,i.lookupRec=e.GSUB.readSubstLookupRecords(r,a,f);}}else {if(7==t&&1==i.fmt){var g=o.readUshort(r,a);a+=2;var S=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=g;else if(n.ltype!=g)throw "invalid extension substitution";return e.GSUB.subt(r,n.ltype,s+S)}console.debug("unsupported GSUB table LookupType",t,"format",i.fmt);}return i},e.GSUB.readSubClassSet=function(r,t){var a=e._bin.readUshort,n=t,o=[],s=a(r,t);t+=2;for(var i=0;i<s;i++){var h=a(r,t);t+=2,o.push(e.GSUB.readSubClassRule(r,n+h));}return o},e.GSUB.readSubClassRule=function(r,t){var a=e._bin.readUshort,n={},o=a(r,t),s=a(r,t+=2);t+=2,n.input=[];for(var i=0;i<o-1;i++)n.input.push(a(r,t)),t+=2;return n.substLookupRecords=e.GSUB.readSubstLookupRecords(r,t,s),n},e.GSUB.readSubstLookupRecords=function(r,t,a){for(var n=e._bin.readUshort,o=[],s=0;s<a;s++)o.push(n(r,t),n(r,t+2)),t+=4;return o},e.GSUB.readChainSubClassSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readChainSubClassRule(r,n+h));}return o},e.GSUB.readChainSubClassRule=function(r,t){for(var a=e._bin,n={},o=["backtrack","input","lookahead"],s=0;s<o.length;s++){var i=a.readUshort(r,t);t+=2,1==s&&i--,n[o[s]]=a.readUshorts(r,t,i),t+=2*n[o[s]].length;}i=a.readUshort(r,t);return t+=2,n.subst=a.readUshorts(r,t,2*i),t+=2*n.subst.length,n},e.GSUB.readLigatureSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readLigature(r,n+h));}return o},e.GSUB.readLigature=function(r,t){var a=e._bin,n={chain:[]};n.nglyph=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2;for(var s=0;s<o-1;s++)n.chain.push(a.readUshort(r,t)),t+=2;return n},e.head={},e.head.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.fontRevision=n.readFixed(r,t),t+=4,n.readUint(r,t),t+=4,n.readUint(r,t),t+=4,o.flags=n.readUshort(r,t),t+=2,o.unitsPerEm=n.readUshort(r,t),t+=2,o.created=n.readUint64(r,t),t+=8,o.modified=n.readUint64(r,t),t+=8,o.xMin=n.readShort(r,t),t+=2,o.yMin=n.readShort(r,t),t+=2,o.xMax=n.readShort(r,t),t+=2,o.yMax=n.readShort(r,t),t+=2,o.macStyle=n.readUshort(r,t),t+=2,o.lowestRecPPEM=n.readUshort(r,t),t+=2,o.fontDirectionHint=n.readShort(r,t),t+=2,o.indexToLocFormat=n.readShort(r,t),t+=2,o.glyphDataFormat=n.readShort(r,t),t+=2,o},e.hhea={},e.hhea.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.ascender=n.readShort(r,t),t+=2,o.descender=n.readShort(r,t),t+=2,o.lineGap=n.readShort(r,t),t+=2,o.advanceWidthMax=n.readUshort(r,t),t+=2,o.minLeftSideBearing=n.readShort(r,t),t+=2,o.minRightSideBearing=n.readShort(r,t),t+=2,o.xMaxExtent=n.readShort(r,t),t+=2,o.caretSlopeRise=n.readShort(r,t),t+=2,o.caretSlopeRun=n.readShort(r,t),t+=2,o.caretOffset=n.readShort(r,t),t+=2,t+=8,o.metricDataFormat=n.readShort(r,t),t+=2,o.numberOfHMetrics=n.readUshort(r,t),t+=2,o},e.hmtx={},e.hmtx.parse=function(r,t,a,n){for(var o=e._bin,s={aWidth:[],lsBearing:[]},i=0,h=0,f=0;f<n.maxp.numGlyphs;f++)f<n.hhea.numberOfHMetrics&&(i=o.readUshort(r,t),t+=2,h=o.readShort(r,t),t+=2),s.aWidth.push(i),s.lsBearing.push(h);return s},e.kern={},e.kern.parse=function(r,t,a,n){var o=e._bin,s=o.readUshort(r,t);if(t+=2,1==s)return e.kern.parseV1(r,t-2,a,n);var i=o.readUshort(r,t);t+=2;for(var h={glyph1:[],rval:[]},f=0;f<i;f++){t+=2;a=o.readUshort(r,t);t+=2;var d=o.readUshort(r,t);t+=2;var l=d>>>8;if(0!=(l&=15))throw "unknown kern table format: "+l;t=e.kern.readFormat0(r,t,h);}return h},e.kern.parseV1=function(r,t,a,n){var o=e._bin;o.readFixed(r,t),t+=4;var s=o.readUint(r,t);t+=4;for(var i={glyph1:[],rval:[]},h=0;h<s;h++){o.readUint(r,t),t+=4;var f=o.readUshort(r,t);t+=2,o.readUshort(r,t),t+=2;var d=f>>>8;if(0!=(d&=15))throw "unknown kern table format: "+d;t=e.kern.readFormat0(r,t,i);}return i},e.kern.readFormat0=function(r,t,a){var n=e._bin,o=-1,s=n.readUshort(r,t);t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2;for(var i=0;i<s;i++){var h=n.readUshort(r,t);t+=2;var f=n.readUshort(r,t);t+=2;var d=n.readShort(r,t);t+=2,h!=o&&(a.glyph1.push(h),a.rval.push({glyph2:[],vals:[]}));var l=a.rval[a.rval.length-1];l.glyph2.push(f),l.vals.push(d),o=h;}return t},e.loca={},e.loca.parse=function(r,t,a,n){var o=e._bin,s=[],i=n.head.indexToLocFormat,h=n.maxp.numGlyphs+1;if(0==i)for(var f=0;f<h;f++)s.push(o.readUshort(r,t+(f<<1))<<1);if(1==i)for(f=0;f<h;f++)s.push(o.readUint(r,t+(f<<2)));return s},e.maxp={},e.maxp.parse=function(r,t,a){var n=e._bin,o={},s=n.readUint(r,t);return t+=4,o.numGlyphs=n.readUshort(r,t),t+=2,65536==s&&(o.maxPoints=n.readUshort(r,t),t+=2,o.maxContours=n.readUshort(r,t),t+=2,o.maxCompositePoints=n.readUshort(r,t),t+=2,o.maxCompositeContours=n.readUshort(r,t),t+=2,o.maxZones=n.readUshort(r,t),t+=2,o.maxTwilightPoints=n.readUshort(r,t),t+=2,o.maxStorage=n.readUshort(r,t),t+=2,o.maxFunctionDefs=n.readUshort(r,t),t+=2,o.maxInstructionDefs=n.readUshort(r,t),t+=2,o.maxStackElements=n.readUshort(r,t),t+=2,o.maxSizeOfInstructions=n.readUshort(r,t),t+=2,o.maxComponentElements=n.readUshort(r,t),t+=2,o.maxComponentDepth=n.readUshort(r,t),t+=2),o},e.name={},e.name.parse=function(r,t,a){var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2,n.readUshort(r,t);for(var i,h=["copyright","fontFamily","fontSubfamily","ID","fullName","version","postScriptName","trademark","manufacturer","designer","description","urlVendor","urlDesigner","licence","licenceURL","---","typoFamilyName","typoSubfamilyName","compatibleFull","sampleText","postScriptCID","wwsFamilyName","wwsSubfamilyName","lightPalette","darkPalette"],f=t+=2,d=0;d<s;d++){var l=n.readUshort(r,t);t+=2;var u=n.readUshort(r,t);t+=2;var v=n.readUshort(r,t);t+=2;var c=n.readUshort(r,t);t+=2;var p=n.readUshort(r,t);t+=2;var U=n.readUshort(r,t);t+=2;var g,S=h[c],m=f+12*s+U;if(0==l)g=n.readUnicode(r,m,p/2);else if(3==l&&0==u)g=n.readUnicode(r,m,p/2);else if(0==u)g=n.readASCII(r,m,p);else if(1==u)g=n.readUnicode(r,m,p/2);else if(3==u)g=n.readUnicode(r,m,p/2);else {if(1!=l)throw "unknown encoding "+u+", platformID: "+l;g=n.readASCII(r,m,p),console.debug("reading unknown MAC encoding "+u+" as ASCII");}var b="p"+l+","+v.toString(16);null==o[b]&&(o[b]={}),o[b][void 0!==S?S:c]=g,o[b]._lang=v;}for(var y in o)if(null!=o[y].postScriptName&&1033==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&0==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&3084==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName)return o[y];for(var y in o){i=y;break}return console.debug("returning name table with languageID "+o[i]._lang),o[i]},e["OS/2"]={},e["OS/2"].parse=function(r,t,a){var n=e._bin.readUshort(r,t);t+=2;var o={};if(0==n)e["OS/2"].version0(r,t,o);else if(1==n)e["OS/2"].version1(r,t,o);else if(2==n||3==n||4==n)e["OS/2"].version2(r,t,o);else {if(5!=n)throw "unknown OS/2 table version: "+n;e["OS/2"].version5(r,t,o);}return o},e["OS/2"].version0=function(r,t,a){var n=e._bin;return a.xAvgCharWidth=n.readShort(r,t),t+=2,a.usWeightClass=n.readUshort(r,t),t+=2,a.usWidthClass=n.readUshort(r,t),t+=2,a.fsType=n.readUshort(r,t),t+=2,a.ySubscriptXSize=n.readShort(r,t),t+=2,a.ySubscriptYSize=n.readShort(r,t),t+=2,a.ySubscriptXOffset=n.readShort(r,t),t+=2,a.ySubscriptYOffset=n.readShort(r,t),t+=2,a.ySuperscriptXSize=n.readShort(r,t),t+=2,a.ySuperscriptYSize=n.readShort(r,t),t+=2,a.ySuperscriptXOffset=n.readShort(r,t),t+=2,a.ySuperscriptYOffset=n.readShort(r,t),t+=2,a.yStrikeoutSize=n.readShort(r,t),t+=2,a.yStrikeoutPosition=n.readShort(r,t),t+=2,a.sFamilyClass=n.readShort(r,t),t+=2,a.panose=n.readBytes(r,t,10),t+=10,a.ulUnicodeRange1=n.readUint(r,t),t+=4,a.ulUnicodeRange2=n.readUint(r,t),t+=4,a.ulUnicodeRange3=n.readUint(r,t),t+=4,a.ulUnicodeRange4=n.readUint(r,t),t+=4,a.achVendID=[n.readInt8(r,t),n.readInt8(r,t+1),n.readInt8(r,t+2),n.readInt8(r,t+3)],t+=4,a.fsSelection=n.readUshort(r,t),t+=2,a.usFirstCharIndex=n.readUshort(r,t),t+=2,a.usLastCharIndex=n.readUshort(r,t),t+=2,a.sTypoAscender=n.readShort(r,t),t+=2,a.sTypoDescender=n.readShort(r,t),t+=2,a.sTypoLineGap=n.readShort(r,t),t+=2,a.usWinAscent=n.readUshort(r,t),t+=2,a.usWinDescent=n.readUshort(r,t),t+=2},e["OS/2"].version1=function(r,t,a){var n=e._bin;return t=e["OS/2"].version0(r,t,a),a.ulCodePageRange1=n.readUint(r,t),t+=4,a.ulCodePageRange2=n.readUint(r,t),t+=4},e["OS/2"].version2=function(r,t,a){var n=e._bin;return t=e["OS/2"].version1(r,t,a),a.sxHeight=n.readShort(r,t),t+=2,a.sCapHeight=n.readShort(r,t),t+=2,a.usDefault=n.readUshort(r,t),t+=2,a.usBreak=n.readUshort(r,t),t+=2,a.usMaxContext=n.readUshort(r,t),t+=2},e["OS/2"].version5=function(r,t,a){var n=e._bin;return t=e["OS/2"].version2(r,t,a),a.usLowerOpticalPointSize=n.readUshort(r,t),t+=2,a.usUpperOpticalPointSize=n.readUshort(r,t),t+=2},e.post={},e.post.parse=function(r,t,a){var n=e._bin,o={};return o.version=n.readFixed(r,t),t+=4,o.italicAngle=n.readFixed(r,t),t+=4,o.underlinePosition=n.readShort(r,t),t+=2,o.underlineThickness=n.readShort(r,t),t+=2,o},null==e&&(e={}),null==e.U&&(e.U={}),e.U.codeToGlyph=function(r,e){var t=r.cmap,a=-1;if(null!=t.p0e4?a=t.p0e4:null!=t.p3e1?a=t.p3e1:null!=t.p1e0?a=t.p1e0:null!=t.p0e3&&(a=t.p0e3),-1==a)throw "no familiar platform and encoding!";var n=t.tables[a];if(0==n.format)return e>=n.map.length?0:n.map[e];if(4==n.format){for(var o=-1,s=0;s<n.endCount.length;s++)if(e<=n.endCount[s]){o=s;break}if(-1==o)return 0;if(n.startCount[o]>e)return 0;return 65535&(0!=n.idRangeOffset[o]?n.glyphIdArray[e-n.startCount[o]+(n.idRangeOffset[o]>>1)-(n.idRangeOffset.length-o)]:e+n.idDelta[o])}if(12==n.format){if(e>n.groups[n.groups.length-1][1])return 0;for(s=0;s<n.groups.length;s++){var i=n.groups[s];if(i[0]<=e&&e<=i[1])return i[2]+(e-i[0])}return 0}throw "unknown cmap table format "+n.format},e.U.glyphToPath=function(r,t){var a={cmds:[],crds:[]};if(r.SVG&&r.SVG.entries[t]){var n=r.SVG.entries[t];return null==n?a:("string"==typeof n&&(n=e.SVG.toPath(n),r.SVG.entries[t]=n),n)}if(r.CFF){var o={x:0,y:0,stack:[],nStems:0,haveWidth:!1,width:r.CFF.Private?r.CFF.Private.defaultWidthX:0,open:!1},s=r.CFF,i=r.CFF.Private;if(s.ROS){for(var h=0;s.FDSelect[h+2]<=t;)h+=2;i=s.FDArray[s.FDSelect[h+1]].Private;}e.U._drawCFF(r.CFF.CharStrings[t],o,s,i,a);}else r.glyf&&e.U._drawGlyf(t,r,a);return a},e.U._drawGlyf=function(r,t,a){var n=t.glyf[r];null==n&&(n=t.glyf[r]=e.glyf._parseGlyf(t,r)),null!=n&&(n.noc>-1?e.U._simpleGlyph(n,a):e.U._compoGlyph(n,t,a));},e.U._simpleGlyph=function(r,t){for(var a=0;a<r.noc;a++){for(var n=0==a?0:r.endPts[a-1]+1,o=r.endPts[a],s=n;s<=o;s++){var i=s==n?o:s-1,h=s==o?n:s+1,f=1&r.flags[s],d=1&r.flags[i],l=1&r.flags[h],u=r.xs[s],v=r.ys[s];if(s==n)if(f){if(!d){e.U.P.moveTo(t,u,v);continue}e.U.P.moveTo(t,r.xs[i],r.ys[i]);}else d?e.U.P.moveTo(t,r.xs[i],r.ys[i]):e.U.P.moveTo(t,(r.xs[i]+u)/2,(r.ys[i]+v)/2);f?d&&e.U.P.lineTo(t,u,v):l?e.U.P.qcurveTo(t,u,v,r.xs[h],r.ys[h]):e.U.P.qcurveTo(t,u,v,(u+r.xs[h])/2,(v+r.ys[h])/2);}e.U.P.closePath(t);}},e.U._compoGlyph=function(r,t,a){for(var n=0;n<r.parts.length;n++){var o={cmds:[],crds:[]},s=r.parts[n];e.U._drawGlyf(s.glyphIndex,t,o);for(var i=s.m,h=0;h<o.crds.length;h+=2){var f=o.crds[h],d=o.crds[h+1];a.crds.push(f*i.a+d*i.b+i.tx),a.crds.push(f*i.c+d*i.d+i.ty);}for(h=0;h<o.cmds.length;h++)a.cmds.push(o.cmds[h]);}},e.U._getGlyphClass=function(r,t){var a=e._lctf.getInterval(t,r);return -1==a?0:t[a+2]},e.U.getPairAdjustment=function(r,t,a){var n=0,o=!1;if(r.GPOS)for(var s=r.GPOS,i=s.lookupList,h=s.featureList,f=[],d=0;d<h.length;d++){var l=h[d];if("kern"==l.tag){o=!0;for(var u=0;u<l.tab.length;u++)if(!f[l.tab[u]]){f[l.tab[u]]=!0;for(var v=i[l.tab[u]],c=0;c<v.tabs.length;c++)if(null!=v.tabs[c]){var p,U=v.tabs[c];if(!U.coverage||-1!=(p=e._lctf.coverageIndex(U.coverage,t)))if(1==v.ltype);else if(2==v.ltype){var g;if(1==U.fmt){var S=U.pairsets[p];for(d=0;d<S.length;d++)S[d].gid2==a&&(g=S[d]);}else if(2==U.fmt){var m=e.U._getGlyphClass(t,U.classDef1),b=e.U._getGlyphClass(a,U.classDef2);g=U.matrix[m][b];}g&&g.val1&&g.val1[2]&&(n+=g.val1[2]),g&&g.val2&&g.val2[0]&&(n+=g.val2[0]);}}}}}if(r.kern&&!o){var y=r.kern.glyph1.indexOf(t);if(-1!=y){var F=r.kern.rval[y].glyph2.indexOf(a);-1!=F&&(n+=r.kern.rval[y].vals[F]);}}return n},e.U._applySubs=function(r,t,a,n){for(var o=r.length-t-1,s=0;s<a.tabs.length;s++)if(null!=a.tabs[s]){var i,h=a.tabs[s];if(!h.coverage||-1!=(i=e._lctf.coverageIndex(h.coverage,r[t])))if(1==a.ltype)r[t],1==h.fmt?r[t]=r[t]+h.delta:r[t]=h.newg[i];else if(4==a.ltype)for(var f=h.vals[i],d=0;d<f.length;d++){var l=f[d],u=l.chain.length;if(!(u>o)){for(var v=!0,c=0,p=0;p<u;p++){for(;-1==r[t+c+(1+p)];)c++;l.chain[p]!=r[t+c+(1+p)]&&(v=!1);}if(v){r[t]=l.nglyph;for(p=0;p<u+c;p++)r[t+p+1]=-1;break}}}else if(5==a.ltype&&2==h.fmt)for(var U=e._lctf.getInterval(h.cDef,r[t]),g=h.cDef[U+2],S=h.scset[g],m=0;m<S.length;m++){var b=S[m],y=b.input;if(!(y.length>o)){for(v=!0,p=0;p<y.length;p++){var F=e._lctf.getInterval(h.cDef,r[t+1+p]);if(-1==U&&h.cDef[F+2]!=y[p]){v=!1;break}}if(v){var _=b.substLookupRecords;for(d=0;d<_.length;d+=2)_[d],_[d+1];}}}else if(6==a.ltype&&3==h.fmt){if(!e.U._glsCovered(r,h.backCvg,t-h.backCvg.length))continue;if(!e.U._glsCovered(r,h.inptCvg,t))continue;if(!e.U._glsCovered(r,h.ahedCvg,t+h.inptCvg.length))continue;var C=h.lookupRec;for(m=0;m<C.length;m+=2){U=C[m];var x=n[C[m+1]];e.U._applySubs(r,t+U,x,n);}}}},e.U._glsCovered=function(r,t,a){for(var n=0;n<t.length;n++){if(-1==e._lctf.coverageIndex(t[n],r[a+n]))return !1}return !0},e.U.glyphsToPath=function(r,t,a){for(var n={cmds:[],crds:[]},o=0,s=0;s<t.length;s++){var i=t[s];if(-1!=i){for(var h=s<t.length-1&&-1!=t[s+1]?t[s+1]:0,f=e.U.glyphToPath(r,i),d=0;d<f.crds.length;d+=2)n.crds.push(f.crds[d]+o),n.crds.push(f.crds[d+1]);a&&n.cmds.push(a);for(d=0;d<f.cmds.length;d++)n.cmds.push(f.cmds[d]);a&&n.cmds.push("X"),o+=r.hmtx.aWidth[i],s<t.length-1&&(o+=e.U.getPairAdjustment(r,i,h));}}return n},e.U.P={},e.U.P.moveTo=function(r,e,t){r.cmds.push("M"),r.crds.push(e,t);},e.U.P.lineTo=function(r,e,t){r.cmds.push("L"),r.crds.push(e,t);},e.U.P.curveTo=function(r,e,t,a,n,o,s){r.cmds.push("C"),r.crds.push(e,t,a,n,o,s);},e.U.P.qcurveTo=function(r,e,t,a,n){r.cmds.push("Q"),r.crds.push(e,t,a,n);},e.U.P.closePath=function(r){r.cmds.push("Z");},e.U._drawCFF=function(r,t,a,n,o){for(var s=t.stack,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open,l=0,u=t.x,v=t.y,c=0,p=0,U=0,g=0,S=0,m=0,b=0,y=0,F=0,_=0,C={val:0,size:0};l<r.length;){e.CFF.getCharString(r,l,C);var x=C.val;if(l+=C.size,"o1"==x||"o18"==x)s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;else if("o3"==x||"o23"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;}else if("o4"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),d&&e.U.P.closePath(o),v+=s.pop(),e.U.P.moveTo(o,u,v),d=!0;else if("o5"==x)for(;s.length>0;)u+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,u,v);else if("o6"==x||"o7"==x)for(var P=s.length,I="o6"==x,w=0;w<P;w++){var O=s.shift();I?u+=O:v+=O,I=!I,e.U.P.lineTo(o,u,v);}else if("o8"==x||"o24"==x){P=s.length;for(var T=0;T+6<=P;)c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),u=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,u,v),T+=6;"o24"==x&&(u+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,u,v));}else {if("o11"==x)break;if("o1234"==x||"o1235"==x||"o1236"==x||"o1237"==x)"o1234"==x&&(p=v,U=(c=u+s.shift())+s.shift(),_=g=p+s.shift(),m=g,y=v,u=(b=(S=(F=U+s.shift())+s.shift())+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,u,v)),"o1235"==x&&(c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),u=b+s.shift(),v=y+s.shift(),s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,u,v)),"o1236"==x&&(c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),_=g=p+s.shift(),m=g,b=(S=(F=U+s.shift())+s.shift())+s.shift(),y=m+s.shift(),u=b+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,u,v)),"o1237"==x&&(c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),Math.abs(b-u)>Math.abs(y-v)?u=b+s.shift():v=y+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,u,v));else if("o14"==x){if(s.length>0&&!h&&(f=s.shift()+a.nominalWidthX,h=!0),4==s.length){var k=s.shift(),G=s.shift(),D=s.shift(),B=s.shift(),L=e.CFF.glyphBySE(a,D),R=e.CFF.glyphBySE(a,B);e.U._drawCFF(a.CharStrings[L],t,a,n,o),t.x=k,t.y=G,e.U._drawCFF(a.CharStrings[R],t,a,n,o);}d&&(e.U.P.closePath(o),d=!1);}else if("o19"==x||"o20"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0,l+=i+7>>3;}else if("o21"==x)s.length>2&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),v+=s.pop(),u+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,u,v),d=!0;else if("o22"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),u+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,u,v),d=!0;else if("o25"==x){for(;s.length>6;)u+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,u,v);c=u+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),u=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,u,v);}else if("o26"==x)for(s.length%2&&(u+=s.shift());s.length>0;)c=u,p=v+s.shift(),u=U=c+s.shift(),v=(g=p+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,u,v);else if("o27"==x)for(s.length%2&&(v+=s.shift());s.length>0;)p=v,U=(c=u+s.shift())+s.shift(),g=p+s.shift(),u=U+s.shift(),v=g,e.U.P.curveTo(o,c,p,U,g,u,v);else if("o10"==x||"o29"==x){var A="o10"==x?n:a;if(0==s.length)console.debug("error: empty stack");else {var W=s.pop(),M=A.Subrs[W+A.Bias];t.x=u,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d,e.U._drawCFF(M,t,a,n,o),u=t.x,v=t.y,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open;}}else if("o30"==x||"o31"==x){var V=s.length,N=(T=0,"o31"==x);for(T+=V-(P=-3&V);T<P;)N?(p=v,U=(c=u+s.shift())+s.shift(),v=(g=p+s.shift())+s.shift(),P-T==5?(u=U+s.shift(),T++):u=U,N=!1):(c=u,p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),u=U+s.shift(),P-T==5?(v=g+s.shift(),T++):v=g,N=!0),e.U.P.curveTo(o,c,p,U,g,u,v),T+=4;}else {if("o"==(x+"").charAt(0))throw console.debug("Unknown operation: "+x,r),x;s.push(x);}}}t.x=u,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d;};var t=e,a={Typr:t};return r.Typr=t,r.default=a,Object.defineProperty(r,"__esModule",{value:!0}),r}({}).Typr}
+  function typrFactory(){return "undefined"==typeof window&&(self.window=self),function(r){var e={parse:function(r){var t=e._bin,a=new Uint8Array(r);if("ttcf"==t.readASCII(a,0,4)){var n=4;t.readUshort(a,n),n+=2,t.readUshort(a,n),n+=2;var o=t.readUint(a,n);n+=4;for(var s=[],i=0;i<o;i++){var h=t.readUint(a,n);n+=4,s.push(e._readFont(a,h));}return s}return [e._readFont(a,0)]},_readFont:function(r,t){var a=e._bin,n=t;a.readFixed(r,t),t+=4;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2;for(var s=["cmap","head","hhea","maxp","hmtx","name","OS/2","post","loca","glyf","kern","CFF ","GPOS","GSUB","SVG "],i={_data:r,_offset:n},h={},f=0;f<o;f++){var d=a.readASCII(r,t,4);t+=4,a.readUint(r,t),t+=4;var u=a.readUint(r,t);t+=4;var l=a.readUint(r,t);t+=4,h[d]={offset:u,length:l};}for(f=0;f<s.length;f++){var v=s[f];h[v]&&(i[v.trim()]=e[v.trim()].parse(r,h[v].offset,h[v].length,i));}return i},_tabOffset:function(r,t,a){for(var n=e._bin,o=n.readUshort(r,a+4),s=a+12,i=0;i<o;i++){var h=n.readASCII(r,s,4);s+=4,n.readUint(r,s),s+=4;var f=n.readUint(r,s);if(s+=4,n.readUint(r,s),s+=4,h==t)return f}return 0}};e._bin={readFixed:function(r,e){return (r[e]<<8|r[e+1])+(r[e+2]<<8|r[e+3])/65540},readF2dot14:function(r,t){return e._bin.readShort(r,t)/16384},readInt:function(r,t){return e._bin._view(r).getInt32(t)},readInt8:function(r,t){return e._bin._view(r).getInt8(t)},readShort:function(r,t){return e._bin._view(r).getInt16(t)},readUshort:function(r,t){return e._bin._view(r).getUint16(t)},readUshorts:function(r,t,a){for(var n=[],o=0;o<a;o++)n.push(e._bin.readUshort(r,t+2*o));return n},readUint:function(r,t){return e._bin._view(r).getUint32(t)},readUint64:function(r,t){return 4294967296*e._bin.readUint(r,t)+e._bin.readUint(r,t+4)},readASCII:function(r,e,t){for(var a="",n=0;n<t;n++)a+=String.fromCharCode(r[e+n]);return a},readUnicode:function(r,e,t){for(var a="",n=0;n<t;n++){var o=r[e++]<<8|r[e++];a+=String.fromCharCode(o);}return a},_tdec:"undefined"!=typeof window&&window.TextDecoder?new window.TextDecoder:null,readUTF8:function(r,t,a){var n=e._bin._tdec;return n&&0==t&&a==r.length?n.decode(r):e._bin.readASCII(r,t,a)},readBytes:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(r[e+n]);return a},readASCIIArray:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(String.fromCharCode(r[e+n]));return a},_view:function(r){return r._dataView||(r._dataView=r.buffer?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(new Uint8Array(r).buffer))}},e._lctf={},e._lctf.parse=function(r,t,a,n,o){var s=e._bin,i={},h=t;s.readFixed(r,t),t+=4;var f=s.readUshort(r,t);t+=2;var d=s.readUshort(r,t);t+=2;var u=s.readUshort(r,t);return t+=2,i.scriptList=e._lctf.readScriptList(r,h+f),i.featureList=e._lctf.readFeatureList(r,h+d),i.lookupList=e._lctf.readLookupList(r,h+u,o),i},e._lctf.readLookupList=function(r,t,a){var n=e._bin,o=t,s=[],i=n.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=n.readUshort(r,t);t+=2;var d=e._lctf.readLookupTable(r,o+f,a);s.push(d);}return s},e._lctf.readLookupTable=function(r,t,a){var n=e._bin,o=t,s={tabs:[]};s.ltype=n.readUshort(r,t),t+=2,s.flag=n.readUshort(r,t),t+=2;var i=n.readUshort(r,t);t+=2;for(var h=s.ltype,f=0;f<i;f++){var d=n.readUshort(r,t);t+=2;var u=a(r,h,o+d,s);s.tabs.push(u);}return s},e._lctf.numOfOnes=function(r){for(var e=0,t=0;t<32;t++)0!=(r>>>t&1)&&e++;return e},e._lctf.readClassDef=function(r,t){var a=e._bin,n=[],o=a.readUshort(r,t);if(t+=2,1==o){var s=a.readUshort(r,t);t+=2;var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++)n.push(s+h),n.push(s+h),n.push(a.readUshort(r,t)),t+=2;}if(2==o){var f=a.readUshort(r,t);t+=2;for(h=0;h<f;h++)n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2;}return n},e._lctf.getInterval=function(r,e){for(var t=0;t<r.length;t+=3){var a=r[t],n=r[t+1];if(r[t+2],a<=e&&e<=n)return t}return -1},e._lctf.readCoverage=function(r,t){var a=e._bin,n={};n.fmt=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,1==n.fmt&&(n.tab=a.readUshorts(r,t,o)),2==n.fmt&&(n.tab=a.readUshorts(r,t,3*o)),n},e._lctf.coverageIndex=function(r,t){var a=r.tab;if(1==r.fmt)return a.indexOf(t);if(2==r.fmt){var n=e._lctf.getInterval(a,t);if(-1!=n)return a[n+2]+(t-a[n])}return -1},e._lctf.readFeatureList=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2;var d=e._lctf.readFeatureTable(r,n+f);d.tag=h.trim(),o.push(d);}return o},e._lctf.readFeatureTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,s>0&&(o.featureParams=n+s);var i=a.readUshort(r,t);t+=2,o.tab=[];for(var h=0;h<i;h++)o.tab.push(a.readUshort(r,t+2*h));return o},e._lctf.readScriptList=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2,o[h.trim()]=e._lctf.readScriptTable(r,n+f);}return o},e._lctf.readScriptTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,o.default=e._lctf.readLangSysTable(r,n+s);var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=a.readASCII(r,t,4);t+=4;var d=a.readUshort(r,t);t+=2,o[f.trim()]=e._lctf.readLangSysTable(r,n+d);}return o},e._lctf.readLangSysTable=function(r,t){var a=e._bin,n={};a.readUshort(r,t),t+=2,n.reqFeature=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,n.features=a.readUshorts(r,t,o),n},e.CFF={},e.CFF.parse=function(r,t,a){var n=e._bin;(r=new Uint8Array(r.buffer,t,a))[t=0],r[++t],r[++t],r[++t],t++;var o=[];t=e.CFF.readIndex(r,t,o);for(var s=[],i=0;i<o.length-1;i++)s.push(n.readASCII(r,t+o[i],o[i+1]-o[i]));t+=o[o.length-1];var h=[];t=e.CFF.readIndex(r,t,h);var f=[];for(i=0;i<h.length-1;i++)f.push(e.CFF.readDict(r,t+h[i],t+h[i+1]));t+=h[h.length-1];var d=f[0],u=[];t=e.CFF.readIndex(r,t,u);var l=[];for(i=0;i<u.length-1;i++)l.push(n.readASCII(r,t+u[i],u[i+1]-u[i]));if(t+=u[u.length-1],e.CFF.readSubrs(r,t,d),d.CharStrings){t=d.CharStrings;u=[];t=e.CFF.readIndex(r,t,u);var v=[];for(i=0;i<u.length-1;i++)v.push(n.readBytes(r,t+u[i],u[i+1]-u[i]));d.CharStrings=v;}if(d.ROS){t=d.FDArray;var c=[];t=e.CFF.readIndex(r,t,c),d.FDArray=[];for(i=0;i<c.length-1;i++){var p=e.CFF.readDict(r,t+c[i],t+c[i+1]);e.CFF._readFDict(r,p,l),d.FDArray.push(p);}t+=c[c.length-1],t=d.FDSelect,d.FDSelect=[];var U=r[t];if(t++,3!=U)throw U;var g=n.readUshort(r,t);t+=2;for(i=0;i<g+1;i++)d.FDSelect.push(n.readUshort(r,t),r[t+2]),t+=3;}return d.Encoding&&(d.Encoding=e.CFF.readEncoding(r,d.Encoding,d.CharStrings.length)),d.charset&&(d.charset=e.CFF.readCharset(r,d.charset,d.CharStrings.length)),e.CFF._readFDict(r,d,l),d},e.CFF._readFDict=function(r,t,a){var n;for(var o in t.Private&&(n=t.Private[1],t.Private=e.CFF.readDict(r,n,n+t.Private[0]),t.Private.Subrs&&e.CFF.readSubrs(r,n+t.Private.Subrs,t.Private)),t)-1!=["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(o)&&(t[o]=a[t[o]-426+35]);},e.CFF.readSubrs=function(r,t,a){var n=e._bin,o=[];t=e.CFF.readIndex(r,t,o);var s,i=o.length;s=i<1240?107:i<33900?1131:32768,a.Bias=s,a.Subrs=[];for(var h=0;h<o.length-1;h++)a.Subrs.push(n.readBytes(r,t+o[h],o[h+1]-o[h]));},e.CFF.tableSE=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,0,111,112,113,114,0,115,116,117,118,119,120,121,122,0,123,0,124,125,126,127,128,129,130,131,0,132,133,0,134,135,136,137,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,138,0,139,0,0,0,0,140,141,142,143,0,0,0,0,0,144,0,0,0,145,0,0,146,147,148,149,0,0,0,0],e.CFF.glyphByUnicode=function(r,e){for(var t=0;t<r.charset.length;t++)if(r.charset[t]==e)return t;return -1},e.CFF.glyphBySE=function(r,t){return t<0||t>255?-1:e.CFF.glyphByUnicode(r,e.CFF.tableSE[t])},e.CFF.readEncoding=function(r,t,a){e._bin;var n=[".notdef"],o=r[t];if(t++,0!=o)throw "error: unknown encoding format: "+o;var s=r[t];t++;for(var i=0;i<s;i++)n.push(r[t+i]);return n},e.CFF.readCharset=function(r,t,a){var n=e._bin,o=[".notdef"],s=r[t];if(t++,0==s)for(var i=0;i<a;i++){var h=n.readUshort(r,t);t+=2,o.push(h);}else {if(1!=s&&2!=s)throw "error: format: "+s;for(;o.length<a;){h=n.readUshort(r,t);t+=2;var f=0;1==s?(f=r[t],t++):(f=n.readUshort(r,t),t+=2);for(i=0;i<=f;i++)o.push(h),h++;}}return o},e.CFF.readIndex=function(r,t,a){var n=e._bin,o=n.readUshort(r,t)+1,s=r[t+=2];if(t++,1==s)for(var i=0;i<o;i++)a.push(r[t+i]);else if(2==s)for(i=0;i<o;i++)a.push(n.readUshort(r,t+2*i));else if(3==s)for(i=0;i<o;i++)a.push(16777215&n.readUint(r,t+3*i-1));else if(1!=o)throw "unsupported offset size: "+s+", count: "+o;return (t+=o*s)-1},e.CFF.getCharString=function(r,t,a){var n=e._bin,o=r[t],s=r[t+1];r[t+2],r[t+3],r[t+4];var i=1,h=null,f=null;o<=20&&(h=o,i=1),12==o&&(h=100*o+s,i=2),21<=o&&o<=27&&(h=o,i=1),28==o&&(f=n.readShort(r,t+1),i=3),29<=o&&o<=31&&(h=o,i=1),32<=o&&o<=246&&(f=o-139,i=1),247<=o&&o<=250&&(f=256*(o-247)+s+108,i=2),251<=o&&o<=254&&(f=256*-(o-251)-s-108,i=2),255==o&&(f=n.readInt(r,t+1)/65535,i=5),a.val=null!=f?f:"o"+h,a.size=i;},e.CFF.readCharString=function(r,t,a){for(var n=t+a,o=e._bin,s=[];t<n;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;i<=20&&(d=i,f=1),12==i&&(d=100*i+h,f=2),19!=i&&20!=i||(d=i,f=2),21<=i&&i<=27&&(d=i,f=1),28==i&&(u=o.readShort(r,t+1),f=3),29<=i&&i<=31&&(d=i,f=1),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i&&(u=o.readInt(r,t+1)/65535,f=5),s.push(null!=u?u:"o"+d),t+=f;}return s},e.CFF.readDict=function(r,t,a){for(var n=e._bin,o={},s=[];t<a;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;if(28==i&&(u=n.readShort(r,t+1),f=3),29==i&&(u=n.readInt(r,t+1),f=5),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i)throw u=n.readInt(r,t+1)/65535,f=5,"unknown number";if(30==i){var l=[];for(f=1;;){var v=r[t+f];f++;var c=v>>4,p=15&v;if(15!=c&&l.push(c),15!=p&&l.push(p),15==p)break}for(var U="",g=[0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"],S=0;S<l.length;S++)U+=g[l[S]];u=parseFloat(U);}if(i<=21)if(d=["version","Notice","FullName","FamilyName","Weight","FontBBox","BlueValues","OtherBlues","FamilyBlues","FamilyOtherBlues","StdHW","StdVW","escape","UniqueID","XUID","charset","Encoding","CharStrings","Private","Subrs","defaultWidthX","nominalWidthX"][i],f=1,12==i)d=["Copyright","isFixedPitch","ItalicAngle","UnderlinePosition","UnderlineThickness","PaintType","CharstringType","FontMatrix","StrokeWidth","BlueScale","BlueShift","BlueFuzz","StemSnapH","StemSnapV","ForceBold",0,0,"LanguageGroup","ExpansionFactor","initialRandomSeed","SyntheticBase","PostScript","BaseFontName","BaseFontBlend",0,0,0,0,0,0,"ROS","CIDFontVersion","CIDFontRevision","CIDFontType","CIDCount","UIDBase","FDArray","FDSelect","FontName"][h],f=2;null!=d?(o[d]=1==s.length?s[0]:s,s=[]):s.push(u),t+=f;}return o},e.cmap={},e.cmap.parse=function(r,t,a){r=new Uint8Array(r.buffer,t,a),t=0;var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2;var i=[];o.tables=[];for(var h=0;h<s;h++){var f=n.readUshort(r,t);t+=2;var d=n.readUshort(r,t);t+=2;var u=n.readUint(r,t);t+=4;var l="p"+f+"e"+d,v=i.indexOf(u);if(-1==v){var c;v=o.tables.length,i.push(u);var p=n.readUshort(r,u);0==p?c=e.cmap.parse0(r,u):4==p?c=e.cmap.parse4(r,u):6==p?c=e.cmap.parse6(r,u):12==p?c=e.cmap.parse12(r,u):console.debug("unknown format: "+p,f,d,u),o.tables.push(c);}if(null!=o[l])throw "multiple tables for one platform+encoding";o[l]=v;}return o},e.cmap.parse0=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,n.map=[];for(var s=0;s<o-6;s++)n.map.push(r[t+s]);return n},e.cmap.parse4=function(r,t){var a=e._bin,n=t,o={};o.format=a.readUshort(r,t),t+=2;var s=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2;var i=a.readUshort(r,t);t+=2;var h=i/2;o.searchRange=a.readUshort(r,t),t+=2,o.entrySelector=a.readUshort(r,t),t+=2,o.rangeShift=a.readUshort(r,t),t+=2,o.endCount=a.readUshorts(r,t,h),t+=2*h,t+=2,o.startCount=a.readUshorts(r,t,h),t+=2*h,o.idDelta=[];for(var f=0;f<h;f++)o.idDelta.push(a.readShort(r,t)),t+=2;for(o.idRangeOffset=a.readUshorts(r,t,h),t+=2*h,o.glyphIdArray=[];t<n+s;)o.glyphIdArray.push(a.readUshort(r,t)),t+=2;return o},e.cmap.parse6=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,n.firstCode=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,n.glyphIdArray=[];for(var s=0;s<o;s++)n.glyphIdArray.push(a.readUshort(r,t)),t+=2;return n},e.cmap.parse12=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,t+=2,a.readUint(r,t),t+=4,a.readUint(r,t),t+=4;var o=a.readUint(r,t);t+=4,n.groups=[];for(var s=0;s<o;s++){var i=t+12*s,h=a.readUint(r,i+0),f=a.readUint(r,i+4),d=a.readUint(r,i+8);n.groups.push([h,f,d]);}return n},e.glyf={},e.glyf.parse=function(r,e,t,a){for(var n=[],o=0;o<a.maxp.numGlyphs;o++)n.push(null);return n},e.glyf._parseGlyf=function(r,t){var a=e._bin,n=r._data,o=e._tabOffset(n,"glyf",r._offset)+r.loca[t];if(r.loca[t]==r.loca[t+1])return null;var s={};if(s.noc=a.readShort(n,o),o+=2,s.xMin=a.readShort(n,o),o+=2,s.yMin=a.readShort(n,o),o+=2,s.xMax=a.readShort(n,o),o+=2,s.yMax=a.readShort(n,o),o+=2,s.xMin>=s.xMax||s.yMin>=s.yMax)return null;if(s.noc>0){s.endPts=[];for(var i=0;i<s.noc;i++)s.endPts.push(a.readUshort(n,o)),o+=2;var h=a.readUshort(n,o);if(o+=2,n.length-o<h)return null;s.instructions=a.readBytes(n,o,h),o+=h;var f=s.endPts[s.noc-1]+1;s.flags=[];for(i=0;i<f;i++){var d=n[o];if(o++,s.flags.push(d),0!=(8&d)){var u=n[o];o++;for(var l=0;l<u;l++)s.flags.push(d),i++;}}s.xs=[];for(i=0;i<f;i++){var v=0!=(2&s.flags[i]),c=0!=(16&s.flags[i]);v?(s.xs.push(c?n[o]:-n[o]),o++):c?s.xs.push(0):(s.xs.push(a.readShort(n,o)),o+=2);}s.ys=[];for(i=0;i<f;i++){v=0!=(4&s.flags[i]),c=0!=(32&s.flags[i]);v?(s.ys.push(c?n[o]:-n[o]),o++):c?s.ys.push(0):(s.ys.push(a.readShort(n,o)),o+=2);}var p=0,U=0;for(i=0;i<f;i++)p+=s.xs[i],U+=s.ys[i],s.xs[i]=p,s.ys[i]=U;}else {var g;s.parts=[];do{g=a.readUshort(n,o),o+=2;var S={m:{a:1,b:0,c:0,d:1,tx:0,ty:0},p1:-1,p2:-1};if(s.parts.push(S),S.glyphIndex=a.readUshort(n,o),o+=2,1&g){var m=a.readShort(n,o);o+=2;var b=a.readShort(n,o);o+=2;}else {m=a.readInt8(n,o);o++;b=a.readInt8(n,o);o++;}2&g?(S.m.tx=m,S.m.ty=b):(S.p1=m,S.p2=b),8&g?(S.m.a=S.m.d=a.readF2dot14(n,o),o+=2):64&g?(S.m.a=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2):128&g&&(S.m.a=a.readF2dot14(n,o),o+=2,S.m.b=a.readF2dot14(n,o),o+=2,S.m.c=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2);}while(32&g);if(256&g){var y=a.readUshort(n,o);o+=2,s.instr=[];for(i=0;i<y;i++)s.instr.push(n[o]),o++;}}return s},e.GPOS={},e.GPOS.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GPOS.subt)},e.GPOS.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1==t||2==t||3==t||7==t||8==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,h+s);}if(1==t&&1==i.fmt){var f=o.readUshort(r,a);a+=2;var d=e._lctf.numOfOnes(f);0!=f&&(i.pos=e.GPOS.readValueRecord(r,a,f));}else if(2==t&&i.fmt>=1&&i.fmt<=2){f=o.readUshort(r,a);a+=2;var u=o.readUshort(r,a);a+=2;d=e._lctf.numOfOnes(f);var l=e._lctf.numOfOnes(u);if(1==i.fmt){i.pairsets=[];var v=o.readUshort(r,a);a+=2;for(var c=0;c<v;c++){var p=s+o.readUshort(r,a);a+=2;var U=o.readUshort(r,p);p+=2;for(var g=[],S=0;S<U;S++){var m=o.readUshort(r,p);p+=2,0!=f&&(x=e.GPOS.readValueRecord(r,p,f),p+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,p,u),p+=2*l),g.push({gid2:m,val1:x,val2:P});}i.pairsets.push(g);}}if(2==i.fmt){var b=o.readUshort(r,a);a+=2;var y=o.readUshort(r,a);a+=2;var F=o.readUshort(r,a);a+=2;var _=o.readUshort(r,a);a+=2,i.classDef1=e._lctf.readClassDef(r,s+b),i.classDef2=e._lctf.readClassDef(r,s+y),i.matrix=[];for(c=0;c<F;c++){var C=[];for(S=0;S<_;S++){var x=null,P=null;0!=f&&(x=e.GPOS.readValueRecord(r,a,f),a+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,a,u),a+=2*l),C.push({val1:x,val2:P});}i.matrix.push(C);}}}else {if(9==t&&1==i.fmt){var I=o.readUshort(r,a);a+=2;var w=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=I;else if(n.ltype!=I)throw "invalid extension substitution";return e.GPOS.subt(r,n.ltype,s+w)}console.debug("unsupported GPOS table LookupType",t,"format",i.fmt);}return i},e.GPOS.readValueRecord=function(r,t,a){var n=e._bin,o=[];return o.push(1&a?n.readShort(r,t):0),t+=1&a?2:0,o.push(2&a?n.readShort(r,t):0),t+=2&a?2:0,o.push(4&a?n.readShort(r,t):0),t+=4&a?2:0,o.push(8&a?n.readShort(r,t):0),t+=8&a?2:0,o},e.GSUB={},e.GSUB.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GSUB.subt)},e.GSUB.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1!=t&&4!=t&&5!=t&&6!=t)return null;if(1==t||4==t||5==t&&i.fmt<=2||6==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,s+h);}if(1==t&&i.fmt>=1&&i.fmt<=2){if(1==i.fmt)i.delta=o.readShort(r,a),a+=2;else if(2==i.fmt){var f=o.readUshort(r,a);a+=2,i.newg=o.readUshorts(r,a,f),a+=2*i.newg.length;}}else if(4==t){i.vals=[];f=o.readUshort(r,a);a+=2;for(var d=0;d<f;d++){var u=o.readUshort(r,a);a+=2,i.vals.push(e.GSUB.readLigatureSet(r,s+u));}}else if(5==t&&2==i.fmt){if(2==i.fmt){var l=o.readUshort(r,a);a+=2,i.cDef=e._lctf.readClassDef(r,s+l),i.scset=[];var v=o.readUshort(r,a);a+=2;for(d=0;d<v;d++){var c=o.readUshort(r,a);a+=2,i.scset.push(0==c?null:e.GSUB.readSubClassSet(r,s+c));}}}else if(6==t&&3==i.fmt){if(3==i.fmt){for(d=0;d<3;d++){f=o.readUshort(r,a);a+=2;for(var p=[],U=0;U<f;U++)p.push(e._lctf.readCoverage(r,s+o.readUshort(r,a+2*U)));a+=2*f,0==d&&(i.backCvg=p),1==d&&(i.inptCvg=p),2==d&&(i.ahedCvg=p);}f=o.readUshort(r,a);a+=2,i.lookupRec=e.GSUB.readSubstLookupRecords(r,a,f);}}else {if(7==t&&1==i.fmt){var g=o.readUshort(r,a);a+=2;var S=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=g;else if(n.ltype!=g)throw "invalid extension substitution";return e.GSUB.subt(r,n.ltype,s+S)}console.debug("unsupported GSUB table LookupType",t,"format",i.fmt);}return i},e.GSUB.readSubClassSet=function(r,t){var a=e._bin.readUshort,n=t,o=[],s=a(r,t);t+=2;for(var i=0;i<s;i++){var h=a(r,t);t+=2,o.push(e.GSUB.readSubClassRule(r,n+h));}return o},e.GSUB.readSubClassRule=function(r,t){var a=e._bin.readUshort,n={},o=a(r,t),s=a(r,t+=2);t+=2,n.input=[];for(var i=0;i<o-1;i++)n.input.push(a(r,t)),t+=2;return n.substLookupRecords=e.GSUB.readSubstLookupRecords(r,t,s),n},e.GSUB.readSubstLookupRecords=function(r,t,a){for(var n=e._bin.readUshort,o=[],s=0;s<a;s++)o.push(n(r,t),n(r,t+2)),t+=4;return o},e.GSUB.readChainSubClassSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readChainSubClassRule(r,n+h));}return o},e.GSUB.readChainSubClassRule=function(r,t){for(var a=e._bin,n={},o=["backtrack","input","lookahead"],s=0;s<o.length;s++){var i=a.readUshort(r,t);t+=2,1==s&&i--,n[o[s]]=a.readUshorts(r,t,i),t+=2*n[o[s]].length;}i=a.readUshort(r,t);return t+=2,n.subst=a.readUshorts(r,t,2*i),t+=2*n.subst.length,n},e.GSUB.readLigatureSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readLigature(r,n+h));}return o},e.GSUB.readLigature=function(r,t){var a=e._bin,n={chain:[]};n.nglyph=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2;for(var s=0;s<o-1;s++)n.chain.push(a.readUshort(r,t)),t+=2;return n},e.head={},e.head.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.fontRevision=n.readFixed(r,t),t+=4,n.readUint(r,t),t+=4,n.readUint(r,t),t+=4,o.flags=n.readUshort(r,t),t+=2,o.unitsPerEm=n.readUshort(r,t),t+=2,o.created=n.readUint64(r,t),t+=8,o.modified=n.readUint64(r,t),t+=8,o.xMin=n.readShort(r,t),t+=2,o.yMin=n.readShort(r,t),t+=2,o.xMax=n.readShort(r,t),t+=2,o.yMax=n.readShort(r,t),t+=2,o.macStyle=n.readUshort(r,t),t+=2,o.lowestRecPPEM=n.readUshort(r,t),t+=2,o.fontDirectionHint=n.readShort(r,t),t+=2,o.indexToLocFormat=n.readShort(r,t),t+=2,o.glyphDataFormat=n.readShort(r,t),t+=2,o},e.hhea={},e.hhea.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.ascender=n.readShort(r,t),t+=2,o.descender=n.readShort(r,t),t+=2,o.lineGap=n.readShort(r,t),t+=2,o.advanceWidthMax=n.readUshort(r,t),t+=2,o.minLeftSideBearing=n.readShort(r,t),t+=2,o.minRightSideBearing=n.readShort(r,t),t+=2,o.xMaxExtent=n.readShort(r,t),t+=2,o.caretSlopeRise=n.readShort(r,t),t+=2,o.caretSlopeRun=n.readShort(r,t),t+=2,o.caretOffset=n.readShort(r,t),t+=2,t+=8,o.metricDataFormat=n.readShort(r,t),t+=2,o.numberOfHMetrics=n.readUshort(r,t),t+=2,o},e.hmtx={},e.hmtx.parse=function(r,t,a,n){for(var o=e._bin,s={aWidth:[],lsBearing:[]},i=0,h=0,f=0;f<n.maxp.numGlyphs;f++)f<n.hhea.numberOfHMetrics&&(i=o.readUshort(r,t),t+=2,h=o.readShort(r,t),t+=2),s.aWidth.push(i),s.lsBearing.push(h);return s},e.kern={},e.kern.parse=function(r,t,a,n){var o=e._bin,s=o.readUshort(r,t);if(t+=2,1==s)return e.kern.parseV1(r,t-2,a,n);var i=o.readUshort(r,t);t+=2;for(var h={glyph1:[],rval:[]},f=0;f<i;f++){t+=2;a=o.readUshort(r,t);t+=2;var d=o.readUshort(r,t);t+=2;var u=d>>>8;if(0!=(u&=15))throw "unknown kern table format: "+u;t=e.kern.readFormat0(r,t,h);}return h},e.kern.parseV1=function(r,t,a,n){var o=e._bin;o.readFixed(r,t),t+=4;var s=o.readUint(r,t);t+=4;for(var i={glyph1:[],rval:[]},h=0;h<s;h++){o.readUint(r,t),t+=4;var f=o.readUshort(r,t);t+=2,o.readUshort(r,t),t+=2;var d=f>>>8;if(0!=(d&=15))throw "unknown kern table format: "+d;t=e.kern.readFormat0(r,t,i);}return i},e.kern.readFormat0=function(r,t,a){var n=e._bin,o=-1,s=n.readUshort(r,t);t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2;for(var i=0;i<s;i++){var h=n.readUshort(r,t);t+=2;var f=n.readUshort(r,t);t+=2;var d=n.readShort(r,t);t+=2,h!=o&&(a.glyph1.push(h),a.rval.push({glyph2:[],vals:[]}));var u=a.rval[a.rval.length-1];u.glyph2.push(f),u.vals.push(d),o=h;}return t},e.loca={},e.loca.parse=function(r,t,a,n){var o=e._bin,s=[],i=n.head.indexToLocFormat,h=n.maxp.numGlyphs+1;if(0==i)for(var f=0;f<h;f++)s.push(o.readUshort(r,t+(f<<1))<<1);if(1==i)for(f=0;f<h;f++)s.push(o.readUint(r,t+(f<<2)));return s},e.maxp={},e.maxp.parse=function(r,t,a){var n=e._bin,o={},s=n.readUint(r,t);return t+=4,o.numGlyphs=n.readUshort(r,t),t+=2,65536==s&&(o.maxPoints=n.readUshort(r,t),t+=2,o.maxContours=n.readUshort(r,t),t+=2,o.maxCompositePoints=n.readUshort(r,t),t+=2,o.maxCompositeContours=n.readUshort(r,t),t+=2,o.maxZones=n.readUshort(r,t),t+=2,o.maxTwilightPoints=n.readUshort(r,t),t+=2,o.maxStorage=n.readUshort(r,t),t+=2,o.maxFunctionDefs=n.readUshort(r,t),t+=2,o.maxInstructionDefs=n.readUshort(r,t),t+=2,o.maxStackElements=n.readUshort(r,t),t+=2,o.maxSizeOfInstructions=n.readUshort(r,t),t+=2,o.maxComponentElements=n.readUshort(r,t),t+=2,o.maxComponentDepth=n.readUshort(r,t),t+=2),o},e.name={},e.name.parse=function(r,t,a){var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2,n.readUshort(r,t);for(var i,h=["copyright","fontFamily","fontSubfamily","ID","fullName","version","postScriptName","trademark","manufacturer","designer","description","urlVendor","urlDesigner","licence","licenceURL","---","typoFamilyName","typoSubfamilyName","compatibleFull","sampleText","postScriptCID","wwsFamilyName","wwsSubfamilyName","lightPalette","darkPalette"],f=t+=2,d=0;d<s;d++){var u=n.readUshort(r,t);t+=2;var l=n.readUshort(r,t);t+=2;var v=n.readUshort(r,t);t+=2;var c=n.readUshort(r,t);t+=2;var p=n.readUshort(r,t);t+=2;var U=n.readUshort(r,t);t+=2;var g,S=h[c],m=f+12*s+U;if(0==u)g=n.readUnicode(r,m,p/2);else if(3==u&&0==l)g=n.readUnicode(r,m,p/2);else if(0==l)g=n.readASCII(r,m,p);else if(1==l)g=n.readUnicode(r,m,p/2);else if(3==l)g=n.readUnicode(r,m,p/2);else {if(1!=u)throw "unknown encoding "+l+", platformID: "+u;g=n.readASCII(r,m,p),console.debug("reading unknown MAC encoding "+l+" as ASCII");}var b="p"+u+","+v.toString(16);null==o[b]&&(o[b]={}),o[b][void 0!==S?S:c]=g,o[b]._lang=v;}for(var y in o)if(null!=o[y].postScriptName&&1033==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&0==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&3084==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName)return o[y];for(var y in o){i=y;break}return console.debug("returning name table with languageID "+o[i]._lang),o[i]},e["OS/2"]={},e["OS/2"].parse=function(r,t,a){var n=e._bin.readUshort(r,t);t+=2;var o={};if(0==n)e["OS/2"].version0(r,t,o);else if(1==n)e["OS/2"].version1(r,t,o);else if(2==n||3==n||4==n)e["OS/2"].version2(r,t,o);else {if(5!=n)throw "unknown OS/2 table version: "+n;e["OS/2"].version5(r,t,o);}return o},e["OS/2"].version0=function(r,t,a){var n=e._bin;return a.xAvgCharWidth=n.readShort(r,t),t+=2,a.usWeightClass=n.readUshort(r,t),t+=2,a.usWidthClass=n.readUshort(r,t),t+=2,a.fsType=n.readUshort(r,t),t+=2,a.ySubscriptXSize=n.readShort(r,t),t+=2,a.ySubscriptYSize=n.readShort(r,t),t+=2,a.ySubscriptXOffset=n.readShort(r,t),t+=2,a.ySubscriptYOffset=n.readShort(r,t),t+=2,a.ySuperscriptXSize=n.readShort(r,t),t+=2,a.ySuperscriptYSize=n.readShort(r,t),t+=2,a.ySuperscriptXOffset=n.readShort(r,t),t+=2,a.ySuperscriptYOffset=n.readShort(r,t),t+=2,a.yStrikeoutSize=n.readShort(r,t),t+=2,a.yStrikeoutPosition=n.readShort(r,t),t+=2,a.sFamilyClass=n.readShort(r,t),t+=2,a.panose=n.readBytes(r,t,10),t+=10,a.ulUnicodeRange1=n.readUint(r,t),t+=4,a.ulUnicodeRange2=n.readUint(r,t),t+=4,a.ulUnicodeRange3=n.readUint(r,t),t+=4,a.ulUnicodeRange4=n.readUint(r,t),t+=4,a.achVendID=[n.readInt8(r,t),n.readInt8(r,t+1),n.readInt8(r,t+2),n.readInt8(r,t+3)],t+=4,a.fsSelection=n.readUshort(r,t),t+=2,a.usFirstCharIndex=n.readUshort(r,t),t+=2,a.usLastCharIndex=n.readUshort(r,t),t+=2,a.sTypoAscender=n.readShort(r,t),t+=2,a.sTypoDescender=n.readShort(r,t),t+=2,a.sTypoLineGap=n.readShort(r,t),t+=2,a.usWinAscent=n.readUshort(r,t),t+=2,a.usWinDescent=n.readUshort(r,t),t+=2},e["OS/2"].version1=function(r,t,a){var n=e._bin;return t=e["OS/2"].version0(r,t,a),a.ulCodePageRange1=n.readUint(r,t),t+=4,a.ulCodePageRange2=n.readUint(r,t),t+=4},e["OS/2"].version2=function(r,t,a){var n=e._bin;return t=e["OS/2"].version1(r,t,a),a.sxHeight=n.readShort(r,t),t+=2,a.sCapHeight=n.readShort(r,t),t+=2,a.usDefault=n.readUshort(r,t),t+=2,a.usBreak=n.readUshort(r,t),t+=2,a.usMaxContext=n.readUshort(r,t),t+=2},e["OS/2"].version5=function(r,t,a){var n=e._bin;return t=e["OS/2"].version2(r,t,a),a.usLowerOpticalPointSize=n.readUshort(r,t),t+=2,a.usUpperOpticalPointSize=n.readUshort(r,t),t+=2},e.post={},e.post.parse=function(r,t,a){var n=e._bin,o={};return o.version=n.readFixed(r,t),t+=4,o.italicAngle=n.readFixed(r,t),t+=4,o.underlinePosition=n.readShort(r,t),t+=2,o.underlineThickness=n.readShort(r,t),t+=2,o},null==e&&(e={}),null==e.U&&(e.U={}),e.U.codeToGlyph=function(r,e){var t=r.cmap,a=-1;if(null!=t.p0e4?a=t.p0e4:null!=t.p3e1?a=t.p3e1:null!=t.p1e0?a=t.p1e0:null!=t.p0e3&&(a=t.p0e3),-1==a)throw "no familiar platform and encoding!";var n=t.tables[a];if(0==n.format)return e>=n.map.length?0:n.map[e];if(4==n.format){for(var o=-1,s=0;s<n.endCount.length;s++)if(e<=n.endCount[s]){o=s;break}if(-1==o)return 0;if(n.startCount[o]>e)return 0;return 65535&(0!=n.idRangeOffset[o]?n.glyphIdArray[e-n.startCount[o]+(n.idRangeOffset[o]>>1)-(n.idRangeOffset.length-o)]:e+n.idDelta[o])}if(12==n.format){if(e>n.groups[n.groups.length-1][1])return 0;for(s=0;s<n.groups.length;s++){var i=n.groups[s];if(i[0]<=e&&e<=i[1])return i[2]+(e-i[0])}return 0}throw "unknown cmap table format "+n.format},e.U.glyphToPath=function(r,t){var a={cmds:[],crds:[]};if(r.SVG&&r.SVG.entries[t]){var n=r.SVG.entries[t];return null==n?a:("string"==typeof n&&(n=e.SVG.toPath(n),r.SVG.entries[t]=n),n)}if(r.CFF){var o={x:0,y:0,stack:[],nStems:0,haveWidth:!1,width:r.CFF.Private?r.CFF.Private.defaultWidthX:0,open:!1},s=r.CFF,i=r.CFF.Private;if(s.ROS){for(var h=0;s.FDSelect[h+2]<=t;)h+=2;i=s.FDArray[s.FDSelect[h+1]].Private;}e.U._drawCFF(r.CFF.CharStrings[t],o,s,i,a);}else r.glyf&&e.U._drawGlyf(t,r,a);return a},e.U._drawGlyf=function(r,t,a){var n=t.glyf[r];null==n&&(n=t.glyf[r]=e.glyf._parseGlyf(t,r)),null!=n&&(n.noc>-1?e.U._simpleGlyph(n,a):e.U._compoGlyph(n,t,a));},e.U._simpleGlyph=function(r,t){for(var a=0;a<r.noc;a++){for(var n=0==a?0:r.endPts[a-1]+1,o=r.endPts[a],s=n;s<=o;s++){var i=s==n?o:s-1,h=s==o?n:s+1,f=1&r.flags[s],d=1&r.flags[i],u=1&r.flags[h],l=r.xs[s],v=r.ys[s];if(s==n)if(f){if(!d){e.U.P.moveTo(t,l,v);continue}e.U.P.moveTo(t,r.xs[i],r.ys[i]);}else d?e.U.P.moveTo(t,r.xs[i],r.ys[i]):e.U.P.moveTo(t,(r.xs[i]+l)/2,(r.ys[i]+v)/2);f?d&&e.U.P.lineTo(t,l,v):u?e.U.P.qcurveTo(t,l,v,r.xs[h],r.ys[h]):e.U.P.qcurveTo(t,l,v,(l+r.xs[h])/2,(v+r.ys[h])/2);}e.U.P.closePath(t);}},e.U._compoGlyph=function(r,t,a){for(var n=0;n<r.parts.length;n++){var o={cmds:[],crds:[]},s=r.parts[n];e.U._drawGlyf(s.glyphIndex,t,o);for(var i=s.m,h=0;h<o.crds.length;h+=2){var f=o.crds[h],d=o.crds[h+1];a.crds.push(f*i.a+d*i.b+i.tx),a.crds.push(f*i.c+d*i.d+i.ty);}for(h=0;h<o.cmds.length;h++)a.cmds.push(o.cmds[h]);}},e.U._getGlyphClass=function(r,t){var a=e._lctf.getInterval(t,r);return -1==a?0:t[a+2]},e.U.getPairAdjustment=function(r,t,a){var n=!1;if(r.GPOS)for(var o=r.GPOS,s=o.lookupList,i=o.featureList,h=[],f=0;f<i.length;f++){var d=i[f];if("kern"==d.tag){n=!0;for(var u=0;u<d.tab.length;u++)if(!h[d.tab[u]]){h[d.tab[u]]=!0;for(var l=s[d.tab[u]],v=0;v<l.tabs.length;v++)if(null!=l.tabs[v]){var c,p=l.tabs[v];if(!p.coverage||-1!=(c=e._lctf.coverageIndex(p.coverage,t)))if(1==l.ltype);else if(2==l.ltype){var U=null;if(1==p.fmt){var g=p.pairsets[c];for(f=0;f<g.length;f++)g[f].gid2==a&&(U=g[f]);}else if(2==p.fmt){var S=e.U._getGlyphClass(t,p.classDef1),m=e.U._getGlyphClass(a,p.classDef2);U=p.matrix[S][m];}if(U){var b=0;return U.val1&&U.val1[2]&&(b+=U.val1[2]),U.val2&&U.val2[0]&&(b+=U.val2[0]),b}}}}}}if(r.kern&&!n){var y=r.kern.glyph1.indexOf(t);if(-1!=y){var F=r.kern.rval[y].glyph2.indexOf(a);if(-1!=F)return r.kern.rval[y].vals[F]}}return 0},e.U._applySubs=function(r,t,a,n){for(var o=r.length-t-1,s=0;s<a.tabs.length;s++)if(null!=a.tabs[s]){var i,h=a.tabs[s];if(!h.coverage||-1!=(i=e._lctf.coverageIndex(h.coverage,r[t])))if(1==a.ltype)r[t],1==h.fmt?r[t]=r[t]+h.delta:r[t]=h.newg[i];else if(4==a.ltype)for(var f=h.vals[i],d=0;d<f.length;d++){var u=f[d],l=u.chain.length;if(!(l>o)){for(var v=!0,c=0,p=0;p<l;p++){for(;-1==r[t+c+(1+p)];)c++;u.chain[p]!=r[t+c+(1+p)]&&(v=!1);}if(v){r[t]=u.nglyph;for(p=0;p<l+c;p++)r[t+p+1]=-1;break}}}else if(5==a.ltype&&2==h.fmt)for(var U=e._lctf.getInterval(h.cDef,r[t]),g=h.cDef[U+2],S=h.scset[g],m=0;m<S.length;m++){var b=S[m],y=b.input;if(!(y.length>o)){for(v=!0,p=0;p<y.length;p++){var F=e._lctf.getInterval(h.cDef,r[t+1+p]);if(-1==U&&h.cDef[F+2]!=y[p]){v=!1;break}}if(v){var _=b.substLookupRecords;for(d=0;d<_.length;d+=2)_[d],_[d+1];}}}else if(6==a.ltype&&3==h.fmt){if(!e.U._glsCovered(r,h.backCvg,t-h.backCvg.length))continue;if(!e.U._glsCovered(r,h.inptCvg,t))continue;if(!e.U._glsCovered(r,h.ahedCvg,t+h.inptCvg.length))continue;var C=h.lookupRec;for(m=0;m<C.length;m+=2){U=C[m];var x=n[C[m+1]];e.U._applySubs(r,t+U,x,n);}}}},e.U._glsCovered=function(r,t,a){for(var n=0;n<t.length;n++){if(-1==e._lctf.coverageIndex(t[n],r[a+n]))return !1}return !0},e.U.glyphsToPath=function(r,t,a){for(var n={cmds:[],crds:[]},o=0,s=0;s<t.length;s++){var i=t[s];if(-1!=i){for(var h=s<t.length-1&&-1!=t[s+1]?t[s+1]:0,f=e.U.glyphToPath(r,i),d=0;d<f.crds.length;d+=2)n.crds.push(f.crds[d]+o),n.crds.push(f.crds[d+1]);a&&n.cmds.push(a);for(d=0;d<f.cmds.length;d++)n.cmds.push(f.cmds[d]);a&&n.cmds.push("X"),o+=r.hmtx.aWidth[i],s<t.length-1&&(o+=e.U.getPairAdjustment(r,i,h));}}return n},e.U.P={},e.U.P.moveTo=function(r,e,t){r.cmds.push("M"),r.crds.push(e,t);},e.U.P.lineTo=function(r,e,t){r.cmds.push("L"),r.crds.push(e,t);},e.U.P.curveTo=function(r,e,t,a,n,o,s){r.cmds.push("C"),r.crds.push(e,t,a,n,o,s);},e.U.P.qcurveTo=function(r,e,t,a,n){r.cmds.push("Q"),r.crds.push(e,t,a,n);},e.U.P.closePath=function(r){r.cmds.push("Z");},e.U._drawCFF=function(r,t,a,n,o){for(var s=t.stack,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open,u=0,l=t.x,v=t.y,c=0,p=0,U=0,g=0,S=0,m=0,b=0,y=0,F=0,_=0,C={val:0,size:0};u<r.length;){e.CFF.getCharString(r,u,C);var x=C.val;if(u+=C.size,"o1"==x||"o18"==x)s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;else if("o3"==x||"o23"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;}else if("o4"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),d&&e.U.P.closePath(o),v+=s.pop(),e.U.P.moveTo(o,l,v),d=!0;else if("o5"==x)for(;s.length>0;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);else if("o6"==x||"o7"==x)for(var P=s.length,I="o6"==x,w=0;w<P;w++){var O=s.shift();I?l+=O:v+=O,I=!I,e.U.P.lineTo(o,l,v);}else if("o8"==x||"o24"==x){P=s.length;for(var T=0;T+6<=P;)c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v),T+=6;"o24"==x&&(l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v));}else {if("o11"==x)break;if("o1234"==x||"o1235"==x||"o1236"==x||"o1237"==x)"o1234"==x&&(p=v,U=(c=l+s.shift())+s.shift(),_=g=p+s.shift(),m=g,y=v,l=(b=(S=(F=U+s.shift())+s.shift())+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1235"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),l=b+s.shift(),v=y+s.shift(),s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1236"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),_=g=p+s.shift(),m=g,b=(S=(F=U+s.shift())+s.shift())+s.shift(),y=m+s.shift(),l=b+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1237"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),Math.abs(b-l)>Math.abs(y-v)?l=b+s.shift():v=y+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v));else if("o14"==x){if(s.length>0&&!h&&(f=s.shift()+a.nominalWidthX,h=!0),4==s.length){var k=s.shift(),G=s.shift(),D=s.shift(),B=s.shift(),L=e.CFF.glyphBySE(a,D),R=e.CFF.glyphBySE(a,B);e.U._drawCFF(a.CharStrings[L],t,a,n,o),t.x=k,t.y=G,e.U._drawCFF(a.CharStrings[R],t,a,n,o);}d&&(e.U.P.closePath(o),d=!1);}else if("o19"==x||"o20"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0,u+=i+7>>3;}else if("o21"==x)s.length>2&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),v+=s.pop(),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o22"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o25"==x){for(;s.length>6;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);}else if("o26"==x)for(s.length%2&&(l+=s.shift());s.length>0;)c=l,p=v+s.shift(),l=U=c+s.shift(),v=(g=p+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);else if("o27"==x)for(s.length%2&&(v+=s.shift());s.length>0;)p=v,U=(c=l+s.shift())+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g,e.U.P.curveTo(o,c,p,U,g,l,v);else if("o10"==x||"o29"==x){var A="o10"==x?n:a;if(0==s.length)console.debug("error: empty stack");else {var W=s.pop(),M=A.Subrs[W+A.Bias];t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d,e.U._drawCFF(M,t,a,n,o),l=t.x,v=t.y,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open;}}else if("o30"==x||"o31"==x){var V=s.length,N=(T=0,"o31"==x);for(T+=V-(P=-3&V);T<P;)N?(p=v,U=(c=l+s.shift())+s.shift(),v=(g=p+s.shift())+s.shift(),P-T==5?(l=U+s.shift(),T++):l=U,N=!1):(c=l,p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),P-T==5?(v=g+s.shift(),T++):v=g,N=!0),e.U.P.curveTo(o,c,p,U,g,l,v),T+=4;}else {if("o"==(x+"").charAt(0))throw console.debug("Unknown operation: "+x,r),x;s.push(x);}}}t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d;};var t=e,a={Typr:t};return r.Typr=t,r.default=a,Object.defineProperty(r,"__esModule",{value:!0}),r}({}).Typr}
 
   /*!
   Custom bundle of woff2otf (https://github.com/arty-name/woff2otf) with fflate
@@ -3840,14 +3632,29 @@ void main() {
       return glyphIds
     }
 
+    function firstNum(...args) {
+      for (let i = 0; i < args.length; i++) {
+        if (typeof args[i] === 'number') {
+          return args[i]
+        }
+      }
+    }
 
     function wrapFontObj(typrFont) {
       const glyphMap = Object.create(null);
 
+      const os2 = typrFont['OS/2'];
+      const hhea = typrFont.hhea;
+      const unitsPerEm = typrFont.head.unitsPerEm;
+      const ascender = firstNum(os2 && os2.sTypoAscender, hhea && hhea.ascender, unitsPerEm);
+
       const fontObj = {
-        unitsPerEm: typrFont.head.unitsPerEm,
-        ascender: typrFont.hhea.ascender,
-        descender: typrFont.hhea.descender,
+        unitsPerEm,
+        ascender,
+        descender: firstNum(os2 && os2.sTypoDescender, hhea && hhea.descender, 0),
+        capHeight: firstNum(os2 && os2.sCapHeight, ascender),
+        xHeight: firstNum(os2 && os2.sxHeight, ascender),
+        lineGap: firstNum(os2 && os2.sTypoLineGap, hhea && hhea.lineGap),
         forEachGlyph(text, fontSize, letterSpacing, callback) {
           let glyphX = 0;
           const fontScale = 1 / fontObj.unitsPerEm * fontSize;
@@ -4011,6 +3818,8 @@ void main() {
    * @property {number} [caretHeight] - An appropriate height for all selection carets.
    * @property {number} ascender - The font's ascender metric.
    * @property {number} descender - The font's descender metric.
+   * @property {number} capHeight - The font's cap height metric, based on the height of Latin capital letters.
+   * @property {number} xHeight - The font's x height metric, based on the height of Latin lowercase letters.
    * @property {number} lineHeight - The final computed lineHeight measurement.
    * @property {number} topBaseline - The y position of the top line's baseline.
    * @property {Array<number>} blockBounds - The total [minX, minY, maxX, maxY] rect of the whole text block;
@@ -4018,8 +3827,6 @@ void main() {
    *           equivalent to the dimensions of a block-level text element in CSS.
    * @property {Array<number>} visibleBounds - The total [minX, minY, maxX, maxY] rect of the whole text block;
    *           unlike `blockBounds` this is tightly wrapped to the visible glyph paths.
-   * @property {Array<number>} totalBounds - DEPRECATED; use blockBounds instead.
-   * @property {Array<number>} totalBlockSize - DEPRECATED; use blockBounds instead
    * @property {Array<object>} chunkedBounds - List of bounding rects for each consecutive set of N glyphs,
    *           in the format `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`.
    * @property {object} timings - Timing info for various parts of the rendering logic including SDF
@@ -4167,7 +3974,7 @@ void main() {
         sdfTexture.dispose();
       }
 
-      DefaultThenable.all(neededSDFs.map(glyphInfo =>
+      Promise.all(neededSDFs.map(glyphInfo =>
         generateGlyphSDF(glyphInfo, atlas, args.gpuAccelerateSDF).then(({timing}) => {
           timings.sdf[glyphInfo.atlasIndex] = timing;
         })
@@ -4195,19 +4002,12 @@ void main() {
           ascender: result.ascender,
           descender: result.descender,
           lineHeight: result.lineHeight,
+          capHeight: result.capHeight,
+          xHeight: result.xHeight,
           topBaseline: result.topBaseline,
           blockBounds: result.blockBounds,
           visibleBounds: result.visibleBounds,
           timings: result.timings,
-          get totalBounds() {
-            console.log('totalBounds deprecated, use blockBounds instead');
-            return result.blockBounds
-          },
-          get totalBlockSize() {
-            console.log('totalBlockSize deprecated, use blockBounds instead');
-            const [x0, y0, x1, y1] = result.blockBounds;
-            return [x1 - x0, y1 - y0]
-          }
         }));
       });
     });
@@ -4215,7 +4015,7 @@ void main() {
     // While the typesetting request is being handled, go ahead and make sure the atlas canvas context is
     // "warmed up"; the first request will be the longest due to shader program compilation so this gets
     // a head start on that process before SDFs actually start getting processed.
-    DefaultThenable.all([]).then(() => {
+    Promise.resolve().then(() => {
       if (!atlas.contextLost) {
         warmUpSDFCanvas(sdfCanvas);
       }
@@ -4278,7 +4078,7 @@ void main() {
           promises.push(generateGlyphSDF(glyph, atlas, true));
         });
       });
-      DefaultThenable.all(promises).then(() => {
+      Promise.all(promises).then(() => {
         safariPre15Workaround(atlas);
         atlas.sdfTexture.needsUpdate = true;
       });
@@ -4349,13 +4149,12 @@ void main() {
     name: 'Typesetter',
     dependencies: [
       typesetterWorkerModule,
-      ThenableWorkerModule
     ],
-    init(typesetter, Thenable) {
+    init(typesetter) {
       return function(args) {
-        const thenable = new Thenable();
-        typesetter.typeset(args, thenable.resolve);
-        return thenable
+        return new Promise(resolve => {
+          typesetter.typeset(args, resolve);
+        })
       }
     },
     getTransferables(result) {
@@ -4374,253 +4173,236 @@ void main() {
     }
   });
 
-  const GlyphsGeometry = /*#__PURE__*/(() => {
+  const templateGeometries = {};
 
-    const templateGeometries = {};
-    function getTemplateGeometry(detail) {
-      let geom = templateGeometries[detail];
-      if (!geom) {
-        // Geometry is two planes back-to-back, which will always be rendered FrontSide only but
-        // appear as DoubleSide by default. FrontSide/BackSide are emulated using drawRange.
-        // We do it this way to avoid the performance hit of two draw calls for DoubleSide materials
-        // introduced by Three.js in r130 - see https://github.com/mrdoob/three.js/pull/21967
-        const front = new THREE.PlaneBufferGeometry(1, 1, detail, detail);
-        const back = front.clone();
-        const frontAttrs = front.attributes;
-        const backAttrs = back.attributes;
-        const combined = new THREE.BufferGeometry();
-        const vertCount = frontAttrs.uv.count;
-        for (let i = 0; i < vertCount; i++) {
-          backAttrs.position.array[i * 3] *= -1; // flip position x
-          backAttrs.normal.array[i * 3 + 2] *= -1; // flip normal z
-        }
-  ['position', 'normal', 'uv'].forEach(name => {
-          combined.setAttribute(name, new THREE.Float32BufferAttribute(
-            [...frontAttrs[name].array, ...backAttrs[name].array],
-            frontAttrs[name].itemSize)
-          );
-        });
-        combined.setIndex([...front.index.array, ...back.index.array.map(n => n + vertCount)]);
-        combined.translate(0.5, 0.5, 0);
-        geom = templateGeometries[detail] = combined;
+  function getTemplateGeometry(detail) {
+    let geom = templateGeometries[detail];
+    if (!geom) {
+      // Geometry is two planes back-to-back, which will always be rendered FrontSide only but
+      // appear as DoubleSide by default. FrontSide/BackSide are emulated using drawRange.
+      // We do it this way to avoid the performance hit of two draw calls for DoubleSide materials
+      // introduced by Three.js in r130 - see https://github.com/mrdoob/three.js/pull/21967
+      const front = new THREE.PlaneGeometry(1, 1, detail, detail);
+      const back = front.clone();
+      const frontAttrs = front.attributes;
+      const backAttrs = back.attributes;
+      const combined = new THREE.BufferGeometry();
+      const vertCount = frontAttrs.uv.count;
+      for (let i = 0; i < vertCount; i++) {
+        backAttrs.position.array[i * 3] *= -1; // flip position x
+        backAttrs.normal.array[i * 3 + 2] *= -1; // flip normal z
       }
-      return geom
+  ['position', 'normal', 'uv'].forEach(name => {
+        combined.setAttribute(name, new THREE.Float32BufferAttribute(
+          [...frontAttrs[name].array, ...backAttrs[name].array],
+          frontAttrs[name].itemSize)
+        );
+      });
+      combined.setIndex([...front.index.array, ...back.index.array.map(n => n + vertCount)]);
+      combined.translate(0.5, 0.5, 0);
+      geom = templateGeometries[detail] = combined;
+    }
+    return geom
+  }
+
+  const glyphBoundsAttrName = 'aTroikaGlyphBounds';
+  const glyphIndexAttrName = 'aTroikaGlyphIndex';
+  const glyphColorAttrName = 'aTroikaGlyphColor';
+
+  /**
+  @class GlyphsGeometry
+
+  A specialized Geometry for rendering a set of text glyphs. Uses InstancedBufferGeometry to
+  render the glyphs using GPU instancing of a single quad, rather than constructing a whole
+  geometry with vertices, for much smaller attribute arraybuffers according to this math:
+
+    Where N = number of glyphs...
+
+    Instanced:
+    - position: 4 * 3
+    - index: 2 * 3
+    - normal: 4 * 3
+    - uv: 4 * 2
+    - glyph x/y bounds: N * 4
+    - glyph indices: N * 1
+    = 5N + 38
+
+    Non-instanced:
+    - position: N * 4 * 3
+    - index: N * 2 * 3
+    - normal: N * 4 * 3
+    - uv: N * 4 * 2
+    - glyph indices: N * 1
+    = 39N
+
+  A downside of this is the rare-but-possible lack of the instanced arrays extension,
+  which we could potentially work around with a fallback non-instanced implementation.
+
+  */
+  class GlyphsGeometry extends THREE.InstancedBufferGeometry {
+    constructor() {
+      super();
+
+      this.detail = 1;
+      this.curveRadius = 0;
+
+      // Define groups for rendering text outline as a separate pass; these will only
+      // be used when the `material` getter returns an array, i.e. outlineWidth > 0.
+      this.groups = [
+        {start: 0, count: Infinity, materialIndex: 0},
+        {start: 0, count: Infinity, materialIndex: 1}
+      ];
+
+      // Preallocate empty bounding objects
+      this.boundingSphere = new THREE.Sphere();
+      this.boundingBox = new THREE.Box3();
     }
 
-    const glyphBoundsAttrName = 'aTroikaGlyphBounds';
-    const glyphIndexAttrName = 'aTroikaGlyphIndex';
-    const glyphColorAttrName = 'aTroikaGlyphColor';
+    computeBoundingSphere () {
+      // No-op; we'll sync the boundingSphere proactively when needed.
+    }
 
-    /**
-    @class GlyphsGeometry
+    computeBoundingBox() {
+      // No-op; we'll sync the boundingBox proactively when needed.
+    }
 
-    A specialized Geometry for rendering a set of text glyphs. Uses InstancedBufferGeometry to
-    render the glyphs using GPU instancing of a single quad, rather than constructing a whole
-    geometry with vertices, for much smaller attribute arraybuffers according to this math:
+    // Since our base geometry contains triangles for both front and back sides, we can emulate
+    // the "side" by restricting the draw range.
+    setSide(side) {
+      const verts = this.getIndex().count;
+      this.setDrawRange(side === THREE.BackSide ? verts / 2 : 0, side === THREE.DoubleSide ? verts : verts / 2);
+    }
 
-      Where N = number of glyphs...
-
-      Instanced:
-      - position: 4 * 3
-      - index: 2 * 3
-      - normal: 4 * 3
-      - uv: 4 * 2
-      - glyph x/y bounds: N * 4
-      - glyph indices: N * 1
-      = 5N + 38
-
-      Non-instanced:
-      - position: N * 4 * 3
-      - index: N * 2 * 3
-      - normal: N * 4 * 3
-      - uv: N * 4 * 2
-      - glyph indices: N * 1
-      = 39N
-
-    A downside of this is the rare-but-possible lack of the instanced arrays extension,
-    which we could potentially work around with a fallback non-instanced implementation.
-
-    */
-    class GlyphsGeometry extends THREE.InstancedBufferGeometry {
-      constructor() {
-        super();
-
-        this.detail = 1;
-        this.curveRadius = 0;
-
-        // Define groups for rendering text outline as a separate pass; these will only
-        // be used when the `material` getter returns an array, i.e. outlineWidth > 0.
-        this.groups = [
-          {start: 0, count: Infinity, materialIndex: 0},
-          {start: 0, count: Infinity, materialIndex: 1}
-        ];
-
-        // Preallocate empty bounding objects
-        this.boundingSphere = new THREE.Sphere();
-        this.boundingBox = new THREE.Box3();
-      }
-
-      computeBoundingSphere () {
-        // No-op; we'll sync the boundingSphere proactively when needed.
-      }
-
-      computeBoundingBox() {
-        // No-op; we'll sync the boundingBox proactively when needed.
-      }
-
-      // Since our base geometry contains triangles for both front and back sides, we can emulate
-      // the "side" by restricting the draw range.
-      setSide(side) {
-        const verts = this.getIndex().count;
-        this.setDrawRange(side === THREE.BackSide ? verts / 2 : 0, side === THREE.DoubleSide ? verts : verts / 2);
-      }
-
-      set detail(detail) {
-        if (detail !== this._detail) {
-          this._detail = detail;
-          if (typeof detail !== 'number' || detail < 1) {
-            detail = 1;
-          }
-          let tpl = getTemplateGeometry(detail)
-          ;['position', 'normal', 'uv'].forEach(attr => {
-            this.attributes[attr] = tpl.attributes[attr].clone();
-          });
-          this.setIndex(tpl.getIndex().clone());
+    set detail(detail) {
+      if (detail !== this._detail) {
+        this._detail = detail;
+        if (typeof detail !== 'number' || detail < 1) {
+          detail = 1;
         }
+        let tpl = getTemplateGeometry(detail)
+        ;['position', 'normal', 'uv'].forEach(attr => {
+          this.attributes[attr] = tpl.attributes[attr].clone();
+        });
+        this.setIndex(tpl.getIndex().clone());
       }
-      get detail() {
-        return this._detail
-      }
+    }
+    get detail() {
+      return this._detail
+    }
 
-      set curveRadius(r) {
-        if (r !== this._curveRadius) {
-          this._curveRadius = r;
-          this._updateBounds();
-        }
-      }
-      get curveRadius() {
-        return this._curveRadius
-      }
-
-      /**
-       * Update the geometry for a new set of glyphs.
-       * @param {Float32Array} glyphBounds - An array holding the planar bounds for all glyphs
-       *        to be rendered, 4 entries for each glyph: x1,x2,y1,y1
-       * @param {Float32Array} glyphAtlasIndices - An array holding the index of each glyph within
-       *        the SDF atlas texture.
-       * @param {Array} blockBounds - An array holding the [minX, minY, maxX, maxY] across all glyphs
-       * @param {Array} [chunkedBounds] - An array of objects describing bounds for each chunk of N
-       *        consecutive glyphs: `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`. This can be
-       *        used with `applyClipRect` to choose an optimized `instanceCount`.
-       * @param {Uint8Array} [glyphColors] - An array holding r,g,b values for each glyph.
-       */
-      updateGlyphs(glyphBounds, glyphAtlasIndices, blockBounds, chunkedBounds, glyphColors) {
-        // Update the instance attributes
-        updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
-        updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
-        updateBufferAttr(this, glyphColorAttrName, glyphColors, 3);
-        this._blockBounds = blockBounds;
-        this._chunkedBounds = chunkedBounds;
-        setInstanceCount(this, glyphAtlasIndices.length);
+    set curveRadius(r) {
+      if (r !== this._curveRadius) {
+        this._curveRadius = r;
         this._updateBounds();
       }
-
-      _updateBounds() {
-        const bounds = this._blockBounds;
-        if (bounds) {
-          const { curveRadius, boundingBox: bbox } = this;
-          if (curveRadius) {
-            const { PI, floor, min, max, sin, cos } = Math;
-            const halfPi = PI / 2;
-            const twoPi = PI * 2;
-            const absR = Math.abs(curveRadius);
-            const leftAngle = bounds[0] / absR;
-            const rightAngle = bounds[2] / absR;
-            const minX = floor((leftAngle + halfPi) / twoPi) !== floor((rightAngle + halfPi) / twoPi)
-              ? -absR : min(sin(leftAngle) * absR, sin(rightAngle) * absR);
-            const maxX = floor((leftAngle - halfPi) / twoPi) !== floor((rightAngle - halfPi) / twoPi)
-              ? absR : max(sin(leftAngle) * absR, sin(rightAngle) * absR);
-            const maxZ = floor((leftAngle + PI) / twoPi) !== floor((rightAngle + PI) / twoPi)
-              ? absR * 2 : max(absR - cos(leftAngle) * absR, absR - cos(rightAngle) * absR);
-            bbox.min.set(minX, bounds[1], curveRadius < 0 ? -maxZ : 0);
-            bbox.max.set(maxX, bounds[3], curveRadius < 0 ? 0 : maxZ);
-          } else {
-            bbox.min.set(bounds[0], bounds[1], 0);
-            bbox.max.set(bounds[2], bounds[3], 0);
-          }
-          bbox.getBoundingSphere(this.boundingSphere);
-        }
-      }
-
-      /**
-       * Given a clipping rect, and the chunkedBounds from the last updateGlyphs call, choose the lowest
-       * `instanceCount` that will show all glyphs within the clipped view. This is an optimization
-       * for long blocks of text that are clipped, to skip vertex shader evaluation for glyphs that would
-       * be clipped anyway.
-       *
-       * Note that since `drawElementsInstanced[ANGLE]` only accepts an instance count and not a starting
-       * offset, this optimization becomes less effective as the clipRect moves closer to the end of the
-       * text block. We could fix that by switching from instancing to a full geometry with a drawRange,
-       * but at the expense of much larger attribute buffers (see classdoc above.)
-       *
-       * @param {Vector4} clipRect
-       */
-      applyClipRect(clipRect) {
-        let count = this.getAttribute(glyphIndexAttrName).count;
-        let chunks = this._chunkedBounds;
-        if (chunks) {
-          for (let i = chunks.length; i--;) {
-            count = chunks[i].end;
-            let rect = chunks[i].rect;
-            // note: both rects are l-b-r-t
-            if (rect[1] < clipRect.w && rect[3] > clipRect.y && rect[0] < clipRect.z && rect[2] > clipRect.x) {
-              break
-            }
-          }
-        }
-        setInstanceCount(this, count);
-      }
+    }
+    get curveRadius() {
+      return this._curveRadius
     }
 
-    // Compat for pre r109:
-    if (!GlyphsGeometry.prototype.setAttribute) {
-      GlyphsGeometry.prototype.setAttribute = function(name, attribute) {
-        this.attributes[ name ] = attribute;
-        return this
-      };
+    /**
+     * Update the geometry for a new set of glyphs.
+     * @param {Float32Array} glyphBounds - An array holding the planar bounds for all glyphs
+     *        to be rendered, 4 entries for each glyph: x1,x2,y1,y1
+     * @param {Float32Array} glyphAtlasIndices - An array holding the index of each glyph within
+     *        the SDF atlas texture.
+     * @param {Array} blockBounds - An array holding the [minX, minY, maxX, maxY] across all glyphs
+     * @param {Array} [chunkedBounds] - An array of objects describing bounds for each chunk of N
+     *        consecutive glyphs: `{start:N, end:N, rect:[minX, minY, maxX, maxY]}`. This can be
+     *        used with `applyClipRect` to choose an optimized `instanceCount`.
+     * @param {Uint8Array} [glyphColors] - An array holding r,g,b values for each glyph.
+     */
+    updateGlyphs(glyphBounds, glyphAtlasIndices, blockBounds, chunkedBounds, glyphColors) {
+      // Update the instance attributes
+      updateBufferAttr(this, glyphBoundsAttrName, glyphBounds, 4);
+      updateBufferAttr(this, glyphIndexAttrName, glyphAtlasIndices, 1);
+      updateBufferAttr(this, glyphColorAttrName, glyphColors, 3);
+      this._blockBounds = blockBounds;
+      this._chunkedBounds = chunkedBounds;
+      this.instanceCount = glyphAtlasIndices.length;
+      this._updateBounds();
     }
 
-
-    function updateBufferAttr(geom, attrName, newArray, itemSize) {
-      const attr = geom.getAttribute(attrName);
-      if (newArray) {
-        // If length isn't changing, just update the attribute's array data
-        if (attr && attr.array.length === newArray.length) {
-          attr.array.set(newArray);
-          attr.needsUpdate = true;
+    _updateBounds() {
+      const bounds = this._blockBounds;
+      if (bounds) {
+        const { curveRadius, boundingBox: bbox } = this;
+        if (curveRadius) {
+          const { PI, floor, min, max, sin, cos } = Math;
+          const halfPi = PI / 2;
+          const twoPi = PI * 2;
+          const absR = Math.abs(curveRadius);
+          const leftAngle = bounds[0] / absR;
+          const rightAngle = bounds[2] / absR;
+          const minX = floor((leftAngle + halfPi) / twoPi) !== floor((rightAngle + halfPi) / twoPi)
+            ? -absR : min(sin(leftAngle) * absR, sin(rightAngle) * absR);
+          const maxX = floor((leftAngle - halfPi) / twoPi) !== floor((rightAngle - halfPi) / twoPi)
+            ? absR : max(sin(leftAngle) * absR, sin(rightAngle) * absR);
+          const maxZ = floor((leftAngle + PI) / twoPi) !== floor((rightAngle + PI) / twoPi)
+            ? absR * 2 : max(absR - cos(leftAngle) * absR, absR - cos(rightAngle) * absR);
+          bbox.min.set(minX, bounds[1], curveRadius < 0 ? -maxZ : 0);
+          bbox.max.set(maxX, bounds[3], curveRadius < 0 ? 0 : maxZ);
         } else {
-          geom.setAttribute(attrName, new THREE.InstancedBufferAttribute(newArray, itemSize));
-          // If the new attribute has a different size, we also have to (as of r117) manually clear the
-          // internal cached max instance count. See https://github.com/mrdoob/three.js/issues/19706
-          // It's unclear if this is a threejs bug or a truly unsupported scenario; discussion in
-          // that ticket is ambiguous as to whether replacing a BufferAttribute with one of a
-          // different size is supported, but https://github.com/mrdoob/three.js/pull/17418 strongly
-          // implies it should be supported. It's possible we need to
-          delete geom._maxInstanceCount; //for r117+, could be fragile
-          geom.dispose(); //for r118+, more robust feeling, but more heavy-handed than I'd like
+          bbox.min.set(bounds[0], bounds[1], 0);
+          bbox.max.set(bounds[2], bounds[3], 0);
         }
-      } else if (attr) {
-        geom.deleteAttribute(attrName);
+        bbox.getBoundingSphere(this.boundingSphere);
       }
     }
 
-    // Handle maxInstancedCount -> instanceCount rename that happened in three r117
-    function setInstanceCount(geom, count) {
-      geom[geom.hasOwnProperty('instanceCount') ? 'instanceCount' : 'maxInstancedCount'] = count;
+    /**
+     * Given a clipping rect, and the chunkedBounds from the last updateGlyphs call, choose the lowest
+     * `instanceCount` that will show all glyphs within the clipped view. This is an optimization
+     * for long blocks of text that are clipped, to skip vertex shader evaluation for glyphs that would
+     * be clipped anyway.
+     *
+     * Note that since `drawElementsInstanced[ANGLE]` only accepts an instance count and not a starting
+     * offset, this optimization becomes less effective as the clipRect moves closer to the end of the
+     * text block. We could fix that by switching from instancing to a full geometry with a drawRange,
+     * but at the expense of much larger attribute buffers (see classdoc above.)
+     *
+     * @param {Vector4} clipRect
+     */
+    applyClipRect(clipRect) {
+      let count = this.getAttribute(glyphIndexAttrName).count;
+      let chunks = this._chunkedBounds;
+      if (chunks) {
+        for (let i = chunks.length; i--;) {
+          count = chunks[i].end;
+          let rect = chunks[i].rect;
+          // note: both rects are l-b-r-t
+          if (rect[1] < clipRect.w && rect[3] > clipRect.y && rect[0] < clipRect.z && rect[2] > clipRect.x) {
+            break
+          }
+        }
+      }
+      this.instanceCount = count;
     }
+  }
 
-    return GlyphsGeometry
-  })();
+
+  function updateBufferAttr(geom, attrName, newArray, itemSize) {
+    const attr = geom.getAttribute(attrName);
+    if (newArray) {
+      // If length isn't changing, just update the attribute's array data
+      if (attr && attr.array.length === newArray.length) {
+        attr.array.set(newArray);
+        attr.needsUpdate = true;
+      } else {
+        geom.setAttribute(attrName, new THREE.InstancedBufferAttribute(newArray, itemSize));
+        // If the new attribute has a different size, we also have to (as of r117) manually clear the
+        // internal cached max instance count. See https://github.com/mrdoob/three.js/issues/19706
+        // It's unclear if this is a threejs bug or a truly unsupported scenario; discussion in
+        // that ticket is ambiguous as to whether replacing a BufferAttribute with one of a
+        // different size is supported, but https://github.com/mrdoob/three.js/pull/17418 strongly
+        // implies it should be supported. It's possible we need to
+        delete geom._maxInstanceCount; //for r117+, could be fragile
+        geom.dispose(); //for r118+, more robust feeling, but more heavy-handed than I'd like
+      }
+    } else if (attr) {
+      geom.deleteAttribute(attrName);
+    }
+  }
 
   // language=GLSL
   const VERTEX_DEFS = `
@@ -4897,797 +4679,758 @@ if (edgeAlpha == 0.0) {
     return textMaterial
   }
 
-  const Text = /*#__PURE__*/(() => {
+  const defaultMaterial = /*#__PURE__*/ new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    side: THREE.DoubleSide,
+    transparent: true
+  });
+  const defaultStrokeColor = 0x808080;
 
-    const defaultMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      side: THREE.DoubleSide,
-      transparent: true
-    });
-    const defaultStrokeColor = 0x808080;
+  const tempMat4 = /*#__PURE__*/ new THREE.Matrix4();
+  const tempVec3a = /*#__PURE__*/ new THREE.Vector3();
+  const tempVec3b = /*#__PURE__*/ new THREE.Vector3();
+  const tempArray = [];
+  const origin = /*#__PURE__*/ new THREE.Vector3();
+  const defaultOrient = '+x+y';
 
-    const tempMat4 = new THREE.Matrix4();
-    const tempVec3a = new THREE.Vector3();
-    const tempVec3b = new THREE.Vector3();
-    const tempArray = [];
-    const origin = new THREE.Vector3();
-    const defaultOrient = '+x+y';
+  function first(o) {
+    return Array.isArray(o) ? o[0] : o
+  }
 
-    function first(o) {
-      return Array.isArray(o) ? o[0] : o
-    }
-
-    let getFlatRaycastMesh = () => {
-      const mesh = new THREE.Mesh(
-        new THREE.PlaneBufferGeometry(1, 1),
-        defaultMaterial
-      );
-      getFlatRaycastMesh = () => mesh;
-      return mesh
-    };
-    let getCurvedRaycastMesh = () => {
-      const mesh = new THREE.Mesh(
-        new THREE.PlaneBufferGeometry(1, 1, 32, 1),
-        defaultMaterial
-      );
-      getCurvedRaycastMesh = () => mesh;
-      return mesh
-    };
-
-    const syncStartEvent = {type: 'syncstart'};
-    const syncCompleteEvent = {type: 'synccomplete'};
-
-    const SYNCABLE_PROPS = [
-      'font',
-      'fontSize',
-      'letterSpacing',
-      'lineHeight',
-      'maxWidth',
-      'overflowWrap',
-      'text',
-      'direction',
-      'textAlign',
-      'textIndent',
-      'whiteSpace',
-      'anchorX',
-      'anchorY',
-      'colorRanges',
-      'sdfGlyphSize'
-    ];
-
-    const COPYABLE_PROPS = SYNCABLE_PROPS.concat(
-      'material',
-      'color',
-      'depthOffset',
-      'clipRect',
-      'curveRadius',
-      'orientation',
-      'glyphGeometryDetail'
+  let getFlatRaycastMesh = () => {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      defaultMaterial
     );
+    getFlatRaycastMesh = () => mesh;
+    return mesh
+  };
+  let getCurvedRaycastMesh = () => {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1, 32, 1),
+      defaultMaterial
+    );
+    getCurvedRaycastMesh = () => mesh;
+    return mesh
+  };
+
+  const syncStartEvent = { type: 'syncstart' };
+  const syncCompleteEvent = { type: 'synccomplete' };
+
+  const SYNCABLE_PROPS = [
+    'font',
+    'fontSize',
+    'letterSpacing',
+    'lineHeight',
+    'maxWidth',
+    'overflowWrap',
+    'text',
+    'direction',
+    'textAlign',
+    'textIndent',
+    'whiteSpace',
+    'anchorX',
+    'anchorY',
+    'colorRanges',
+    'sdfGlyphSize'
+  ];
+
+  const COPYABLE_PROPS = SYNCABLE_PROPS.concat(
+    'material',
+    'color',
+    'depthOffset',
+    'clipRect',
+    'curveRadius',
+    'orientation',
+    'glyphGeometryDetail'
+  );
+
+  /**
+   * @class Text
+   *
+   * A ThreeJS Mesh that renders a string of text on a plane in 3D space using signed distance
+   * fields (SDF).
+   */
+  class Text extends THREE.Mesh {
+    constructor() {
+      const geometry = new GlyphsGeometry();
+      super(geometry, null);
+
+      // === Text layout properties: === //
+
+      /**
+       * @member {string} text
+       * The string of text to be rendered.
+       */
+      this.text = '';
+
+      /**
+       * @member {number|string} anchorX
+       * Defines the horizontal position in the text block that should line up with the local origin.
+       * Can be specified as a numeric x position in local units, a string percentage of the total
+       * text block width e.g. `'25%'`, or one of the following keyword strings: 'left', 'center',
+       * or 'right'.
+       */
+      this.anchorX = 0;
+
+      /**
+       * @member {number|string} anchorX
+       * Defines the vertical position in the text block that should line up with the local origin.
+       * Can be specified as a numeric y position in local units (note: down is negative y), a string
+       * percentage of the total text block height e.g. `'25%'`, or one of the following keyword strings:
+       * 'top', 'top-baseline', 'top-cap', 'top-ex', 'middle', 'bottom-baseline', or 'bottom'.
+       */
+      this.anchorY = 0;
+
+      /**
+       * @member {number} curveRadius
+       * Defines a cylindrical radius along which the text's plane will be curved. Positive numbers put
+       * the cylinder's centerline (oriented vertically) that distance in front of the text, for a concave
+       * curvature, while negative numbers put it behind the text for a convex curvature. The centerline
+       * will be aligned with the text's local origin; you can use `anchorX` to offset it.
+       *
+       * Since each glyph is by default rendered with a simple quad, each glyph remains a flat plane
+       * internally. You can use `glyphGeometryDetail` to add more vertices for curvature inside glyphs.
+       */
+      this.curveRadius = 0;
+
+      /**
+       * @member {string} direction
+       * Sets the base direction for the text. The default value of "auto" will choose a direction based
+       * on the text's content according to the bidi spec. A value of "ltr" or "rtl" will force the direction.
+       */
+      this.direction = 'auto';
+
+      /**
+       * @member {string} font
+       * URL of a custom font to be used. Font files can be in .ttf, .otf, or .woff (not .woff2) formats.
+       * Defaults to the Roboto font loaded from Google Fonts.
+       */
+      this.font = null; //will use default from TextBuilder
+
+      /**
+       * @member {number} fontSize
+       * The size at which to render the font in local units; corresponds to the em-box height
+       * of the chosen `font`.
+       */
+      this.fontSize = 0.1;
+
+      /**
+       * @member {number} letterSpacing
+       * Sets a uniform adjustment to spacing between letters after kerning is applied. Positive
+       * numbers increase spacing and negative numbers decrease it.
+       */
+      this.letterSpacing = 0;
+
+      /**
+       * @member {number|string} lineHeight
+       * Sets the height of each line of text, as a multiple of the `fontSize`. Defaults to 'normal'
+       * which chooses a reasonable height based on the chosen font's ascender/descender metrics.
+       */
+      this.lineHeight = 'normal';
+
+      /**
+       * @member {number} maxWidth
+       * The maximum width of the text block, above which text may start wrapping according to the
+       * `whiteSpace` and `overflowWrap` properties.
+       */
+      this.maxWidth = Infinity;
+
+      /**
+       * @member {string} overflowWrap
+       * Defines how text wraps if the `whiteSpace` property is `normal`. Can be either `'normal'`
+       * to break at whitespace characters, or `'break-word'` to allow breaking within words.
+       * Defaults to `'normal'`.
+       */
+      this.overflowWrap = 'normal';
+
+      /**
+       * @member {string} textAlign
+       * The horizontal alignment of each line of text within the overall text bounding box.
+       */
+      this.textAlign = 'left';
+
+      /**
+       * @member {number} textIndent
+       * Indentation for the first character of a line; see CSS `text-indent`.
+       */
+      this.textIndent = 0;
+
+      /**
+       * @member {string} whiteSpace
+       * Defines whether text should wrap when a line reaches the `maxWidth`. Can
+       * be either `'normal'` (the default), to allow wrapping according to the `overflowWrap` property,
+       * or `'nowrap'` to prevent wrapping. Note that `'normal'` here honors newline characters to
+       * manually break lines, making it behave more like `'pre-wrap'` does in CSS.
+       */
+      this.whiteSpace = 'normal';
 
 
+      // === Presentation properties: === //
+
+      /**
+       * @member {THREE.Material} material
+       * Defines a _base_ material to be used when rendering the text. This material will be
+       * automatically replaced with a material derived from it, that adds shader code to
+       * decrease the alpha for each fragment (pixel) outside the text glyphs, with antialiasing.
+       * By default it will derive from a simple white MeshBasicMaterial, but you can use any
+       * of the other mesh materials to gain other features like lighting, texture maps, etc.
+       *
+       * Also see the `color` shortcut property.
+       */
+      this.material = null;
+
+      /**
+       * @member {string|number|THREE.Color} color
+       * This is a shortcut for setting the `color` of the text's material. You can use this
+       * if you don't want to specify a whole custom `material`. Also, if you do use a custom
+       * `material`, this color will only be used for this particuar Text instance, even if
+       * that same material instance is shared across multiple Text objects.
+       */
+      this.color = null;
+
+      /**
+       * @member {object|null} colorRanges
+       * WARNING: This API is experimental and may change.
+       * This allows more fine-grained control of colors for individual or ranges of characters,
+       * taking precedence over the material's `color`. Its format is an Object whose keys each
+       * define a starting character index for a range, and whose values are the color for each
+       * range. The color value can be a numeric hex color value, a `THREE.Color` object, or
+       * any of the strings accepted by `THREE.Color`.
+       */
+      this.colorRanges = null;
+
+      /**
+       * @member {number|string} outlineWidth
+       * WARNING: This API is experimental and may change.
+       * The width of an outline/halo to be drawn around each text glyph using the `outlineColor` and `outlineOpacity`.
+       * Can be specified as either an absolute number in local units, or as a percentage string e.g.
+       * `"12%"` which is treated as a percentage of the `fontSize`. Defaults to `0`, which means
+       * no outline will be drawn unless an `outlineOffsetX/Y` or `outlineBlur` is set.
+       */
+      this.outlineWidth = 0;
+
+      /**
+       * @member {string|number|THREE.Color} outlineColor
+       * WARNING: This API is experimental and may change.
+       * The color of the text outline, if `outlineWidth`/`outlineBlur`/`outlineOffsetX/Y` are set.
+       * Defaults to black.
+       */
+      this.outlineColor = 0x000000;
+
+      /**
+       * @member {number} outlineOpacity
+       * WARNING: This API is experimental and may change.
+       * The opacity of the outline, if `outlineWidth`/`outlineBlur`/`outlineOffsetX/Y` are set.
+       * Defaults to `1`.
+       */
+      this.outlineOpacity = 1;
+
+      /**
+       * @member {number|string} outlineBlur
+       * WARNING: This API is experimental and may change.
+       * A blur radius applied to the outer edge of the text's outline. If the `outlineWidth` is
+       * zero, the blur will be applied at the glyph edge, like CSS's `text-shadow` blur radius.
+       * Can be specified as either an absolute number in local units, or as a percentage string e.g.
+       * `"12%"` which is treated as a percentage of the `fontSize`. Defaults to `0`.
+       */
+      this.outlineBlur = 0;
+
+      /**
+       * @member {number|string} outlineOffsetX
+       * WARNING: This API is experimental and may change.
+       * A horizontal offset for the text outline.
+       * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
+       * which is treated as a percentage of the `fontSize`. Defaults to `0`.
+       */
+      this.outlineOffsetX = 0;
+
+      /**
+       * @member {number|string} outlineOffsetY
+       * WARNING: This API is experimental and may change.
+       * A vertical offset for the text outline.
+       * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
+       * which is treated as a percentage of the `fontSize`. Defaults to `0`.
+       */
+      this.outlineOffsetY = 0;
+
+      /**
+       * @member {number|string} strokeWidth
+       * WARNING: This API is experimental and may change.
+       * The width of an inner stroke drawn inside each text glyph using the `strokeColor` and `strokeOpacity`.
+       * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
+       * which is treated as a percentage of the `fontSize`. Defaults to `0`.
+       */
+      this.strokeWidth = 0;
+
+      /**
+       * @member {string|number|THREE.Color} strokeColor
+       * WARNING: This API is experimental and may change.
+       * The color of the text stroke, if `strokeWidth` is greater than zero. Defaults to gray.
+       */
+      this.strokeColor = defaultStrokeColor;
+
+      /**
+       * @member {number} strokeOpacity
+       * WARNING: This API is experimental and may change.
+       * The opacity of the stroke, if `strokeWidth` is greater than zero. Defaults to `1`.
+       */
+      this.strokeOpacity = 1;
+
+      /**
+       * @member {number} fillOpacity
+       * WARNING: This API is experimental and may change.
+       * The opacity of the glyph's fill from 0 to 1. This behaves like the material's `opacity` but allows
+       * giving the fill a different opacity than the `strokeOpacity`. A fillOpacity of `0` makes the
+       * interior of the glyph invisible, leaving just the `strokeWidth`. Defaults to `1`.
+       */
+      this.fillOpacity = 1;
+
+      /**
+       * @member {number} depthOffset
+       * This is a shortcut for setting the material's `polygonOffset` and related properties,
+       * which can be useful in preventing z-fighting when this text is laid on top of another
+       * plane in the scene. Positive numbers are further from the camera, negatives closer.
+       */
+      this.depthOffset = 0;
+
+      /**
+       * @member {Array<number>} clipRect
+       * If specified, defines a `[minX, minY, maxX, maxY]` of a rectangle outside of which all
+       * pixels will be discarded. This can be used for example to clip overflowing text when
+       * `whiteSpace='nowrap'`.
+       */
+      this.clipRect = null;
+
+      /**
+       * @member {string} orientation
+       * Defines the axis plane on which the text should be laid out when the mesh has no extra
+       * rotation transform. It is specified as a string with two axes: the horizontal axis with
+       * positive pointing right, and the vertical axis with positive pointing up. By default this
+       * is '+x+y', meaning the text sits on the xy plane with the text's top toward positive y
+       * and facing positive z. A value of '+x-z' would place it on the xz plane with the text's
+       * top toward negative z and facing positive y.
+       */
+      this.orientation = defaultOrient;
+
+      /**
+       * @member {number} glyphGeometryDetail
+       * Controls number of vertical/horizontal segments that make up each glyph's rectangular
+       * plane. Defaults to 1. This can be increased to provide more geometrical detail for custom
+       * vertex shader effects, for example.
+       */
+      this.glyphGeometryDetail = 1;
+
+      /**
+       * @member {number|null} sdfGlyphSize
+       * The size of each glyph's SDF (signed distance field) used for rendering. This must be a
+       * power-of-two number. Defaults to 64 which is generally a good balance of size and quality
+       * for most fonts. Larger sizes can improve the quality of glyph rendering by increasing
+       * the sharpness of corners and preventing loss of very thin lines, at the expense of
+       * increased memory footprint and longer SDF generation time.
+       */
+      this.sdfGlyphSize = null;
+
+      /**
+       * @member {boolean} gpuAccelerateSDF
+       * When `true`, the SDF generation process will be GPU-accelerated with WebGL when possible,
+       * making it much faster especially for complex glyphs, and falling back to a JavaScript version
+       * executed in web workers when support isn't available. It should automatically detect support,
+       * but it's still somewhat experimental, so you can set it to `false` to force it to use the JS
+       * version if you encounter issues with it.
+       */
+      this.gpuAccelerateSDF = true;
+
+      this.debugSDF = false;
+    }
 
     /**
-     * @class Text
-     *
-     * A ThreeJS Mesh that renders a string of text on a plane in 3D space using signed distance
-     * fields (SDF).
+     * Updates the text rendering according to the current text-related configuration properties.
+     * This is an async process, so you can pass in a callback function to be executed when it
+     * finishes.
+     * @param {function} [callback]
      */
-    class Text extends THREE.Mesh {
-      constructor() {
-        const geometry = new GlyphsGeometry();
-        super(geometry, null);
+    sync(callback) {
+      if (this._needsSync) {
+        this._needsSync = false;
 
-        // === Text layout properties: === //
-
-        /**
-         * @member {string} text
-         * The string of text to be rendered.
-         */
-        this.text = '';
-
-        /**
-         * @deprecated Use `anchorX` and `anchorY` instead
-         * @member {Array<number>} anchor
-         * Defines where in the text block should correspond to the mesh's local position, as a set
-         * of horizontal and vertical percentages from 0 to 1. A value of `[0, 0]` (the default)
-         * anchors at the top-left, `[1, 1]` at the bottom-right, and `[0.5, 0.5]` centers the
-         * block at the mesh's position.
-         */
-        //this.anchor = null
-
-        /**
-         * @member {number|string} anchorX
-         * Defines the horizontal position in the text block that should line up with the local origin.
-         * Can be specified as a numeric x position in local units, a string percentage of the total
-         * text block width e.g. `'25%'`, or one of the following keyword strings: 'left', 'center',
-         * or 'right'.
-         */
-        this.anchorX = 0;
-
-        /**
-         * @member {number|string} anchorX
-         * Defines the vertical position in the text block that should line up with the local origin.
-         * Can be specified as a numeric y position in local units (note: down is negative y), a string
-         * percentage of the total text block height e.g. `'25%'`, or one of the following keyword strings:
-         * 'top', 'top-baseline', 'middle', 'bottom-baseline', or 'bottom'.
-         */
-        this.anchorY = 0;
-
-        /**
-         * @member {number} curveRadius
-         * Defines a cylindrical radius along which the text's plane will be curved. Positive numbers put
-         * the cylinder's centerline (oriented vertically) that distance in front of the text, for a concave
-         * curvature, while negative numbers put it behind the text for a convex curvature. The centerline
-         * will be aligned with the text's local origin; you can use `anchorX` to offset it.
-         *
-         * Since each glyph is by default rendered with a simple quad, each glyph remains a flat plane
-         * internally. You can use `glyphGeometryDetail` to add more vertices for curvature inside glyphs.
-         */
-        this.curveRadius = 0;
-
-        /**
-         * @member {string} direction
-         * Sets the base direction for the text. The default value of "auto" will choose a direction based
-         * on the text's content according to the bidi spec. A value of "ltr" or "rtl" will force the direction.
-         */
-        this.direction = 'auto';
-
-        /**
-         * @member {string} font
-         * URL of a custom font to be used. Font files can be in .ttf, .otf, or .woff (not .woff2) formats.
-         * Defaults to the Roboto font loaded from Google Fonts.
-         */
-        this.font = null; //will use default from TextBuilder
-
-        /**
-         * @member {number} fontSize
-         * The size at which to render the font in local units; corresponds to the em-box height
-         * of the chosen `font`.
-         */
-        this.fontSize = 0.1;
-
-        /**
-         * @member {number} letterSpacing
-         * Sets a uniform adjustment to spacing between letters after kerning is applied. Positive
-         * numbers increase spacing and negative numbers decrease it.
-         */
-        this.letterSpacing = 0;
-
-        /**
-         * @member {number|string} lineHeight
-         * Sets the height of each line of text, as a multiple of the `fontSize`. Defaults to 'normal'
-         * which chooses a reasonable height based on the chosen font's ascender/descender metrics.
-         */
-        this.lineHeight = 'normal';
-
-        /**
-         * @member {number} maxWidth
-         * The maximum width of the text block, above which text may start wrapping according to the
-         * `whiteSpace` and `overflowWrap` properties.
-         */
-        this.maxWidth = Infinity;
-
-        /**
-         * @member {string} overflowWrap
-         * Defines how text wraps if the `whiteSpace` property is `normal`. Can be either `'normal'`
-         * to break at whitespace characters, or `'break-word'` to allow breaking within words.
-         * Defaults to `'normal'`.
-         */
-        this.overflowWrap = 'normal';
-
-        /**
-         * @member {string} textAlign
-         * The horizontal alignment of each line of text within the overall text bounding box.
-         */
-        this.textAlign = 'left';
-
-        /**
-         * @member {number} textIndent
-         * Indentation for the first character of a line; see CSS `text-indent`.
-         */
-        this.textIndent = 0;
-
-        /**
-         * @member {string} whiteSpace
-         * Defines whether text should wrap when a line reaches the `maxWidth`. Can
-         * be either `'normal'` (the default), to allow wrapping according to the `overflowWrap` property,
-         * or `'nowrap'` to prevent wrapping. Note that `'normal'` here honors newline characters to
-         * manually break lines, making it behave more like `'pre-wrap'` does in CSS.
-         */
-        this.whiteSpace = 'normal';
-
-
-        // === Presentation properties: === //
-
-        /**
-         * @member {THREE.Material} material
-         * Defines a _base_ material to be used when rendering the text. This material will be
-         * automatically replaced with a material derived from it, that adds shader code to
-         * decrease the alpha for each fragment (pixel) outside the text glyphs, with antialiasing.
-         * By default it will derive from a simple white MeshBasicMaterial, but you can use any
-         * of the other mesh materials to gain other features like lighting, texture maps, etc.
-         *
-         * Also see the `color` shortcut property.
-         */
-        this.material = null;
-
-        /**
-         * @member {string|number|THREE.Color} color
-         * This is a shortcut for setting the `color` of the text's material. You can use this
-         * if you don't want to specify a whole custom `material`. Also, if you do use a custom
-         * `material`, this color will only be used for this particuar Text instance, even if
-         * that same material instance is shared across multiple Text objects.
-         */
-        this.color = null;
-
-        /**
-         * @member {object|null} colorRanges
-         * WARNING: This API is experimental and may change.
-         * This allows more fine-grained control of colors for individual or ranges of characters,
-         * taking precedence over the material's `color`. Its format is an Object whose keys each
-         * define a starting character index for a range, and whose values are the color for each
-         * range. The color value can be a numeric hex color value, a `THREE.Color` object, or
-         * any of the strings accepted by `THREE.Color`.
-         */
-        this.colorRanges = null;
-
-        /**
-         * @member {number|string} outlineWidth
-         * WARNING: This API is experimental and may change.
-         * The width of an outline/halo to be drawn around each text glyph using the `outlineColor` and `outlineOpacity`.
-         * Can be specified as either an absolute number in local units, or as a percentage string e.g.
-         * `"12%"` which is treated as a percentage of the `fontSize`. Defaults to `0`, which means
-         * no outline will be drawn unless an `outlineOffsetX/Y` or `outlineBlur` is set.
-         */
-        this.outlineWidth = 0;
-
-        /**
-         * @member {string|number|THREE.Color} outlineColor
-         * WARNING: This API is experimental and may change.
-         * The color of the text outline, if `outlineWidth`/`outlineBlur`/`outlineOffsetX/Y` are set.
-         * Defaults to black.
-         */
-        this.outlineColor = 0x000000;
-
-        /**
-         * @member {number} outlineOpacity
-         * WARNING: This API is experimental and may change.
-         * The opacity of the outline, if `outlineWidth`/`outlineBlur`/`outlineOffsetX/Y` are set.
-         * Defaults to `1`.
-         */
-        this.outlineOpacity = 1;
-
-        /**
-         * @member {number|string} outlineBlur
-         * WARNING: This API is experimental and may change.
-         * A blur radius applied to the outer edge of the text's outline. If the `outlineWidth` is
-         * zero, the blur will be applied at the glyph edge, like CSS's `text-shadow` blur radius.
-         * Can be specified as either an absolute number in local units, or as a percentage string e.g.
-         * `"12%"` which is treated as a percentage of the `fontSize`. Defaults to `0`.
-         */
-        this.outlineBlur = 0;
-
-        /**
-         * @member {number|string} outlineOffsetX
-         * WARNING: This API is experimental and may change.
-         * A horizontal offset for the text outline.
-         * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
-         * which is treated as a percentage of the `fontSize`. Defaults to `0`.
-         */
-        this.outlineOffsetX = 0;
-
-        /**
-         * @member {number|string} outlineOffsetY
-         * WARNING: This API is experimental and may change.
-         * A vertical offset for the text outline.
-         * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
-         * which is treated as a percentage of the `fontSize`. Defaults to `0`.
-         */
-        this.outlineOffsetY = 0;
-
-        /**
-         * @member {number|string} strokeWidth
-         * WARNING: This API is experimental and may change.
-         * The width of an inner stroke drawn inside each text glyph using the `strokeColor` and `strokeOpacity`.
-         * Can be specified as either an absolute number in local units, or as a percentage string e.g. `"12%"`
-         * which is treated as a percentage of the `fontSize`. Defaults to `0`.
-         */
-        this.strokeWidth = 0;
-
-        /**
-         * @member {string|number|THREE.Color} strokeColor
-         * WARNING: This API is experimental and may change.
-         * The color of the text stroke, if `strokeWidth` is greater than zero. Defaults to gray.
-         */
-        this.strokeColor = defaultStrokeColor;
-
-        /**
-         * @member {number} strokeOpacity
-         * WARNING: This API is experimental and may change.
-         * The opacity of the stroke, if `strokeWidth` is greater than zero. Defaults to `1`.
-         */
-        this.strokeOpacity = 1;
-
-        /**
-         * @member {number} fillOpacity
-         * WARNING: This API is experimental and may change.
-         * The opacity of the glyph's fill from 0 to 1. This behaves like the material's `opacity` but allows
-         * giving the fill a different opacity than the `strokeOpacity`. A fillOpacity of `0` makes the
-         * interior of the glyph invisible, leaving just the `strokeWidth`. Defaults to `1`.
-         */
-        this.fillOpacity = 1;
-
-        /**
-         * @member {number} depthOffset
-         * This is a shortcut for setting the material's `polygonOffset` and related properties,
-         * which can be useful in preventing z-fighting when this text is laid on top of another
-         * plane in the scene. Positive numbers are further from the camera, negatives closer.
-         */
-        this.depthOffset = 0;
-
-        /**
-         * @member {Array<number>} clipRect
-         * If specified, defines a `[minX, minY, maxX, maxY]` of a rectangle outside of which all
-         * pixels will be discarded. This can be used for example to clip overflowing text when
-         * `whiteSpace='nowrap'`.
-         */
-        this.clipRect = null;
-
-        /**
-         * @member {string} orientation
-         * Defines the axis plane on which the text should be laid out when the mesh has no extra
-         * rotation transform. It is specified as a string with two axes: the horizontal axis with
-         * positive pointing right, and the vertical axis with positive pointing up. By default this
-         * is '+x+y', meaning the text sits on the xy plane with the text's top toward positive y
-         * and facing positive z. A value of '+x-z' would place it on the xz plane with the text's
-         * top toward negative z and facing positive y.
-         */
-        this.orientation = defaultOrient;
-
-        /**
-         * @member {number} glyphGeometryDetail
-         * Controls number of vertical/horizontal segments that make up each glyph's rectangular
-         * plane. Defaults to 1. This can be increased to provide more geometrical detail for custom
-         * vertex shader effects, for example.
-         */
-        this.glyphGeometryDetail = 1;
-
-        /**
-         * @member {number|null} sdfGlyphSize
-         * The size of each glyph's SDF (signed distance field) used for rendering. This must be a
-         * power-of-two number. Defaults to 64 which is generally a good balance of size and quality
-         * for most fonts. Larger sizes can improve the quality of glyph rendering by increasing
-         * the sharpness of corners and preventing loss of very thin lines, at the expense of
-         * increased memory footprint and longer SDF generation time.
-         */
-        this.sdfGlyphSize = null;
-
-        /**
-         * @member {boolean} gpuAccelerateSDF
-         * When `true`, the SDF generation process will be GPU-accelerated with WebGL when possible,
-         * making it much faster especially for complex glyphs, and falling back to a JavaScript version
-         * executed in web workers when support isn't available. It should automatically detect support,
-         * but it's still somewhat experimental, so you can set it to `false` to force it to use the JS
-         * version if you encounter issues with it.
-         */
-        this.gpuAccelerateSDF = true;
-
-        this.debugSDF = false;
-      }
-
-      /**
-       * Updates the text rendering according to the current text-related configuration properties.
-       * This is an async process, so you can pass in a callback function to be executed when it
-       * finishes.
-       * @param {function} [callback]
-       */
-      sync(callback) {
-        if (this._needsSync) {
-          this._needsSync = false;
-
-          // If there's another sync still in progress, queue
-          if (this._isSyncing) {
-            (this._queuedSyncs || (this._queuedSyncs = [])).push(callback);
-          } else {
-            this._isSyncing = true;
-            this.dispatchEvent(syncStartEvent);
-
-            getTextRenderInfo({
-              text: this.text,
-              font: this.font,
-              fontSize: this.fontSize || 0.1,
-              letterSpacing: this.letterSpacing || 0,
-              lineHeight: this.lineHeight || 'normal',
-              maxWidth: this.maxWidth,
-              direction: this.direction || 'auto',
-              textAlign: this.textAlign,
-              textIndent: this.textIndent,
-              whiteSpace: this.whiteSpace,
-              overflowWrap: this.overflowWrap,
-              anchorX: this.anchorX,
-              anchorY: this.anchorY,
-              colorRanges: this.colorRanges,
-              includeCaretPositions: true, //TODO parameterize
-              sdfGlyphSize: this.sdfGlyphSize,
-              gpuAccelerateSDF: this.gpuAccelerateSDF,
-            }, textRenderInfo => {
-              this._isSyncing = false;
-
-              // Save result for later use in onBeforeRender
-              this._textRenderInfo = textRenderInfo;
-
-              // Update the geometry attributes
-              this.geometry.updateGlyphs(
-                textRenderInfo.glyphBounds,
-                textRenderInfo.glyphAtlasIndices,
-                textRenderInfo.blockBounds,
-                textRenderInfo.chunkedBounds,
-                textRenderInfo.glyphColors
-              );
-
-              // If we had extra sync requests queued up, kick it off
-              const queued = this._queuedSyncs;
-              if (queued) {
-                this._queuedSyncs = null;
-                this._needsSync = true;
-                this.sync(() => {
-                  queued.forEach(fn => fn && fn());
-                });
-              }
-
-              this.dispatchEvent(syncCompleteEvent);
-              if (callback) {
-                callback();
-              }
-            });
-          }
-        }
-      }
-
-      /**
-       * Initiate a sync if needed - note it won't complete until next frame at the
-       * earliest so if possible it's a good idea to call sync() manually as soon as
-       * all the properties have been set.
-       * @override
-       */
-      onBeforeRender(renderer, scene, camera, geometry, material, group) {
-        this.sync();
-
-        // This may not always be a text material, e.g. if there's a scene.overrideMaterial present
-        if (material.isTroikaTextMaterial) {
-          this._prepareForRender(material);
-        }
-
-        // We need to force the material to FrontSide to avoid the double-draw-call performance hit
-        // introduced in Three.js r130: https://github.com/mrdoob/three.js/pull/21967 - The sidedness
-        // is instead applied via drawRange in the GlyphsGeometry.
-        material._hadOwnSide = material.hasOwnProperty('side');
-        this.geometry.setSide(material._actualSide = material.side);
-        material.side = THREE.FrontSide;
-      }
-
-      onAfterRender(renderer, scene, camera, geometry, material, group) {
-        // Restore original material side
-        if (material._hadOwnSide) {
-          material.side = material._actualSide;
+        // If there's another sync still in progress, queue
+        if (this._isSyncing) {
+          (this._queuedSyncs || (this._queuedSyncs = [])).push(callback);
         } else {
-          delete material.side; // back to inheriting from base material
-        }
-      }
+          this._isSyncing = true;
+          this.dispatchEvent(syncStartEvent);
 
-      /**
-       * Shortcut to dispose the geometry specific to this instance.
-       * Note: we don't also dispose the derived material here because if anything else is
-       * sharing the same base material it will result in a pause next frame as the program
-       * is recompiled. Instead users can dispose the base material manually, like normal,
-       * and we'll also dispose the derived material at that time.
-       */
-      dispose() {
-        this.geometry.dispose();
-      }
+          getTextRenderInfo({
+            text: this.text,
+            font: this.font,
+            fontSize: this.fontSize || 0.1,
+            letterSpacing: this.letterSpacing || 0,
+            lineHeight: this.lineHeight || 'normal',
+            maxWidth: this.maxWidth,
+            direction: this.direction || 'auto',
+            textAlign: this.textAlign,
+            textIndent: this.textIndent,
+            whiteSpace: this.whiteSpace,
+            overflowWrap: this.overflowWrap,
+            anchorX: this.anchorX,
+            anchorY: this.anchorY,
+            colorRanges: this.colorRanges,
+            includeCaretPositions: true, //TODO parameterize
+            sdfGlyphSize: this.sdfGlyphSize,
+            gpuAccelerateSDF: this.gpuAccelerateSDF,
+          }, textRenderInfo => {
+            this._isSyncing = false;
 
-      /**
-       * @property {TroikaTextRenderInfo|null} textRenderInfo
-       * @readonly
-       * The current processed rendering data for this TextMesh, returned by the TextBuilder after
-       * a `sync()` call. This will be `null` initially, and may be stale for a short period until
-       * the asynchrous `sync()` process completes.
-       */
-      get textRenderInfo() {
-        return this._textRenderInfo || null
-      }
+            // Save result for later use in onBeforeRender
+            this._textRenderInfo = textRenderInfo;
 
-      // Handler for automatically wrapping the base material with our upgrades. We do the wrapping
-      // lazily on _read_ rather than write to avoid unnecessary wrapping on transient values.
-      get material() {
-        let derivedMaterial = this._derivedMaterial;
-        const baseMaterial = this._baseMaterial || this._defaultMaterial || (this._defaultMaterial = defaultMaterial.clone());
-        if (!derivedMaterial || derivedMaterial.baseMaterial !== baseMaterial) {
-          derivedMaterial = this._derivedMaterial = createTextDerivedMaterial(baseMaterial);
-          // dispose the derived material when its base material is disposed:
-          baseMaterial.addEventListener('dispose', function onDispose() {
-            baseMaterial.removeEventListener('dispose', onDispose);
-            derivedMaterial.dispose();
+            // Update the geometry attributes
+            this.geometry.updateGlyphs(
+              textRenderInfo.glyphBounds,
+              textRenderInfo.glyphAtlasIndices,
+              textRenderInfo.blockBounds,
+              textRenderInfo.chunkedBounds,
+              textRenderInfo.glyphColors
+            );
+
+            // If we had extra sync requests queued up, kick it off
+            const queued = this._queuedSyncs;
+            if (queued) {
+              this._queuedSyncs = null;
+              this._needsSync = true;
+              this.sync(() => {
+                queued.forEach(fn => fn && fn());
+              });
+            }
+
+            this.dispatchEvent(syncCompleteEvent);
+            if (callback) {
+              callback();
+            }
           });
         }
-        // If text outline is configured, render it as a preliminary draw using Three's multi-material
-        // feature (see GlyphsGeometry which sets up `groups` for this purpose) Doing it with multi
-        // materials ensures the layers are always rendered consecutively in a consistent order.
-        // Each layer will trigger onBeforeRender with the appropriate material.
-        if (this.outlineWidth || this.outlineBlur || this.outlineOffsetX || this.outlineOffsetY) {
-          let outlineMaterial = derivedMaterial._outlineMtl;
-          if (!outlineMaterial) {
-            outlineMaterial = derivedMaterial._outlineMtl = Object.create(derivedMaterial, {
-              id: {value: derivedMaterial.id + 0.1}
-            });
-            outlineMaterial.isTextOutlineMaterial = true;
-            outlineMaterial.depthWrite = false;
-            outlineMaterial.map = null; //???
-            derivedMaterial.addEventListener('dispose', function onDispose() {
-              derivedMaterial.removeEventListener('dispose', onDispose);
-              outlineMaterial.dispose();
-            });
-          }
-          return [
-            outlineMaterial,
-            derivedMaterial
-          ]
-        } else {
-          return derivedMaterial
-        }
-      }
-      set material(baseMaterial) {
-        if (baseMaterial && baseMaterial.isTroikaTextMaterial) { //prevent double-derivation
-          this._derivedMaterial = baseMaterial;
-          this._baseMaterial = baseMaterial.baseMaterial;
-        } else {
-          this._baseMaterial = baseMaterial;
-        }
-      }
-
-      get glyphGeometryDetail() {
-        return this.geometry.detail
-      }
-      set glyphGeometryDetail(detail) {
-        this.geometry.detail = detail;
-      }
-
-      get curveRadius() {
-        return this.geometry.curveRadius
-      }
-      set curveRadius(r) {
-        this.geometry.curveRadius = r;
-      }
-
-      // Create and update material for shadows upon request:
-      get customDepthMaterial() {
-        return first(this.material).getDepthMaterial()
-      }
-      get customDistanceMaterial() {
-        return first(this.material).getDistanceMaterial()
-      }
-
-      _prepareForRender(material) {
-        const isOutline = material.isTextOutlineMaterial;
-        const uniforms = material.uniforms;
-        const textInfo = this.textRenderInfo;
-        if (textInfo) {
-          const {sdfTexture, blockBounds} = textInfo;
-          uniforms.uTroikaSDFTexture.value = sdfTexture;
-          uniforms.uTroikaSDFTextureSize.value.set(sdfTexture.image.width, sdfTexture.image.height);
-          uniforms.uTroikaSDFGlyphSize.value = textInfo.sdfGlyphSize;
-          uniforms.uTroikaSDFExponent.value = textInfo.sdfExponent;
-          uniforms.uTroikaTotalBounds.value.fromArray(blockBounds);
-          uniforms.uTroikaUseGlyphColors.value = !isOutline && !!textInfo.glyphColors;
-
-          let distanceOffset = 0;
-          let blurRadius = 0;
-          let strokeWidth = 0;
-          let fillOpacity;
-          let strokeOpacity;
-          let strokeColor;
-          let offsetX = 0;
-          let offsetY = 0;
-
-          if (isOutline) {
-            let {outlineWidth, outlineOffsetX, outlineOffsetY, outlineBlur, outlineOpacity} = this;
-            distanceOffset = this._parsePercent(outlineWidth) || 0;
-            blurRadius = Math.max(0, this._parsePercent(outlineBlur) || 0);
-            fillOpacity = outlineOpacity;
-            offsetX = this._parsePercent(outlineOffsetX) || 0;
-            offsetY = this._parsePercent(outlineOffsetY) || 0;
-          } else {
-            strokeWidth = Math.max(0, this._parsePercent(this.strokeWidth) || 0);
-            if (strokeWidth) {
-              strokeColor = this.strokeColor;
-              uniforms.uTroikaStrokeColor.value.set(strokeColor == null ? defaultStrokeColor : strokeColor);
-              strokeOpacity = this.strokeOpacity;
-              if (strokeOpacity == null) strokeOpacity = 1;
-            }
-            fillOpacity = this.fillOpacity;
-          }
-
-          uniforms.uTroikaDistanceOffset.value = distanceOffset;
-          uniforms.uTroikaPositionOffset.value.set(offsetX, offsetY);
-          uniforms.uTroikaBlurRadius.value = blurRadius;
-          uniforms.uTroikaStrokeWidth.value = strokeWidth;
-          uniforms.uTroikaStrokeOpacity.value = strokeOpacity;
-          uniforms.uTroikaFillOpacity.value = fillOpacity == null ? 1 : fillOpacity;
-          uniforms.uTroikaCurveRadius.value = this.curveRadius || 0;
-
-          let clipRect = this.clipRect;
-          if (clipRect && Array.isArray(clipRect) && clipRect.length === 4) {
-            uniforms.uTroikaClipRect.value.fromArray(clipRect);
-          } else {
-            // no clipping - choose a finite rect that shouldn't ever be reached by overflowing glyphs or outlines
-            const pad = (this.fontSize || 0.1) * 100;
-            uniforms.uTroikaClipRect.value.set(
-              blockBounds[0] - pad,
-              blockBounds[1] - pad,
-              blockBounds[2] + pad,
-              blockBounds[3] + pad
-            );
-          }
-          this.geometry.applyClipRect(uniforms.uTroikaClipRect.value);
-        }
-        uniforms.uTroikaSDFDebug.value = !!this.debugSDF;
-        material.polygonOffset = !!this.depthOffset;
-        material.polygonOffsetFactor = material.polygonOffsetUnits = this.depthOffset || 0;
-
-        // Shortcut for setting material color via `color` prop on the mesh; this is
-        // applied only to the derived material to avoid mutating a shared base material.
-        const color = isOutline ? (this.outlineColor || 0) : this.color;
-
-        if (color == null) {
-          delete material.color; //inherit from base
-        } else {
-          const colorObj = material.hasOwnProperty('color') ? material.color : (material.color = new THREE.Color());
-          if (color !== colorObj._input || typeof color === 'object') {
-            colorObj.set(colorObj._input = color);
-          }
-        }
-
-        // base orientation
-        let orient = this.orientation || defaultOrient;
-        if (orient !== material._orientation) {
-          let rotMat = uniforms.uTroikaOrient.value;
-          orient = orient.replace(/[^-+xyz]/g, '');
-          let match = orient !== defaultOrient && orient.match(/^([-+])([xyz])([-+])([xyz])$/);
-          if (match) {
-            let [, hSign, hAxis, vSign, vAxis] = match;
-            tempVec3a.set(0, 0, 0)[hAxis] = hSign === '-' ? 1 : -1;
-            tempVec3b.set(0, 0, 0)[vAxis] = vSign === '-' ? -1 : 1;
-            tempMat4.lookAt(origin, tempVec3a.cross(tempVec3b), tempVec3b);
-            rotMat.setFromMatrix4(tempMat4);
-          } else {
-            rotMat.identity();
-          }
-          material._orientation = orient;
-        }
-      }
-
-      _parsePercent(value) {
-        if (typeof value === 'string') {
-          let match = value.match(/^(-?[\d.]+)%$/);
-          let pct = match ? parseFloat(match[1]) : NaN;
-          value = (isNaN(pct) ? 0 : pct / 100) * this.fontSize;
-        }
-        return value
-      }
-
-      /**
-       * Translate a point in local space to an x/y in the text plane.
-       */
-      localPositionToTextCoords(position, target = new THREE.Vector2()) {
-        target.copy(position); //simple non-curved case is 1:1
-        const r = this.curveRadius;
-        if (r) { //flatten the curve
-          target.x = Math.atan2(position.x, Math.abs(r) - Math.abs(position.z)) * Math.abs(r);
-        }
-        return target
-      }
-
-      /**
-       * Translate a point in world space to an x/y in the text plane.
-       */
-      worldPositionToTextCoords(position, target = new THREE.Vector2()) {
-        tempVec3a.copy(position);
-        return this.localPositionToTextCoords(this.worldToLocal(tempVec3a), target)
-      }
-
-      /**
-       * @override Custom raycasting to test against the whole text block's max rectangular bounds
-       * TODO is there any reason to make this more granular, like within individual line or glyph rects?
-       */
-      raycast(raycaster, intersects) {
-        const {textRenderInfo, curveRadius} = this;
-        if (textRenderInfo) {
-          const bounds = textRenderInfo.blockBounds;
-          const raycastMesh = curveRadius ? getCurvedRaycastMesh() : getFlatRaycastMesh();
-          const geom = raycastMesh.geometry;
-          const {position, uv} = geom.attributes;
-          for (let i = 0; i < uv.count; i++) {
-            let x = bounds[0] + (uv.getX(i) * (bounds[2] - bounds[0]));
-            const y = bounds[1] + (uv.getY(i) * (bounds[3] - bounds[1]));
-            let z = 0;
-            if (curveRadius) {
-              z = curveRadius - Math.cos(x / curveRadius) * curveRadius;
-              x = Math.sin(x / curveRadius) * curveRadius;
-            }
-            position.setXYZ(i, x, y, z);
-          }
-          geom.boundingSphere = this.geometry.boundingSphere;
-          geom.boundingBox = this.geometry.boundingBox;
-          raycastMesh.matrixWorld = this.matrixWorld;
-          raycastMesh.material.side = this.material.side;
-          tempArray.length = 0;
-          raycastMesh.raycast(raycaster, tempArray);
-          for (let i = 0; i < tempArray.length; i++) {
-            tempArray[i].object = this;
-            intersects.push(tempArray[i]);
-          }
-        }
-      }
-
-      copy(source) {
-        // Prevent copying the geometry reference so we don't end up sharing attributes between instances
-        const geom = this.geometry;
-        super.copy(source);
-        this.geometry = geom;
-
-        COPYABLE_PROPS.forEach(prop => {
-          this[prop] = source[prop];
-        });
-        return this
-      }
-
-      clone() {
-        return new this.constructor().copy(this)
       }
     }
 
+    /**
+     * Initiate a sync if needed - note it won't complete until next frame at the
+     * earliest so if possible it's a good idea to call sync() manually as soon as
+     * all the properties have been set.
+     * @override
+     */
+    onBeforeRender(renderer, scene, camera, geometry, material, group) {
+      this.sync();
 
-    // Create setters for properties that affect text layout:
-    SYNCABLE_PROPS.forEach(prop => {
-      const privateKey = '_private_' + prop;
-      Object.defineProperty(Text.prototype, prop, {
-        get() {
-          return this[privateKey]
-        },
-        set(value) {
-          if (value !== this[privateKey]) {
-            this[privateKey] = value;
-            this._needsSync = true;
-          }
+      // This may not always be a text material, e.g. if there's a scene.overrideMaterial present
+      if (material.isTroikaTextMaterial) {
+        this._prepareForRender(material);
+      }
+
+      // We need to force the material to FrontSide to avoid the double-draw-call performance hit
+      // introduced in Three.js r130: https://github.com/mrdoob/three.js/pull/21967 - The sidedness
+      // is instead applied via drawRange in the GlyphsGeometry.
+      material._hadOwnSide = material.hasOwnProperty('side');
+      this.geometry.setSide(material._actualSide = material.side);
+      material.side = THREE.FrontSide;
+    }
+
+    onAfterRender(renderer, scene, camera, geometry, material, group) {
+      // Restore original material side
+      if (material._hadOwnSide) {
+        material.side = material._actualSide;
+      } else {
+        delete material.side; // back to inheriting from base material
+      }
+    }
+
+    /**
+     * Shortcut to dispose the geometry specific to this instance.
+     * Note: we don't also dispose the derived material here because if anything else is
+     * sharing the same base material it will result in a pause next frame as the program
+     * is recompiled. Instead users can dispose the base material manually, like normal,
+     * and we'll also dispose the derived material at that time.
+     */
+    dispose() {
+      this.geometry.dispose();
+    }
+
+    /**
+     * @property {TroikaTextRenderInfo|null} textRenderInfo
+     * @readonly
+     * The current processed rendering data for this TextMesh, returned by the TextBuilder after
+     * a `sync()` call. This will be `null` initially, and may be stale for a short period until
+     * the asynchrous `sync()` process completes.
+     */
+    get textRenderInfo() {
+      return this._textRenderInfo || null
+    }
+
+    // Handler for automatically wrapping the base material with our upgrades. We do the wrapping
+    // lazily on _read_ rather than write to avoid unnecessary wrapping on transient values.
+    get material() {
+      let derivedMaterial = this._derivedMaterial;
+      const baseMaterial = this._baseMaterial || this._defaultMaterial || (this._defaultMaterial = defaultMaterial.clone());
+      if (!derivedMaterial || derivedMaterial.baseMaterial !== baseMaterial) {
+        derivedMaterial = this._derivedMaterial = createTextDerivedMaterial(baseMaterial);
+        // dispose the derived material when its base material is disposed:
+        baseMaterial.addEventListener('dispose', function onDispose() {
+          baseMaterial.removeEventListener('dispose', onDispose);
+          derivedMaterial.dispose();
+        });
+      }
+      // If text outline is configured, render it as a preliminary draw using Three's multi-material
+      // feature (see GlyphsGeometry which sets up `groups` for this purpose) Doing it with multi
+      // materials ensures the layers are always rendered consecutively in a consistent order.
+      // Each layer will trigger onBeforeRender with the appropriate material.
+      if (this.outlineWidth || this.outlineBlur || this.outlineOffsetX || this.outlineOffsetY) {
+        let outlineMaterial = derivedMaterial._outlineMtl;
+        if (!outlineMaterial) {
+          outlineMaterial = derivedMaterial._outlineMtl = Object.create(derivedMaterial, {
+            id: {value: derivedMaterial.id + 0.1}
+          });
+          outlineMaterial.isTextOutlineMaterial = true;
+          outlineMaterial.depthWrite = false;
+          outlineMaterial.map = null; //???
+          derivedMaterial.addEventListener('dispose', function onDispose() {
+            derivedMaterial.removeEventListener('dispose', onDispose);
+            outlineMaterial.dispose();
+          });
         }
-      });
-    });
+        return [
+          outlineMaterial,
+          derivedMaterial
+        ]
+      } else {
+        return derivedMaterial
+      }
+    }
+    set material(baseMaterial) {
+      if (baseMaterial && baseMaterial.isTroikaTextMaterial) { //prevent double-derivation
+        this._derivedMaterial = baseMaterial;
+        this._baseMaterial = baseMaterial.baseMaterial;
+      } else {
+        this._baseMaterial = baseMaterial;
+      }
+    }
 
+    get glyphGeometryDetail() {
+      return this.geometry.detail
+    }
+    set glyphGeometryDetail(detail) {
+      this.geometry.detail = detail;
+    }
 
-    // Deprecation handler for `anchor` array:
-    let deprMsgShown = false;
-    Object.defineProperty(Text.prototype, 'anchor', {
-      get() {
-        return this._deprecated_anchor
-      },
-      set(val) {
-        this._deprecated_anchor = val;
-        if (!deprMsgShown) {
-          console.warn('TextMesh: `anchor` has been deprecated; use `anchorX` and `anchorY` instead.');
-          deprMsgShown = true;
-        }
-        if (Array.isArray(val)) {
-          this.anchorX = `${(+val[0] || 0) * 100}%`;
-          this.anchorY = `${(+val[1] || 0) * 100}%`;
+    get curveRadius() {
+      return this.geometry.curveRadius
+    }
+    set curveRadius(r) {
+      this.geometry.curveRadius = r;
+    }
+
+    // Create and update material for shadows upon request:
+    get customDepthMaterial() {
+      return first(this.material).getDepthMaterial()
+    }
+    get customDistanceMaterial() {
+      return first(this.material).getDistanceMaterial()
+    }
+
+    _prepareForRender(material) {
+      const isOutline = material.isTextOutlineMaterial;
+      const uniforms = material.uniforms;
+      const textInfo = this.textRenderInfo;
+      if (textInfo) {
+        const {sdfTexture, blockBounds} = textInfo;
+        uniforms.uTroikaSDFTexture.value = sdfTexture;
+        uniforms.uTroikaSDFTextureSize.value.set(sdfTexture.image.width, sdfTexture.image.height);
+        uniforms.uTroikaSDFGlyphSize.value = textInfo.sdfGlyphSize;
+        uniforms.uTroikaSDFExponent.value = textInfo.sdfExponent;
+        uniforms.uTroikaTotalBounds.value.fromArray(blockBounds);
+        uniforms.uTroikaUseGlyphColors.value = !isOutline && !!textInfo.glyphColors;
+
+        let distanceOffset = 0;
+        let blurRadius = 0;
+        let strokeWidth = 0;
+        let fillOpacity;
+        let strokeOpacity;
+        let strokeColor;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (isOutline) {
+          let {outlineWidth, outlineOffsetX, outlineOffsetY, outlineBlur, outlineOpacity} = this;
+          distanceOffset = this._parsePercent(outlineWidth) || 0;
+          blurRadius = Math.max(0, this._parsePercent(outlineBlur) || 0);
+          fillOpacity = outlineOpacity;
+          offsetX = this._parsePercent(outlineOffsetX) || 0;
+          offsetY = this._parsePercent(outlineOffsetY) || 0;
         } else {
-          this.anchorX = this.anchorY = 0;
+          strokeWidth = Math.max(0, this._parsePercent(this.strokeWidth) || 0);
+          if (strokeWidth) {
+            strokeColor = this.strokeColor;
+            uniforms.uTroikaStrokeColor.value.set(strokeColor == null ? defaultStrokeColor : strokeColor);
+            strokeOpacity = this.strokeOpacity;
+            if (strokeOpacity == null) strokeOpacity = 1;
+          }
+          fillOpacity = this.fillOpacity;
+        }
+
+        uniforms.uTroikaDistanceOffset.value = distanceOffset;
+        uniforms.uTroikaPositionOffset.value.set(offsetX, offsetY);
+        uniforms.uTroikaBlurRadius.value = blurRadius;
+        uniforms.uTroikaStrokeWidth.value = strokeWidth;
+        uniforms.uTroikaStrokeOpacity.value = strokeOpacity;
+        uniforms.uTroikaFillOpacity.value = fillOpacity == null ? 1 : fillOpacity;
+        uniforms.uTroikaCurveRadius.value = this.curveRadius || 0;
+
+        let clipRect = this.clipRect;
+        if (clipRect && Array.isArray(clipRect) && clipRect.length === 4) {
+          uniforms.uTroikaClipRect.value.fromArray(clipRect);
+        } else {
+          // no clipping - choose a finite rect that shouldn't ever be reached by overflowing glyphs or outlines
+          const pad = (this.fontSize || 0.1) * 100;
+          uniforms.uTroikaClipRect.value.set(
+            blockBounds[0] - pad,
+            blockBounds[1] - pad,
+            blockBounds[2] + pad,
+            blockBounds[3] + pad
+          );
+        }
+        this.geometry.applyClipRect(uniforms.uTroikaClipRect.value);
+      }
+      uniforms.uTroikaSDFDebug.value = !!this.debugSDF;
+      material.polygonOffset = !!this.depthOffset;
+      material.polygonOffsetFactor = material.polygonOffsetUnits = this.depthOffset || 0;
+
+      // Shortcut for setting material color via `color` prop on the mesh; this is
+      // applied only to the derived material to avoid mutating a shared base material.
+      const color = isOutline ? (this.outlineColor || 0) : this.color;
+
+      if (color == null) {
+        delete material.color; //inherit from base
+      } else {
+        const colorObj = material.hasOwnProperty('color') ? material.color : (material.color = new THREE.Color());
+        if (color !== colorObj._input || typeof color === 'object') {
+          colorObj.set(colorObj._input = color);
+        }
+      }
+
+      // base orientation
+      let orient = this.orientation || defaultOrient;
+      if (orient !== material._orientation) {
+        let rotMat = uniforms.uTroikaOrient.value;
+        orient = orient.replace(/[^-+xyz]/g, '');
+        let match = orient !== defaultOrient && orient.match(/^([-+])([xyz])([-+])([xyz])$/);
+        if (match) {
+          let [, hSign, hAxis, vSign, vAxis] = match;
+          tempVec3a.set(0, 0, 0)[hAxis] = hSign === '-' ? 1 : -1;
+          tempVec3b.set(0, 0, 0)[vAxis] = vSign === '-' ? -1 : 1;
+          tempMat4.lookAt(origin, tempVec3a.cross(tempVec3b), tempVec3b);
+          rotMat.setFromMatrix4(tempMat4);
+        } else {
+          rotMat.identity();
+        }
+        material._orientation = orient;
+      }
+    }
+
+    _parsePercent(value) {
+      if (typeof value === 'string') {
+        let match = value.match(/^(-?[\d.]+)%$/);
+        let pct = match ? parseFloat(match[1]) : NaN;
+        value = (isNaN(pct) ? 0 : pct / 100) * this.fontSize;
+      }
+      return value
+    }
+
+    /**
+     * Translate a point in local space to an x/y in the text plane.
+     */
+    localPositionToTextCoords(position, target = new THREE.Vector2()) {
+      target.copy(position); //simple non-curved case is 1:1
+      const r = this.curveRadius;
+      if (r) { //flatten the curve
+        target.x = Math.atan2(position.x, Math.abs(r) - Math.abs(position.z)) * Math.abs(r);
+      }
+      return target
+    }
+
+    /**
+     * Translate a point in world space to an x/y in the text plane.
+     */
+    worldPositionToTextCoords(position, target = new THREE.Vector2()) {
+      tempVec3a.copy(position);
+      return this.localPositionToTextCoords(this.worldToLocal(tempVec3a), target)
+    }
+
+    /**
+     * @override Custom raycasting to test against the whole text block's max rectangular bounds
+     * TODO is there any reason to make this more granular, like within individual line or glyph rects?
+     */
+    raycast(raycaster, intersects) {
+      const {textRenderInfo, curveRadius} = this;
+      if (textRenderInfo) {
+        const bounds = textRenderInfo.blockBounds;
+        const raycastMesh = curveRadius ? getCurvedRaycastMesh() : getFlatRaycastMesh();
+        const geom = raycastMesh.geometry;
+        const {position, uv} = geom.attributes;
+        for (let i = 0; i < uv.count; i++) {
+          let x = bounds[0] + (uv.getX(i) * (bounds[2] - bounds[0]));
+          const y = bounds[1] + (uv.getY(i) * (bounds[3] - bounds[1]));
+          let z = 0;
+          if (curveRadius) {
+            z = curveRadius - Math.cos(x / curveRadius) * curveRadius;
+            x = Math.sin(x / curveRadius) * curveRadius;
+          }
+          position.setXYZ(i, x, y, z);
+        }
+        geom.boundingSphere = this.geometry.boundingSphere;
+        geom.boundingBox = this.geometry.boundingBox;
+        raycastMesh.matrixWorld = this.matrixWorld;
+        raycastMesh.material.side = this.material.side;
+        tempArray.length = 0;
+        raycastMesh.raycast(raycaster, tempArray);
+        for (let i = 0; i < tempArray.length; i++) {
+          tempArray[i].object = this;
+          intersects.push(tempArray[i]);
+        }
+      }
+    }
+
+    copy(source) {
+      // Prevent copying the geometry reference so we don't end up sharing attributes between instances
+      const geom = this.geometry;
+      super.copy(source);
+      this.geometry = geom;
+
+      COPYABLE_PROPS.forEach(prop => {
+        this[prop] = source[prop];
+      });
+      return this
+    }
+
+    clone() {
+      return new this.constructor().copy(this)
+    }
+  }
+
+
+  // Create setters for properties that affect text layout:
+  SYNCABLE_PROPS.forEach(prop => {
+    const privateKey = '_private_' + prop;
+    Object.defineProperty(Text.prototype, prop, {
+      get() {
+        return this[privateKey]
+      },
+      set(value) {
+        if (value !== this[privateKey]) {
+          this[privateKey] = value;
+          this._needsSync = true;
         }
       }
     });
-
-    return Text
-  })();
+  });
 
   var COMPONENT_NAME = 'troika-text';
 
@@ -5707,7 +5450,7 @@ if (edgeAlpha == 0.0) {
     }
   }
 
-  aframe__default['default'].registerComponent(COMPONENT_NAME, {
+  aframe__default["default"].registerComponent(COMPONENT_NAME, {
     schema: {
       align: {type: 'string', default: 'left', oneOf: ['left', 'right', 'center', 'justify']},
       anchor: {default: 'center', oneOf: ['left', 'right', 'center', 'align']},
@@ -5791,12 +5534,19 @@ if (edgeAlpha == 0.0) {
       var data = this.data;
       var mesh = this.troikaTextMesh;
       var entity = this.troikaTextEntity;
+      var font = data.font;
 
       // Update the text mesh
       mesh.text = (data.value || '')
         .replace(/\\n/g, '\n')
         .replace(/\\t/g, '\t');
       mesh.textAlign = data.align;
+
+      // Retrieve font path if preloaded in <a-assets> with unique id
+      if (data.font.startsWith('#')) {
+        const assetItem = document.querySelector(data.font);
+        font = assetItem.getAttribute('src');
+      }
 
       mesh.anchorX = anchorMapping[data.anchor === 'align' ? data.align : data.anchor] || 'center';
       mesh.anchorY = baselineMapping[data.baseline] || 'middle';
@@ -5806,7 +5556,7 @@ if (edgeAlpha == 0.0) {
       mesh.depthOffset = data.depthOffset || 0;
       mesh.direction = data.direction;
       mesh.fillOpacity = data.fillOpacity;
-      mesh.font = data.font; //TODO allow aframe stock font names
+      mesh.font = font; //TODO allow aframe stock font names
       mesh.fontSize = data.fontSize;
       mesh.letterSpacing = data.letterSpacing || 0;
       mesh.lineHeight = data.lineHeight || 'normal';
@@ -5867,7 +5617,7 @@ if (edgeAlpha == 0.0) {
   var mappings = {};
 
   // From aframe's primitives.js utilities...
-  var schema = aframe__default['default'].components[COMPONENT_NAME].schema;
+  var schema = aframe__default["default"].components[COMPONENT_NAME].schema;
   Object.keys(schema).map(function (prop) {
     // Hyphenate where there is camelCase.
     var attrName = prop.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
@@ -5875,7 +5625,7 @@ if (edgeAlpha == 0.0) {
   });
 
 
-  aframe__default['default'].registerPrimitive('a-troika-text', {
+  aframe__default["default"].registerPrimitive('a-troika-text', {
     defaultComponents: {
       'troika-text': {}
     },
@@ -5889,4 +5639,4 @@ if (edgeAlpha == 0.0) {
     }
   })(THREE__namespace);
 
-}(THREE, AFRAME));
+})(THREE, AFRAME);
