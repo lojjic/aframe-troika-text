@@ -45,6 +45,7 @@ aframe.registerComponent(COMPONENT_NAME, {
       }
     },
     color: {type: 'color', default: '#FFF'},
+    colorRanges: {type: 'colorRanges', default: null},
     curveRadius: {type: 'number', default: 0},
     depthOffset: {type: 'number', default: 0},
     direction: {type: 'string', default: 'auto', oneOf: ['auto', 'ltr', 'rtl']},
@@ -121,6 +122,7 @@ aframe.registerComponent(COMPONENT_NAME, {
     mesh.anchorX = anchorMapping[data.anchor === 'align' ? data.align : data.anchor] || 'center'
     mesh.anchorY = baselineMapping[data.baseline] || 'middle'
     mesh.color = data.color
+    mesh.colorRanges = data.colorRanges
     mesh.clipRect = data.clipRect
     mesh.curveRadius = data.curveRadius
     mesh.depthOffset = data.depthOffset || 0
