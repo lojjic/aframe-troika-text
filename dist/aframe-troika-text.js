@@ -5475,6 +5475,12 @@ if (edgeAlpha == 0.0) {
         }
       },
       color: {type: 'color', default: '#FFF'},
+      colorRanges: { // experimental
+        type: 'string',
+        default: null,
+        parse: JSON.parse,
+        stringify: JSON.stringify
+      },
       curveRadius: {type: 'number', default: 0},
       depthOffset: {type: 'number', default: 0},
       direction: {type: 'string', default: 'auto', oneOf: ['auto', 'ltr', 'rtl']},
@@ -5551,6 +5557,7 @@ if (edgeAlpha == 0.0) {
       mesh.anchorX = anchorMapping[data.anchor === 'align' ? data.align : data.anchor] || 'center';
       mesh.anchorY = baselineMapping[data.baseline] || 'middle';
       mesh.color = data.color;
+      mesh.colorRanges = data.colorRanges;
       mesh.clipRect = data.clipRect;
       mesh.curveRadius = data.curveRadius;
       mesh.depthOffset = data.depthOffset || 0;
