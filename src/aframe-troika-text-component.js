@@ -45,7 +45,12 @@ aframe.registerComponent(COMPONENT_NAME, {
       }
     },
     color: {type: 'color', default: '#FFF'},
-    colorRanges: {type: 'colorRanges', default: null},
+    colorRanges: { // experimental
+      type: 'string',
+      default: null,
+      parse: JSON.parse,
+      stringify: JSON.stringify
+    },
     curveRadius: {type: 'number', default: 0},
     depthOffset: {type: 'number', default: 0},
     direction: {type: 'string', default: 'auto', oneOf: ['auto', 'ltr', 'rtl']},
