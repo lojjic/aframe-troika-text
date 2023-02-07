@@ -5478,7 +5478,9 @@ if (edgeAlpha == 0.0) {
       colorRanges: { // experimental
         type: 'string',
         default: null,
-        parse: JSON.parse,
+        parse: function(value) {
+          return typeof value === 'string' ? JSON.parse(value) : value
+        },
         stringify: JSON.stringify
       },
       curveRadius: {type: 'number', default: 0},
