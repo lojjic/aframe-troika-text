@@ -2311,7 +2311,7 @@
       let source = arguments[i];
       if (source) {
         for (let prop in source) {
-          if (source.hasOwnProperty(prop)) {
+          if (Object.prototype.hasOwnProperty.call(source, prop)) {
             target[prop] = source[prop];
           }
         }
@@ -2410,14 +2410,14 @@
 
     // Private onBeforeCompile handler that injects the modified shaders and uniforms when
     // the renderer switches to this material's program
-    const onBeforeCompile = function (shaderInfo) {
-      baseMaterial.onBeforeCompile.call(this, shaderInfo);
+    const onBeforeCompile = function (shaderInfo, renderer) {
+      baseMaterial.onBeforeCompile.call(this, shaderInfo, renderer);
 
       // Upgrade the shaders, caching the result by incoming source code
       const cacheKey = this.customProgramCacheKey() + '|' + shaderInfo.vertexShader + '|' + shaderInfo.fragmentShader;
       let upgradedShaders = SHADER_UPGRADE_CACHE[cacheKey];
       if (!upgradedShaders) {
-        const upgraded = upgradeShaders(shaderInfo, options, optionsKey);
+        const upgraded = upgradeShaders(this, shaderInfo, options, optionsKey);
         upgradedShaders = SHADER_UPGRADE_CACHE[cacheKey] = upgraded;
       }
 
@@ -2573,7 +2573,7 @@
   }
 
 
-  function upgradeShaders({vertexShader, fragmentShader}, options, key) {
+  function upgradeShaders(material, {vertexShader, fragmentShader}, options, key) {
     let {
       vertexDefs,
       vertexMainIntro,
@@ -2661,6 +2661,12 @@ ${vertexMainIntro}
       vertexShader = vertexShader.replace(/\b(position|normal|uv)\b/g, (match, match1, index, fullStr) => {
         return /\battribute\s+vec[23]\s+$/.test(fullStr.substr(0, index)) ? match1 : `troika_${match1}_${key}`
       });
+
+      // Three r152 introduced the MAP_UV token, replace it too if it's pointing to the main 'uv'
+      // Perhaps the other textures too going forward?
+      if (!(material.map && material.map.channel > 0)) {
+        vertexShader = vertexShader.replace(/\bMAP_UV\b/g, `troika_uv_${key}`);
+      }
     }
 
     // Inject defs and intro/outro snippets
@@ -2705,785 +2711,11 @@ void main() {
     return id
   }
 
-  /**
-   * Factory function that creates a self-contained environment for processing text typesetting requests.
-   *
-   * It is important that this function has no closure dependencies, so that it can be easily injected
-   * into the source for a Worker without requiring a build step or complex dependency loading. All its
-   * dependencies must be passed in at initialization.
-   *
-   * @param {function} fontParser - a function that accepts an ArrayBuffer of the font data and returns
-   * a standardized structure giving access to the font and its glyphs:
-   *   {
-   *     unitsPerEm: number,
-   *     ascender: number,
-   *     descender: number,
-   *     capHeight: number,
-   *     xHeight: number,
-   *     lineGap: number,
-   *     forEachGlyph(string, fontSize, letterSpacing, callback) {
-   *       //invokes callback for each glyph to render, passing it an object:
-   *       callback({
-   *         index: number,
-   *         advanceWidth: number,
-   *         xMin: number,
-   *         yMin: number,
-   *         xMax: number,
-   *         yMax: number,
-   *         path: string,
-   *         pathCommandCount: number
-   *       })
-   *     }
-   *   }
-   * @param {object} bidi - the bidi.js implementation object
-   * @param {Object} config
-   * @return {Object}
-   */
-  function createTypesetter(fontParser, bidi, config) {
-
-    const {
-      defaultFontURL
-    } = config;
-
-    /**
-     * Holds parsed font objects by url
-     */
-    const fonts = Object.create(null);
-
-    const INF = Infinity;
-
-    // Set of Unicode Default_Ignorable_Code_Point characters, these will not produce visible glyphs
-    const DEFAULT_IGNORABLE_CHARS = /[\u00AD\u034F\u061C\u115F-\u1160\u17B4-\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFF8]/;
-
-    // This regex (instead of /\s/) allows us to select all whitespace EXCEPT for non-breaking white spaces
-    const lineBreakingWhiteSpace = `[^\\S\\u00A0]`;
-
-    // Incomplete set of characters that allow line breaking after them
-    // In the future we may consider a full Unicode line breaking algorithm impl: https://www.unicode.org/reports/tr14
-    const BREAK_AFTER_CHARS = new RegExp(`${lineBreakingWhiteSpace}|[\\-\\u007C\\u00AD\\u2010\\u2012-\\u2014\\u2027\\u2056\\u2E17\\u2E40]`);
-
-    /**
-     * Load a given font url
-     */
-    function doLoadFont(url, callback) {
-      function tryLoad() {
-        const onError = err => {
-          console.error(`Failure loading font ${url}${url === defaultFontURL ? '' : '; trying fallback'}`, err);
-          if (url !== defaultFontURL) {
-            url = defaultFontURL;
-            tryLoad();
-          }
-        };
-        try {
-          const request = new XMLHttpRequest();
-          request.open('get', url, true);
-          request.responseType = 'arraybuffer';
-          request.onload = function () {
-            if (request.status >= 400) {
-              onError(new Error(request.statusText));
-            }
-            else if (request.status > 0) {
-              try {
-                const fontObj = fontParser(request.response);
-                callback(fontObj);
-              } catch (e) {
-                onError(e);
-              }
-            }
-          };
-          request.onerror = onError;
-          request.send();
-        } catch(err) {
-          onError(err);
-        }
-      }
-      tryLoad();
-    }
-
-
-    /**
-     * Load a given font url if needed, invoking a callback when it's loaded. If already
-     * loaded, the callback will be called synchronously.
-     */
-    function loadFont(fontUrl, callback) {
-      if (!fontUrl) fontUrl = defaultFontURL;
-      let font = fonts[fontUrl];
-      if (font) {
-        // if currently loading font, add to callbacks, otherwise execute immediately
-        if (font.pending) {
-          font.pending.push(callback);
-        } else {
-          callback(font);
-        }
-      } else {
-        fonts[fontUrl] = {pending: [callback]};
-        doLoadFont(fontUrl, fontObj => {
-          let callbacks = fonts[fontUrl].pending;
-          fonts[fontUrl] = fontObj;
-          callbacks.forEach(cb => cb(fontObj));
-        });
-      }
-    }
-
-
-    /**
-     * Main entry point.
-     * Process a text string with given font and formatting parameters, and return all info
-     * necessary to render all its glyphs.
-     */
-    function typeset(
-      {
-        text='',
-        font=defaultFontURL,
-        sdfGlyphSize=64,
-        fontSize=1,
-        letterSpacing=0,
-        lineHeight='normal',
-        maxWidth=INF,
-        direction,
-        textAlign='left',
-        textIndent=0,
-        whiteSpace='normal',
-        overflowWrap='normal',
-        anchorX = 0,
-        anchorY = 0,
-        includeCaretPositions=false,
-        chunkedBoundsSize=8192,
-        colorRanges=null
-      },
-      callback,
-      metricsOnly=false
-    ) {
-      const mainStart = now();
-      const timings = {fontLoad: 0, typesetting: 0};
-
-      // Ensure newlines are normalized
-      if (text.indexOf('\r') > -1) {
-        console.info('Typesetter: got text with \\r chars; normalizing to \\n');
-        text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      }
-
-      // Ensure we've got numbers not strings
-      fontSize = +fontSize;
-      letterSpacing = +letterSpacing;
-      maxWidth = +maxWidth;
-      lineHeight = lineHeight || 'normal';
-      textIndent = +textIndent;
-
-      loadFont(font, fontObj => {
-        const hasMaxWidth = isFinite(maxWidth);
-        let glyphIds = null;
-        let glyphPositions = null;
-        let glyphData = null;
-        let glyphColors = null;
-        let caretPositions = null;
-        let visibleBounds = null;
-        let chunkedBounds = null;
-        let maxLineWidth = 0;
-        let renderableGlyphCount = 0;
-        let canWrap = whiteSpace !== 'nowrap';
-        const {ascender, descender, unitsPerEm, lineGap, capHeight, xHeight} = fontObj;
-        timings.fontLoad = now() - mainStart;
-        const typesetStart = now();
-
-        // Find conversion between native font units and fontSize units; this will already be done
-        // for the gx/gy values below but everything else we'll need to convert
-        const fontSizeMult = fontSize / unitsPerEm;
-
-        // Determine appropriate value for 'normal' line height based on the font's actual metrics
-        // TODO this does not guarantee individual glyphs won't exceed the line height, e.g. Roboto; should we use yMin/Max instead?
-        if (lineHeight === 'normal') {
-          lineHeight = (ascender - descender + lineGap) / unitsPerEm;
-        }
-
-        // Determine line height and leading adjustments
-        lineHeight = lineHeight * fontSize;
-        const halfLeading = (lineHeight - (ascender - descender) * fontSizeMult) / 2;
-        const topBaseline = -(ascender * fontSizeMult + halfLeading);
-        const caretHeight = Math.min(lineHeight, (ascender - descender) * fontSizeMult);
-        const caretBottomOffset = (ascender + descender) / 2 * fontSizeMult - caretHeight / 2;
-
-        // Distribute glyphs into lines based on wrapping
-        let lineXOffset = textIndent;
-        let currentLine = new TextLine();
-        const lines = [currentLine];
-
-        fontObj.forEachGlyph(text, fontSize, letterSpacing, (glyphObj, glyphX, charIndex) => {
-          const char = text.charAt(charIndex);
-          const glyphWidth = glyphObj.advanceWidth * fontSizeMult;
-          const curLineCount = currentLine.count;
-          let nextLine;
-
-          // Calc isWhitespace and isEmpty once per glyphObj
-          if (!('isEmpty' in glyphObj)) {
-            glyphObj.isWhitespace = !!char && new RegExp(lineBreakingWhiteSpace).test(char);
-            glyphObj.canBreakAfter = !!char && BREAK_AFTER_CHARS.test(char);
-            glyphObj.isEmpty = glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax || DEFAULT_IGNORABLE_CHARS.test(char);
-          }
-          if (!glyphObj.isWhitespace && !glyphObj.isEmpty) {
-            renderableGlyphCount++;
-          }
-
-          // If a non-whitespace character overflows the max width, we need to soft-wrap
-          if (canWrap && hasMaxWidth && !glyphObj.isWhitespace && glyphX + glyphWidth + lineXOffset > maxWidth && curLineCount) {
-            // If it's the first char after a whitespace, start a new line
-            if (currentLine.glyphAt(curLineCount - 1).glyphObj.canBreakAfter) {
-              nextLine = new TextLine();
-              lineXOffset = -glyphX;
-            } else {
-              // Back up looking for a whitespace character to wrap at
-              for (let i = curLineCount; i--;) {
-                // If we got the start of the line there's no soft break point; make hard break if overflowWrap='break-word'
-                if (i === 0 && overflowWrap === 'break-word') {
-                  nextLine = new TextLine();
-                  lineXOffset = -glyphX;
-                  break
-                }
-                // Found a soft break point; move all chars since it to a new line
-                else if (currentLine.glyphAt(i).glyphObj.canBreakAfter) {
-                  nextLine = currentLine.splitAt(i + 1);
-                  const adjustX = nextLine.glyphAt(0).x;
-                  lineXOffset -= adjustX;
-                  for (let j = nextLine.count; j--;) {
-                    nextLine.glyphAt(j).x -= adjustX;
-                  }
-                  break
-                }
-              }
-            }
-            if (nextLine) {
-              currentLine.isSoftWrapped = true;
-              currentLine = nextLine;
-              lines.push(currentLine);
-              maxLineWidth = maxWidth; //after soft wrapping use maxWidth as calculated width
-            }
-          }
-
-          let fly = currentLine.glyphAt(currentLine.count);
-          fly.glyphObj = glyphObj;
-          fly.x = glyphX + lineXOffset;
-          fly.width = glyphWidth;
-          fly.charIndex = charIndex;
-
-          // Handle hard line breaks
-          if (char === '\n') {
-            currentLine = new TextLine();
-            lines.push(currentLine);
-            lineXOffset = -(glyphX + glyphWidth + (letterSpacing * fontSize)) + textIndent;
-          }
-        });
-
-        // Calculate width of each line (excluding trailing whitespace) and maximum block width
-        lines.forEach(line => {
-          for (let i = line.count; i--;) {
-            let {glyphObj, x, width} = line.glyphAt(i);
-            if (!glyphObj.isWhitespace) {
-              line.width = x + width;
-              if (line.width > maxLineWidth) {
-                maxLineWidth = line.width;
-              }
-              return
-            }
-          }
-        });
-
-        // Find overall position adjustments for anchoring
-        let anchorXOffset = 0;
-        let anchorYOffset = 0;
-        if (anchorX) {
-          if (typeof anchorX === 'number') {
-            anchorXOffset = -anchorX;
-          }
-          else if (typeof anchorX === 'string') {
-            anchorXOffset = -maxLineWidth * (
-              anchorX === 'left' ? 0 :
-              anchorX === 'center' ? 0.5 :
-              anchorX === 'right' ? 1 :
-              parsePercent(anchorX)
-            );
-          }
-        }
-        if (anchorY) {
-          if (typeof anchorY === 'number') {
-            anchorYOffset = -anchorY;
-          }
-          else if (typeof anchorY === 'string') {
-            let height = lines.length * lineHeight;
-            anchorYOffset = anchorY === 'top' ? 0 :
-              anchorY === 'top-baseline' ? -topBaseline :
-              anchorY === 'top-cap' ? -topBaseline - capHeight * fontSizeMult :
-              anchorY === 'top-ex' ? -topBaseline - xHeight * fontSizeMult :
-              anchorY === 'middle' ? height / 2 :
-              anchorY === 'bottom' ? height :
-              anchorY === 'bottom-baseline' ? height - halfLeading + descender * fontSizeMult :
-              parsePercent(anchorY) * height;
-          }
-        }
-
-        if (!metricsOnly) {
-          // Resolve bidi levels
-          const bidiLevelsResult = bidi.getEmbeddingLevels(text, direction);
-
-          // Process each line, applying alignment offsets, adding each glyph to the atlas, and
-          // collecting all renderable glyphs into a single collection.
-          glyphIds = new Uint16Array(renderableGlyphCount);
-          glyphPositions = new Float32Array(renderableGlyphCount * 2);
-          glyphData = {};
-          visibleBounds = [INF, INF, -INF, -INF];
-          chunkedBounds = [];
-          let lineYOffset = topBaseline;
-          if (includeCaretPositions) {
-            caretPositions = new Float32Array(text.length * 3);
-          }
-          if (colorRanges) {
-            glyphColors = new Uint8Array(renderableGlyphCount * 3);
-          }
-          let renderableGlyphIndex = 0;
-          let prevCharIndex = -1;
-          let colorCharIndex = -1;
-          let chunk;
-          let currentColor;
-          lines.forEach((line, lineIndex) => {
-            let {count:lineGlyphCount, width:lineWidth} = line;
-
-            // Ignore empty lines
-            if (lineGlyphCount > 0) {
-              // Count trailing whitespaces, we want to ignore these for certain things
-              let trailingWhitespaceCount = 0;
-              for (let i = lineGlyphCount; i-- && line.glyphAt(i).glyphObj.isWhitespace;) {
-                trailingWhitespaceCount++;
-              }
-
-              // Apply horizontal alignment adjustments
-              let lineXOffset = 0;
-              let justifyAdjust = 0;
-              if (textAlign === 'center') {
-                lineXOffset = (maxLineWidth - lineWidth) / 2;
-              } else if (textAlign === 'right') {
-                lineXOffset = maxLineWidth - lineWidth;
-              } else if (textAlign === 'justify' && line.isSoftWrapped) {
-                // count non-trailing whitespace characters, and we'll adjust the offsets per character in the next loop
-                let whitespaceCount = 0;
-                for (let i = lineGlyphCount - trailingWhitespaceCount; i--;) {
-                  if (line.glyphAt(i).glyphObj.isWhitespace) {
-                    whitespaceCount++;
-                  }
-                }
-                justifyAdjust = (maxLineWidth - lineWidth) / whitespaceCount;
-              }
-              if (justifyAdjust || lineXOffset) {
-                let justifyOffset = 0;
-                for (let i = 0; i < lineGlyphCount; i++) {
-                  let glyphInfo = line.glyphAt(i);
-                  const glyphObj = glyphInfo.glyphObj;
-                  glyphInfo.x += lineXOffset + justifyOffset;
-                  // Expand non-trailing whitespaces for justify alignment
-                  if (justifyAdjust !== 0 && glyphObj.isWhitespace && i < lineGlyphCount - trailingWhitespaceCount) {
-                    justifyOffset += justifyAdjust;
-                    glyphInfo.width += justifyAdjust;
-                  }
-                }
-              }
-
-              // Perform bidi range flipping
-              const flips = bidi.getReorderSegments(
-                text, bidiLevelsResult, line.glyphAt(0).charIndex, line.glyphAt(line.count - 1).charIndex
-              );
-              for (let fi = 0; fi < flips.length; fi++) {
-                const [start, end] = flips[fi];
-                // Map start/end string indices to indices in the line
-                let left = Infinity, right = -Infinity;
-                for (let i = 0; i < lineGlyphCount; i++) {
-                  if (line.glyphAt(i).charIndex >= start) { // gte to handle removed characters
-                    let startInLine = i, endInLine = i;
-                    for (; endInLine < lineGlyphCount; endInLine++) {
-                      let info = line.glyphAt(endInLine);
-                      if (info.charIndex > end) {
-                        break
-                      }
-                      if (endInLine < lineGlyphCount - trailingWhitespaceCount) { //don't include trailing ws in flip width
-                        left = Math.min(left, info.x);
-                        right = Math.max(right, info.x + info.width);
-                      }
-                    }
-                    for (let j = startInLine; j < endInLine; j++) {
-                      const glyphInfo = line.glyphAt(j);
-                      glyphInfo.x = right - (glyphInfo.x + glyphInfo.width - left);
-                    }
-                    break
-                  }
-                }
-              }
-
-              // Assemble final data arrays
-              let glyphObj;
-              const setGlyphObj = g => glyphObj = g;
-              for (let i = 0; i < lineGlyphCount; i++) {
-                let glyphInfo = line.glyphAt(i);
-                glyphObj = glyphInfo.glyphObj;
-                const glyphId = glyphObj.index;
-
-                // Replace mirrored characters in rtl
-                const rtl = bidiLevelsResult.levels[glyphInfo.charIndex] & 1; //odd level means rtl
-                if (rtl) {
-                  const mirrored = bidi.getMirroredCharacter(text[glyphInfo.charIndex]);
-                  if (mirrored) {
-                    fontObj.forEachGlyph(mirrored, 0, 0, setGlyphObj);
-                  }
-                }
-
-                // Add caret positions
-                if (includeCaretPositions) {
-                  const {charIndex} = glyphInfo;
-                  const caretLeft = glyphInfo.x + anchorXOffset;
-                  const caretRight = glyphInfo.x + glyphInfo.width + anchorXOffset;
-                  caretPositions[charIndex * 3] = rtl ? caretRight : caretLeft; //start edge x
-                  caretPositions[charIndex * 3 + 1] = rtl ? caretLeft : caretRight; //end edge x
-                  caretPositions[charIndex * 3 + 2] = lineYOffset + caretBottomOffset + anchorYOffset; //common bottom y
-
-                  // If we skipped any chars from the previous glyph (due to ligature subs), fill in caret
-                  // positions for those missing char indices; currently this uses a best-guess by dividing
-                  // the ligature's width evenly. In the future we may try to use the font's LigatureCaretList
-                  // table to get better interior caret positions.
-                  const ligCount = charIndex - prevCharIndex;
-                  if (ligCount > 1) {
-                    fillLigatureCaretPositions(caretPositions, prevCharIndex, ligCount);
-                  }
-                  prevCharIndex = charIndex;
-                }
-
-                // Track current color range
-                if (colorRanges) {
-                  const {charIndex} = glyphInfo;
-                  while(charIndex > colorCharIndex) {
-                    colorCharIndex++;
-                    if (colorRanges.hasOwnProperty(colorCharIndex)) {
-                      currentColor = colorRanges[colorCharIndex];
-                    }
-                  }
-                }
-
-                // Get atlas data for renderable glyphs
-                if (!glyphObj.isWhitespace && !glyphObj.isEmpty) {
-                  const idx = renderableGlyphIndex++;
-
-                  // Add this glyph's path data
-                  if (!glyphData[glyphId]) {
-                    glyphData[glyphId] = {
-                      path: glyphObj.path,
-                      pathBounds: [glyphObj.xMin, glyphObj.yMin, glyphObj.xMax, glyphObj.yMax]
-                    };
-                  }
-
-                  // Determine final glyph position and add to glyphPositions array
-                  const glyphX = glyphInfo.x + anchorXOffset;
-                  const glyphY = lineYOffset + anchorYOffset;
-                  glyphPositions[idx * 2] = glyphX;
-                  glyphPositions[idx * 2 + 1] = glyphY;
-
-                  // Track total visible bounds
-                  const visX0 = glyphX + glyphObj.xMin * fontSizeMult;
-                  const visY0 = glyphY + glyphObj.yMin * fontSizeMult;
-                  const visX1 = glyphX + glyphObj.xMax * fontSizeMult;
-                  const visY1 = glyphY + glyphObj.yMax * fontSizeMult;
-                  if (visX0 < visibleBounds[0]) visibleBounds[0] = visX0;
-                  if (visY0 < visibleBounds[1]) visibleBounds[1] = visY0;
-                  if (visX1 > visibleBounds[2]) visibleBounds[2] = visX1;
-                  if (visY1 > visibleBounds[3]) visibleBounds[3] = visY1;
-
-                  // Track bounding rects for each chunk of N glyphs
-                  if (idx % chunkedBoundsSize === 0) {
-                    chunk = {start: idx, end: idx, rect: [INF, INF, -INF, -INF]};
-                    chunkedBounds.push(chunk);
-                  }
-                  chunk.end++;
-                  const chunkRect = chunk.rect;
-                  if (visX0 < chunkRect[0]) chunkRect[0] = visX0;
-                  if (visY0 < chunkRect[1]) chunkRect[1] = visY0;
-                  if (visX1 > chunkRect[2]) chunkRect[2] = visX1;
-                  if (visY1 > chunkRect[3]) chunkRect[3] = visY1;
-
-                  // Add to glyph ids array
-                  glyphIds[idx] = glyphId;
-
-                  // Add colors
-                  if (colorRanges) {
-                    const start = idx * 3;
-                    glyphColors[start] = currentColor >> 16 & 255;
-                    glyphColors[start + 1] = currentColor >> 8 & 255;
-                    glyphColors[start + 2] = currentColor & 255;
-                  }
-                }
-              }
-            }
-
-            // Increment y offset for next line
-            lineYOffset -= lineHeight;
-          });
-
-          // Fill in remaining caret positions in case the final character was a ligature
-          if (caretPositions) {
-            const ligCount = text.length - prevCharIndex;
-            if (ligCount > 1) {
-              fillLigatureCaretPositions(caretPositions, prevCharIndex, ligCount);
-            }
-          }
-        }
-
-        // Timing stats
-        timings.typesetting = now() - typesetStart;
-
-        callback({
-          glyphIds, //font indices for each glyph
-          glyphPositions, //x,y of each glyph's origin in layout
-          glyphData, //dict holding data about each glyph appearing in the text
-          caretPositions, //startX,endX,bottomY caret positions for each char
-          caretHeight, //height of cursor from bottom to top
-          glyphColors, //color for each glyph, if color ranges supplied
-          chunkedBounds, //total rects per (n=chunkedBoundsSize) consecutive glyphs
-          fontSize, //calculated em height
-          unitsPerEm, //font units per em
-          ascender: ascender * fontSizeMult, //font ascender
-          descender: descender * fontSizeMult, //font descender
-          capHeight: capHeight * fontSizeMult, //font cap-height
-          xHeight: xHeight * fontSizeMult, //font x-height
-          lineHeight, //computed line height
-          topBaseline, //y coordinate of the top line's baseline
-          blockBounds: [ //bounds for the whole block of text, including vertical padding for lineHeight
-            anchorXOffset,
-            anchorYOffset - lines.length * lineHeight,
-            anchorXOffset + maxLineWidth,
-            anchorYOffset
-          ],
-          visibleBounds, //total bounds of visible text paths, may be larger or smaller than blockBounds
-          timings
-        });
-      });
-    }
-
-
-    /**
-     * For a given text string and font parameters, determine the resulting block dimensions
-     * after wrapping for the given maxWidth.
-     * @param args
-     * @param callback
-     */
-    function measure(args, callback) {
-      typeset(args, (result) => {
-        const [x0, y0, x1, y1] = result.blockBounds;
-        callback({
-          width: x1 - x0,
-          height: y1 - y0
-        });
-      }, {metricsOnly: true});
-    }
-
-    function parsePercent(str) {
-      let match = str.match(/^([\d.]+)%$/);
-      let pct = match ? parseFloat(match[1]) : NaN;
-      return isNaN(pct) ? 0 : pct / 100
-    }
-
-    function fillLigatureCaretPositions(caretPositions, ligStartIndex, ligCount) {
-      const ligStartX = caretPositions[ligStartIndex * 3];
-      const ligEndX = caretPositions[ligStartIndex * 3 + 1];
-      const ligY = caretPositions[ligStartIndex * 3 + 2];
-      const guessedAdvanceX = (ligEndX - ligStartX) / ligCount;
-      for (let i = 0; i < ligCount; i++) {
-        const startIndex = (ligStartIndex + i) * 3;
-        caretPositions[startIndex] = ligStartX + guessedAdvanceX * i;
-        caretPositions[startIndex + 1] = ligStartX + guessedAdvanceX * (i + 1);
-        caretPositions[startIndex + 2] = ligY;
-      }
-    }
-
-    function now() {
-      return (self.performance || Date).now()
-    }
-
-    // Array-backed structure for a single line's glyphs data
-    function TextLine() {
-      this.data = [];
-    }
-    const textLineProps = ['glyphObj', 'x', 'width', 'charIndex'];
-    TextLine.prototype = {
-      width: 0,
-      isSoftWrapped: false,
-      get count() {
-        return Math.ceil(this.data.length / textLineProps.length)
-      },
-      glyphAt(i) {
-        let fly = TextLine.flyweight;
-        fly.data = this.data;
-        fly.index = i;
-        return fly
-      },
-      splitAt(i) {
-        let newLine = new TextLine();
-        newLine.data = this.data.splice(i * textLineProps.length);
-        return newLine
-      }
-    };
-    TextLine.flyweight = textLineProps.reduce((obj, prop, i, all) => {
-      Object.defineProperty(obj, prop, {
-        get() {
-          return this.data[this.index * textLineProps.length + i]
-        },
-        set(val) {
-          this.data[this.index * textLineProps.length + i] = val;
-        }
-      });
-      return obj
-    }, {data: null, index: 0});
-
-
-    return {
-      typeset,
-      measure,
-      loadFont
-    }
-  }
-
-  const now = () => (self.performance || Date).now();
-
-  const mainThreadGenerator = /*#__PURE__*/ SDFGenerator();
-
-  let warned;
-
-  /**
-   * Generate an SDF texture image for a single glyph path, placing the result into a webgl canvas at a
-   * given location and channel. Utilizes the webgl-sdf-generator external package for GPU-accelerated SDF
-   * generation when supported.
-   */
-  function generateSDF(width, height, path, viewBox, distance, exponent, canvas, x, y, channel, useWebGL = true) {
-    // Allow opt-out
-    if (!useWebGL) {
-      return generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel)
-    }
-
-    // Attempt GPU-accelerated generation first
-    return generateSDF_GL(width, height, path, viewBox, distance, exponent, canvas, x, y, channel).then(
-      null,
-      err => {
-        // WebGL failed either due to a hard error or unexpected results; fall back to JS in workers
-        if (!warned) {
-          console.warn(`WebGL SDF generation failed, falling back to JS`, err);
-          warned = true;
-        }
-        return generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel)
-      }
-    )
-  }
-
-  const queue = [];
-  const chunkTimeBudget = 5; // ms
-  let timer = 0;
-
-  function nextChunk() {
-    const start = now();
-    while (queue.length && now() - start < chunkTimeBudget) {
-      queue.shift()();
-    }
-    timer = queue.length ? setTimeout(nextChunk, 0) : 0;
-  }
-
-  /**
-   * WebGL-based implementation executed on the main thread. Requests are executed in time-bounded
-   * macrotask chunks to allow render frames to execute in between.
-   */
-  const generateSDF_GL = (...args) => {
-    return new Promise((resolve, reject) => {
-      queue.push(() => {
-        const start = now();
-        try {
-          mainThreadGenerator.webgl.generateIntoCanvas(...args);
-          resolve({ timing: now() - start });
-        } catch (err) {
-          reject(err);
-        }
-      });
-      if (!timer) {
-        timer = setTimeout(nextChunk, 0);
-      }
-    })
-  };
-
-  const threadCount = 4; // how many workers to spawn
-  const idleTimeout = 2000; // workers will be terminated after being idle this many milliseconds
-  const threads = {};
-  let callNum = 0;
-
-  /**
-   * Fallback JS-based implementation, fanned out to a number of worker threads for parallelism
-   */
-  function generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel) {
-    const workerId = 'TroikaTextSDFGenerator_JS_' + ((callNum++) % threadCount);
-    let thread = threads[workerId];
-    if (!thread) {
-      thread = threads[workerId] = {
-        workerModule: defineWorkerModule({
-          name: workerId,
-          workerId,
-          dependencies: [
-            SDFGenerator,
-            now
-          ],
-          init(_createSDFGenerator, now) {
-            const generate = _createSDFGenerator().javascript.generate;
-            return function (...args) {
-              const start = now();
-              const textureData = generate(...args);
-              return {
-                textureData,
-                timing: now() - start
-              }
-            }
-          },
-          getTransferables(result) {
-            return [result.textureData.buffer]
-          }
-        }),
-        requests: 0,
-        idleTimer: null
-      };
-    }
-
-    thread.requests++;
-    clearTimeout(thread.idleTimer);
-    return thread.workerModule(width, height, path, viewBox, distance, exponent)
-      .then(({ textureData, timing }) => {
-        // copy result data into the canvas
-        const start = now();
-        // expand single-channel data into rgba
-        const imageData = new Uint8Array(textureData.length * 4);
-        for (let i = 0; i < textureData.length; i++) {
-          imageData[i * 4 + channel] = textureData[i];
-        }
-        mainThreadGenerator.webglUtils.renderImageData(canvas, imageData, x, y, width, height, 1 << (3 - channel));
-        timing += now() - start;
-
-        // clean up workers after a while
-        if (--thread.requests === 0) {
-          thread.idleTimer = setTimeout(() => { terminateWorker(workerId); }, idleTimeout);
-        }
-        return { timing }
-      })
-  }
-
-  function warmUpSDFCanvas(canvas) {
-    if (!canvas._warm) {
-      mainThreadGenerator.webgl.isSupported(canvas);
-      canvas._warm = true;
-    }
-  }
-
-  const resizeWebGLCanvasWithoutClearing = mainThreadGenerator.webglUtils.resizeWebGLCanvasWithoutClearing;
-
   /*!
   Custom build of Typr.ts (https://github.com/fredli74/Typr.ts) for use in Troika text rendering.
   Original MIT license applies: https://github.com/fredli74/Typr.ts/blob/master/LICENSE
   */
-  function typrFactory(){return "undefined"==typeof window&&(self.window=self),function(r){var e={parse:function(r){var t=e._bin,a=new Uint8Array(r);if("ttcf"==t.readASCII(a,0,4)){var n=4;t.readUshort(a,n),n+=2,t.readUshort(a,n),n+=2;var o=t.readUint(a,n);n+=4;for(var s=[],i=0;i<o;i++){var h=t.readUint(a,n);n+=4,s.push(e._readFont(a,h));}return s}return [e._readFont(a,0)]},_readFont:function(r,t){var a=e._bin,n=t;a.readFixed(r,t),t+=4;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2;for(var s=["cmap","head","hhea","maxp","hmtx","name","OS/2","post","loca","glyf","kern","CFF ","GPOS","GSUB","SVG "],i={_data:r,_offset:n},h={},f=0;f<o;f++){var d=a.readASCII(r,t,4);t+=4,a.readUint(r,t),t+=4;var u=a.readUint(r,t);t+=4;var l=a.readUint(r,t);t+=4,h[d]={offset:u,length:l};}for(f=0;f<s.length;f++){var v=s[f];h[v]&&(i[v.trim()]=e[v.trim()].parse(r,h[v].offset,h[v].length,i));}return i},_tabOffset:function(r,t,a){for(var n=e._bin,o=n.readUshort(r,a+4),s=a+12,i=0;i<o;i++){var h=n.readASCII(r,s,4);s+=4,n.readUint(r,s),s+=4;var f=n.readUint(r,s);if(s+=4,n.readUint(r,s),s+=4,h==t)return f}return 0}};e._bin={readFixed:function(r,e){return (r[e]<<8|r[e+1])+(r[e+2]<<8|r[e+3])/65540},readF2dot14:function(r,t){return e._bin.readShort(r,t)/16384},readInt:function(r,t){return e._bin._view(r).getInt32(t)},readInt8:function(r,t){return e._bin._view(r).getInt8(t)},readShort:function(r,t){return e._bin._view(r).getInt16(t)},readUshort:function(r,t){return e._bin._view(r).getUint16(t)},readUshorts:function(r,t,a){for(var n=[],o=0;o<a;o++)n.push(e._bin.readUshort(r,t+2*o));return n},readUint:function(r,t){return e._bin._view(r).getUint32(t)},readUint64:function(r,t){return 4294967296*e._bin.readUint(r,t)+e._bin.readUint(r,t+4)},readASCII:function(r,e,t){for(var a="",n=0;n<t;n++)a+=String.fromCharCode(r[e+n]);return a},readUnicode:function(r,e,t){for(var a="",n=0;n<t;n++){var o=r[e++]<<8|r[e++];a+=String.fromCharCode(o);}return a},_tdec:"undefined"!=typeof window&&window.TextDecoder?new window.TextDecoder:null,readUTF8:function(r,t,a){var n=e._bin._tdec;return n&&0==t&&a==r.length?n.decode(r):e._bin.readASCII(r,t,a)},readBytes:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(r[e+n]);return a},readASCIIArray:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(String.fromCharCode(r[e+n]));return a},_view:function(r){return r._dataView||(r._dataView=r.buffer?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(new Uint8Array(r).buffer))}},e._lctf={},e._lctf.parse=function(r,t,a,n,o){var s=e._bin,i={},h=t;s.readFixed(r,t),t+=4;var f=s.readUshort(r,t);t+=2;var d=s.readUshort(r,t);t+=2;var u=s.readUshort(r,t);return t+=2,i.scriptList=e._lctf.readScriptList(r,h+f),i.featureList=e._lctf.readFeatureList(r,h+d),i.lookupList=e._lctf.readLookupList(r,h+u,o),i},e._lctf.readLookupList=function(r,t,a){var n=e._bin,o=t,s=[],i=n.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=n.readUshort(r,t);t+=2;var d=e._lctf.readLookupTable(r,o+f,a);s.push(d);}return s},e._lctf.readLookupTable=function(r,t,a){var n=e._bin,o=t,s={tabs:[]};s.ltype=n.readUshort(r,t),t+=2,s.flag=n.readUshort(r,t),t+=2;var i=n.readUshort(r,t);t+=2;for(var h=s.ltype,f=0;f<i;f++){var d=n.readUshort(r,t);t+=2;var u=a(r,h,o+d,s);s.tabs.push(u);}return s},e._lctf.numOfOnes=function(r){for(var e=0,t=0;t<32;t++)0!=(r>>>t&1)&&e++;return e},e._lctf.readClassDef=function(r,t){var a=e._bin,n=[],o=a.readUshort(r,t);if(t+=2,1==o){var s=a.readUshort(r,t);t+=2;var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++)n.push(s+h),n.push(s+h),n.push(a.readUshort(r,t)),t+=2;}if(2==o){var f=a.readUshort(r,t);t+=2;for(h=0;h<f;h++)n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2;}return n},e._lctf.getInterval=function(r,e){for(var t=0;t<r.length;t+=3){var a=r[t],n=r[t+1];if(r[t+2],a<=e&&e<=n)return t}return -1},e._lctf.readCoverage=function(r,t){var a=e._bin,n={};n.fmt=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,1==n.fmt&&(n.tab=a.readUshorts(r,t,o)),2==n.fmt&&(n.tab=a.readUshorts(r,t,3*o)),n},e._lctf.coverageIndex=function(r,t){var a=r.tab;if(1==r.fmt)return a.indexOf(t);if(2==r.fmt){var n=e._lctf.getInterval(a,t);if(-1!=n)return a[n+2]+(t-a[n])}return -1},e._lctf.readFeatureList=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2;var d=e._lctf.readFeatureTable(r,n+f);d.tag=h.trim(),o.push(d);}return o},e._lctf.readFeatureTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,s>0&&(o.featureParams=n+s);var i=a.readUshort(r,t);t+=2,o.tab=[];for(var h=0;h<i;h++)o.tab.push(a.readUshort(r,t+2*h));return o},e._lctf.readScriptList=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2,o[h.trim()]=e._lctf.readScriptTable(r,n+f);}return o},e._lctf.readScriptTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,o.default=e._lctf.readLangSysTable(r,n+s);var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=a.readASCII(r,t,4);t+=4;var d=a.readUshort(r,t);t+=2,o[f.trim()]=e._lctf.readLangSysTable(r,n+d);}return o},e._lctf.readLangSysTable=function(r,t){var a=e._bin,n={};a.readUshort(r,t),t+=2,n.reqFeature=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,n.features=a.readUshorts(r,t,o),n},e.CFF={},e.CFF.parse=function(r,t,a){var n=e._bin;(r=new Uint8Array(r.buffer,t,a))[t=0],r[++t],r[++t],r[++t],t++;var o=[];t=e.CFF.readIndex(r,t,o);for(var s=[],i=0;i<o.length-1;i++)s.push(n.readASCII(r,t+o[i],o[i+1]-o[i]));t+=o[o.length-1];var h=[];t=e.CFF.readIndex(r,t,h);var f=[];for(i=0;i<h.length-1;i++)f.push(e.CFF.readDict(r,t+h[i],t+h[i+1]));t+=h[h.length-1];var d=f[0],u=[];t=e.CFF.readIndex(r,t,u);var l=[];for(i=0;i<u.length-1;i++)l.push(n.readASCII(r,t+u[i],u[i+1]-u[i]));if(t+=u[u.length-1],e.CFF.readSubrs(r,t,d),d.CharStrings){t=d.CharStrings;u=[];t=e.CFF.readIndex(r,t,u);var v=[];for(i=0;i<u.length-1;i++)v.push(n.readBytes(r,t+u[i],u[i+1]-u[i]));d.CharStrings=v;}if(d.ROS){t=d.FDArray;var c=[];t=e.CFF.readIndex(r,t,c),d.FDArray=[];for(i=0;i<c.length-1;i++){var p=e.CFF.readDict(r,t+c[i],t+c[i+1]);e.CFF._readFDict(r,p,l),d.FDArray.push(p);}t+=c[c.length-1],t=d.FDSelect,d.FDSelect=[];var U=r[t];if(t++,3!=U)throw U;var g=n.readUshort(r,t);t+=2;for(i=0;i<g+1;i++)d.FDSelect.push(n.readUshort(r,t),r[t+2]),t+=3;}return d.Encoding&&(d.Encoding=e.CFF.readEncoding(r,d.Encoding,d.CharStrings.length)),d.charset&&(d.charset=e.CFF.readCharset(r,d.charset,d.CharStrings.length)),e.CFF._readFDict(r,d,l),d},e.CFF._readFDict=function(r,t,a){var n;for(var o in t.Private&&(n=t.Private[1],t.Private=e.CFF.readDict(r,n,n+t.Private[0]),t.Private.Subrs&&e.CFF.readSubrs(r,n+t.Private.Subrs,t.Private)),t)-1!=["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(o)&&(t[o]=a[t[o]-426+35]);},e.CFF.readSubrs=function(r,t,a){var n=e._bin,o=[];t=e.CFF.readIndex(r,t,o);var s,i=o.length;s=i<1240?107:i<33900?1131:32768,a.Bias=s,a.Subrs=[];for(var h=0;h<o.length-1;h++)a.Subrs.push(n.readBytes(r,t+o[h],o[h+1]-o[h]));},e.CFF.tableSE=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,0,111,112,113,114,0,115,116,117,118,119,120,121,122,0,123,0,124,125,126,127,128,129,130,131,0,132,133,0,134,135,136,137,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,138,0,139,0,0,0,0,140,141,142,143,0,0,0,0,0,144,0,0,0,145,0,0,146,147,148,149,0,0,0,0],e.CFF.glyphByUnicode=function(r,e){for(var t=0;t<r.charset.length;t++)if(r.charset[t]==e)return t;return -1},e.CFF.glyphBySE=function(r,t){return t<0||t>255?-1:e.CFF.glyphByUnicode(r,e.CFF.tableSE[t])},e.CFF.readEncoding=function(r,t,a){e._bin;var n=[".notdef"],o=r[t];if(t++,0!=o)throw "error: unknown encoding format: "+o;var s=r[t];t++;for(var i=0;i<s;i++)n.push(r[t+i]);return n},e.CFF.readCharset=function(r,t,a){var n=e._bin,o=[".notdef"],s=r[t];if(t++,0==s)for(var i=0;i<a;i++){var h=n.readUshort(r,t);t+=2,o.push(h);}else {if(1!=s&&2!=s)throw "error: format: "+s;for(;o.length<a;){h=n.readUshort(r,t);t+=2;var f=0;1==s?(f=r[t],t++):(f=n.readUshort(r,t),t+=2);for(i=0;i<=f;i++)o.push(h),h++;}}return o},e.CFF.readIndex=function(r,t,a){var n=e._bin,o=n.readUshort(r,t)+1,s=r[t+=2];if(t++,1==s)for(var i=0;i<o;i++)a.push(r[t+i]);else if(2==s)for(i=0;i<o;i++)a.push(n.readUshort(r,t+2*i));else if(3==s)for(i=0;i<o;i++)a.push(16777215&n.readUint(r,t+3*i-1));else if(1!=o)throw "unsupported offset size: "+s+", count: "+o;return (t+=o*s)-1},e.CFF.getCharString=function(r,t,a){var n=e._bin,o=r[t],s=r[t+1];r[t+2],r[t+3],r[t+4];var i=1,h=null,f=null;o<=20&&(h=o,i=1),12==o&&(h=100*o+s,i=2),21<=o&&o<=27&&(h=o,i=1),28==o&&(f=n.readShort(r,t+1),i=3),29<=o&&o<=31&&(h=o,i=1),32<=o&&o<=246&&(f=o-139,i=1),247<=o&&o<=250&&(f=256*(o-247)+s+108,i=2),251<=o&&o<=254&&(f=256*-(o-251)-s-108,i=2),255==o&&(f=n.readInt(r,t+1)/65535,i=5),a.val=null!=f?f:"o"+h,a.size=i;},e.CFF.readCharString=function(r,t,a){for(var n=t+a,o=e._bin,s=[];t<n;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;i<=20&&(d=i,f=1),12==i&&(d=100*i+h,f=2),19!=i&&20!=i||(d=i,f=2),21<=i&&i<=27&&(d=i,f=1),28==i&&(u=o.readShort(r,t+1),f=3),29<=i&&i<=31&&(d=i,f=1),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i&&(u=o.readInt(r,t+1)/65535,f=5),s.push(null!=u?u:"o"+d),t+=f;}return s},e.CFF.readDict=function(r,t,a){for(var n=e._bin,o={},s=[];t<a;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;if(28==i&&(u=n.readShort(r,t+1),f=3),29==i&&(u=n.readInt(r,t+1),f=5),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i)throw u=n.readInt(r,t+1)/65535,f=5,"unknown number";if(30==i){var l=[];for(f=1;;){var v=r[t+f];f++;var c=v>>4,p=15&v;if(15!=c&&l.push(c),15!=p&&l.push(p),15==p)break}for(var U="",g=[0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"],S=0;S<l.length;S++)U+=g[l[S]];u=parseFloat(U);}if(i<=21)if(d=["version","Notice","FullName","FamilyName","Weight","FontBBox","BlueValues","OtherBlues","FamilyBlues","FamilyOtherBlues","StdHW","StdVW","escape","UniqueID","XUID","charset","Encoding","CharStrings","Private","Subrs","defaultWidthX","nominalWidthX"][i],f=1,12==i)d=["Copyright","isFixedPitch","ItalicAngle","UnderlinePosition","UnderlineThickness","PaintType","CharstringType","FontMatrix","StrokeWidth","BlueScale","BlueShift","BlueFuzz","StemSnapH","StemSnapV","ForceBold",0,0,"LanguageGroup","ExpansionFactor","initialRandomSeed","SyntheticBase","PostScript","BaseFontName","BaseFontBlend",0,0,0,0,0,0,"ROS","CIDFontVersion","CIDFontRevision","CIDFontType","CIDCount","UIDBase","FDArray","FDSelect","FontName"][h],f=2;null!=d?(o[d]=1==s.length?s[0]:s,s=[]):s.push(u),t+=f;}return o},e.cmap={},e.cmap.parse=function(r,t,a){r=new Uint8Array(r.buffer,t,a),t=0;var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2;var i=[];o.tables=[];for(var h=0;h<s;h++){var f=n.readUshort(r,t);t+=2;var d=n.readUshort(r,t);t+=2;var u=n.readUint(r,t);t+=4;var l="p"+f+"e"+d,v=i.indexOf(u);if(-1==v){var c;v=o.tables.length,i.push(u);var p=n.readUshort(r,u);0==p?c=e.cmap.parse0(r,u):4==p?c=e.cmap.parse4(r,u):6==p?c=e.cmap.parse6(r,u):12==p?c=e.cmap.parse12(r,u):console.debug("unknown format: "+p,f,d,u),o.tables.push(c);}if(null!=o[l])throw "multiple tables for one platform+encoding";o[l]=v;}return o},e.cmap.parse0=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,n.map=[];for(var s=0;s<o-6;s++)n.map.push(r[t+s]);return n},e.cmap.parse4=function(r,t){var a=e._bin,n=t,o={};o.format=a.readUshort(r,t),t+=2;var s=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2;var i=a.readUshort(r,t);t+=2;var h=i/2;o.searchRange=a.readUshort(r,t),t+=2,o.entrySelector=a.readUshort(r,t),t+=2,o.rangeShift=a.readUshort(r,t),t+=2,o.endCount=a.readUshorts(r,t,h),t+=2*h,t+=2,o.startCount=a.readUshorts(r,t,h),t+=2*h,o.idDelta=[];for(var f=0;f<h;f++)o.idDelta.push(a.readShort(r,t)),t+=2;for(o.idRangeOffset=a.readUshorts(r,t,h),t+=2*h,o.glyphIdArray=[];t<n+s;)o.glyphIdArray.push(a.readUshort(r,t)),t+=2;return o},e.cmap.parse6=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,n.firstCode=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,n.glyphIdArray=[];for(var s=0;s<o;s++)n.glyphIdArray.push(a.readUshort(r,t)),t+=2;return n},e.cmap.parse12=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,t+=2,a.readUint(r,t),t+=4,a.readUint(r,t),t+=4;var o=a.readUint(r,t);t+=4,n.groups=[];for(var s=0;s<o;s++){var i=t+12*s,h=a.readUint(r,i+0),f=a.readUint(r,i+4),d=a.readUint(r,i+8);n.groups.push([h,f,d]);}return n},e.glyf={},e.glyf.parse=function(r,e,t,a){for(var n=[],o=0;o<a.maxp.numGlyphs;o++)n.push(null);return n},e.glyf._parseGlyf=function(r,t){var a=e._bin,n=r._data,o=e._tabOffset(n,"glyf",r._offset)+r.loca[t];if(r.loca[t]==r.loca[t+1])return null;var s={};if(s.noc=a.readShort(n,o),o+=2,s.xMin=a.readShort(n,o),o+=2,s.yMin=a.readShort(n,o),o+=2,s.xMax=a.readShort(n,o),o+=2,s.yMax=a.readShort(n,o),o+=2,s.xMin>=s.xMax||s.yMin>=s.yMax)return null;if(s.noc>0){s.endPts=[];for(var i=0;i<s.noc;i++)s.endPts.push(a.readUshort(n,o)),o+=2;var h=a.readUshort(n,o);if(o+=2,n.length-o<h)return null;s.instructions=a.readBytes(n,o,h),o+=h;var f=s.endPts[s.noc-1]+1;s.flags=[];for(i=0;i<f;i++){var d=n[o];if(o++,s.flags.push(d),0!=(8&d)){var u=n[o];o++;for(var l=0;l<u;l++)s.flags.push(d),i++;}}s.xs=[];for(i=0;i<f;i++){var v=0!=(2&s.flags[i]),c=0!=(16&s.flags[i]);v?(s.xs.push(c?n[o]:-n[o]),o++):c?s.xs.push(0):(s.xs.push(a.readShort(n,o)),o+=2);}s.ys=[];for(i=0;i<f;i++){v=0!=(4&s.flags[i]),c=0!=(32&s.flags[i]);v?(s.ys.push(c?n[o]:-n[o]),o++):c?s.ys.push(0):(s.ys.push(a.readShort(n,o)),o+=2);}var p=0,U=0;for(i=0;i<f;i++)p+=s.xs[i],U+=s.ys[i],s.xs[i]=p,s.ys[i]=U;}else {var g;s.parts=[];do{g=a.readUshort(n,o),o+=2;var S={m:{a:1,b:0,c:0,d:1,tx:0,ty:0},p1:-1,p2:-1};if(s.parts.push(S),S.glyphIndex=a.readUshort(n,o),o+=2,1&g){var m=a.readShort(n,o);o+=2;var b=a.readShort(n,o);o+=2;}else {m=a.readInt8(n,o);o++;b=a.readInt8(n,o);o++;}2&g?(S.m.tx=m,S.m.ty=b):(S.p1=m,S.p2=b),8&g?(S.m.a=S.m.d=a.readF2dot14(n,o),o+=2):64&g?(S.m.a=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2):128&g&&(S.m.a=a.readF2dot14(n,o),o+=2,S.m.b=a.readF2dot14(n,o),o+=2,S.m.c=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2);}while(32&g);if(256&g){var y=a.readUshort(n,o);o+=2,s.instr=[];for(i=0;i<y;i++)s.instr.push(n[o]),o++;}}return s},e.GPOS={},e.GPOS.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GPOS.subt)},e.GPOS.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1==t||2==t||3==t||7==t||8==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,h+s);}if(1==t&&1==i.fmt){var f=o.readUshort(r,a);a+=2;var d=e._lctf.numOfOnes(f);0!=f&&(i.pos=e.GPOS.readValueRecord(r,a,f));}else if(2==t&&i.fmt>=1&&i.fmt<=2){f=o.readUshort(r,a);a+=2;var u=o.readUshort(r,a);a+=2;d=e._lctf.numOfOnes(f);var l=e._lctf.numOfOnes(u);if(1==i.fmt){i.pairsets=[];var v=o.readUshort(r,a);a+=2;for(var c=0;c<v;c++){var p=s+o.readUshort(r,a);a+=2;var U=o.readUshort(r,p);p+=2;for(var g=[],S=0;S<U;S++){var m=o.readUshort(r,p);p+=2,0!=f&&(x=e.GPOS.readValueRecord(r,p,f),p+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,p,u),p+=2*l),g.push({gid2:m,val1:x,val2:P});}i.pairsets.push(g);}}if(2==i.fmt){var b=o.readUshort(r,a);a+=2;var y=o.readUshort(r,a);a+=2;var F=o.readUshort(r,a);a+=2;var _=o.readUshort(r,a);a+=2,i.classDef1=e._lctf.readClassDef(r,s+b),i.classDef2=e._lctf.readClassDef(r,s+y),i.matrix=[];for(c=0;c<F;c++){var C=[];for(S=0;S<_;S++){var x=null,P=null;0!=f&&(x=e.GPOS.readValueRecord(r,a,f),a+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,a,u),a+=2*l),C.push({val1:x,val2:P});}i.matrix.push(C);}}}else {if(9==t&&1==i.fmt){var I=o.readUshort(r,a);a+=2;var w=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=I;else if(n.ltype!=I)throw "invalid extension substitution";return e.GPOS.subt(r,n.ltype,s+w)}console.debug("unsupported GPOS table LookupType",t,"format",i.fmt);}return i},e.GPOS.readValueRecord=function(r,t,a){var n=e._bin,o=[];return o.push(1&a?n.readShort(r,t):0),t+=1&a?2:0,o.push(2&a?n.readShort(r,t):0),t+=2&a?2:0,o.push(4&a?n.readShort(r,t):0),t+=4&a?2:0,o.push(8&a?n.readShort(r,t):0),t+=8&a?2:0,o},e.GSUB={},e.GSUB.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GSUB.subt)},e.GSUB.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1!=t&&4!=t&&5!=t&&6!=t)return null;if(1==t||4==t||5==t&&i.fmt<=2||6==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,s+h);}if(1==t&&i.fmt>=1&&i.fmt<=2){if(1==i.fmt)i.delta=o.readShort(r,a),a+=2;else if(2==i.fmt){var f=o.readUshort(r,a);a+=2,i.newg=o.readUshorts(r,a,f),a+=2*i.newg.length;}}else if(4==t){i.vals=[];f=o.readUshort(r,a);a+=2;for(var d=0;d<f;d++){var u=o.readUshort(r,a);a+=2,i.vals.push(e.GSUB.readLigatureSet(r,s+u));}}else if(5==t&&2==i.fmt){if(2==i.fmt){var l=o.readUshort(r,a);a+=2,i.cDef=e._lctf.readClassDef(r,s+l),i.scset=[];var v=o.readUshort(r,a);a+=2;for(d=0;d<v;d++){var c=o.readUshort(r,a);a+=2,i.scset.push(0==c?null:e.GSUB.readSubClassSet(r,s+c));}}}else if(6==t&&3==i.fmt){if(3==i.fmt){for(d=0;d<3;d++){f=o.readUshort(r,a);a+=2;for(var p=[],U=0;U<f;U++)p.push(e._lctf.readCoverage(r,s+o.readUshort(r,a+2*U)));a+=2*f,0==d&&(i.backCvg=p),1==d&&(i.inptCvg=p),2==d&&(i.ahedCvg=p);}f=o.readUshort(r,a);a+=2,i.lookupRec=e.GSUB.readSubstLookupRecords(r,a,f);}}else {if(7==t&&1==i.fmt){var g=o.readUshort(r,a);a+=2;var S=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=g;else if(n.ltype!=g)throw "invalid extension substitution";return e.GSUB.subt(r,n.ltype,s+S)}console.debug("unsupported GSUB table LookupType",t,"format",i.fmt);}return i},e.GSUB.readSubClassSet=function(r,t){var a=e._bin.readUshort,n=t,o=[],s=a(r,t);t+=2;for(var i=0;i<s;i++){var h=a(r,t);t+=2,o.push(e.GSUB.readSubClassRule(r,n+h));}return o},e.GSUB.readSubClassRule=function(r,t){var a=e._bin.readUshort,n={},o=a(r,t),s=a(r,t+=2);t+=2,n.input=[];for(var i=0;i<o-1;i++)n.input.push(a(r,t)),t+=2;return n.substLookupRecords=e.GSUB.readSubstLookupRecords(r,t,s),n},e.GSUB.readSubstLookupRecords=function(r,t,a){for(var n=e._bin.readUshort,o=[],s=0;s<a;s++)o.push(n(r,t),n(r,t+2)),t+=4;return o},e.GSUB.readChainSubClassSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readChainSubClassRule(r,n+h));}return o},e.GSUB.readChainSubClassRule=function(r,t){for(var a=e._bin,n={},o=["backtrack","input","lookahead"],s=0;s<o.length;s++){var i=a.readUshort(r,t);t+=2,1==s&&i--,n[o[s]]=a.readUshorts(r,t,i),t+=2*n[o[s]].length;}i=a.readUshort(r,t);return t+=2,n.subst=a.readUshorts(r,t,2*i),t+=2*n.subst.length,n},e.GSUB.readLigatureSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readLigature(r,n+h));}return o},e.GSUB.readLigature=function(r,t){var a=e._bin,n={chain:[]};n.nglyph=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2;for(var s=0;s<o-1;s++)n.chain.push(a.readUshort(r,t)),t+=2;return n},e.head={},e.head.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.fontRevision=n.readFixed(r,t),t+=4,n.readUint(r,t),t+=4,n.readUint(r,t),t+=4,o.flags=n.readUshort(r,t),t+=2,o.unitsPerEm=n.readUshort(r,t),t+=2,o.created=n.readUint64(r,t),t+=8,o.modified=n.readUint64(r,t),t+=8,o.xMin=n.readShort(r,t),t+=2,o.yMin=n.readShort(r,t),t+=2,o.xMax=n.readShort(r,t),t+=2,o.yMax=n.readShort(r,t),t+=2,o.macStyle=n.readUshort(r,t),t+=2,o.lowestRecPPEM=n.readUshort(r,t),t+=2,o.fontDirectionHint=n.readShort(r,t),t+=2,o.indexToLocFormat=n.readShort(r,t),t+=2,o.glyphDataFormat=n.readShort(r,t),t+=2,o},e.hhea={},e.hhea.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.ascender=n.readShort(r,t),t+=2,o.descender=n.readShort(r,t),t+=2,o.lineGap=n.readShort(r,t),t+=2,o.advanceWidthMax=n.readUshort(r,t),t+=2,o.minLeftSideBearing=n.readShort(r,t),t+=2,o.minRightSideBearing=n.readShort(r,t),t+=2,o.xMaxExtent=n.readShort(r,t),t+=2,o.caretSlopeRise=n.readShort(r,t),t+=2,o.caretSlopeRun=n.readShort(r,t),t+=2,o.caretOffset=n.readShort(r,t),t+=2,t+=8,o.metricDataFormat=n.readShort(r,t),t+=2,o.numberOfHMetrics=n.readUshort(r,t),t+=2,o},e.hmtx={},e.hmtx.parse=function(r,t,a,n){for(var o=e._bin,s={aWidth:[],lsBearing:[]},i=0,h=0,f=0;f<n.maxp.numGlyphs;f++)f<n.hhea.numberOfHMetrics&&(i=o.readUshort(r,t),t+=2,h=o.readShort(r,t),t+=2),s.aWidth.push(i),s.lsBearing.push(h);return s},e.kern={},e.kern.parse=function(r,t,a,n){var o=e._bin,s=o.readUshort(r,t);if(t+=2,1==s)return e.kern.parseV1(r,t-2,a,n);var i=o.readUshort(r,t);t+=2;for(var h={glyph1:[],rval:[]},f=0;f<i;f++){t+=2;a=o.readUshort(r,t);t+=2;var d=o.readUshort(r,t);t+=2;var u=d>>>8;if(0!=(u&=15))throw "unknown kern table format: "+u;t=e.kern.readFormat0(r,t,h);}return h},e.kern.parseV1=function(r,t,a,n){var o=e._bin;o.readFixed(r,t),t+=4;var s=o.readUint(r,t);t+=4;for(var i={glyph1:[],rval:[]},h=0;h<s;h++){o.readUint(r,t),t+=4;var f=o.readUshort(r,t);t+=2,o.readUshort(r,t),t+=2;var d=f>>>8;if(0!=(d&=15))throw "unknown kern table format: "+d;t=e.kern.readFormat0(r,t,i);}return i},e.kern.readFormat0=function(r,t,a){var n=e._bin,o=-1,s=n.readUshort(r,t);t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2;for(var i=0;i<s;i++){var h=n.readUshort(r,t);t+=2;var f=n.readUshort(r,t);t+=2;var d=n.readShort(r,t);t+=2,h!=o&&(a.glyph1.push(h),a.rval.push({glyph2:[],vals:[]}));var u=a.rval[a.rval.length-1];u.glyph2.push(f),u.vals.push(d),o=h;}return t},e.loca={},e.loca.parse=function(r,t,a,n){var o=e._bin,s=[],i=n.head.indexToLocFormat,h=n.maxp.numGlyphs+1;if(0==i)for(var f=0;f<h;f++)s.push(o.readUshort(r,t+(f<<1))<<1);if(1==i)for(f=0;f<h;f++)s.push(o.readUint(r,t+(f<<2)));return s},e.maxp={},e.maxp.parse=function(r,t,a){var n=e._bin,o={},s=n.readUint(r,t);return t+=4,o.numGlyphs=n.readUshort(r,t),t+=2,65536==s&&(o.maxPoints=n.readUshort(r,t),t+=2,o.maxContours=n.readUshort(r,t),t+=2,o.maxCompositePoints=n.readUshort(r,t),t+=2,o.maxCompositeContours=n.readUshort(r,t),t+=2,o.maxZones=n.readUshort(r,t),t+=2,o.maxTwilightPoints=n.readUshort(r,t),t+=2,o.maxStorage=n.readUshort(r,t),t+=2,o.maxFunctionDefs=n.readUshort(r,t),t+=2,o.maxInstructionDefs=n.readUshort(r,t),t+=2,o.maxStackElements=n.readUshort(r,t),t+=2,o.maxSizeOfInstructions=n.readUshort(r,t),t+=2,o.maxComponentElements=n.readUshort(r,t),t+=2,o.maxComponentDepth=n.readUshort(r,t),t+=2),o},e.name={},e.name.parse=function(r,t,a){var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2,n.readUshort(r,t);for(var i,h=["copyright","fontFamily","fontSubfamily","ID","fullName","version","postScriptName","trademark","manufacturer","designer","description","urlVendor","urlDesigner","licence","licenceURL","---","typoFamilyName","typoSubfamilyName","compatibleFull","sampleText","postScriptCID","wwsFamilyName","wwsSubfamilyName","lightPalette","darkPalette"],f=t+=2,d=0;d<s;d++){var u=n.readUshort(r,t);t+=2;var l=n.readUshort(r,t);t+=2;var v=n.readUshort(r,t);t+=2;var c=n.readUshort(r,t);t+=2;var p=n.readUshort(r,t);t+=2;var U=n.readUshort(r,t);t+=2;var g,S=h[c],m=f+12*s+U;if(0==u)g=n.readUnicode(r,m,p/2);else if(3==u&&0==l)g=n.readUnicode(r,m,p/2);else if(0==l)g=n.readASCII(r,m,p);else if(1==l)g=n.readUnicode(r,m,p/2);else if(3==l)g=n.readUnicode(r,m,p/2);else {if(1!=u)throw "unknown encoding "+l+", platformID: "+u;g=n.readASCII(r,m,p),console.debug("reading unknown MAC encoding "+l+" as ASCII");}var b="p"+u+","+v.toString(16);null==o[b]&&(o[b]={}),o[b][void 0!==S?S:c]=g,o[b]._lang=v;}for(var y in o)if(null!=o[y].postScriptName&&1033==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&0==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&3084==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName)return o[y];for(var y in o){i=y;break}return console.debug("returning name table with languageID "+o[i]._lang),o[i]},e["OS/2"]={},e["OS/2"].parse=function(r,t,a){var n=e._bin.readUshort(r,t);t+=2;var o={};if(0==n)e["OS/2"].version0(r,t,o);else if(1==n)e["OS/2"].version1(r,t,o);else if(2==n||3==n||4==n)e["OS/2"].version2(r,t,o);else {if(5!=n)throw "unknown OS/2 table version: "+n;e["OS/2"].version5(r,t,o);}return o},e["OS/2"].version0=function(r,t,a){var n=e._bin;return a.xAvgCharWidth=n.readShort(r,t),t+=2,a.usWeightClass=n.readUshort(r,t),t+=2,a.usWidthClass=n.readUshort(r,t),t+=2,a.fsType=n.readUshort(r,t),t+=2,a.ySubscriptXSize=n.readShort(r,t),t+=2,a.ySubscriptYSize=n.readShort(r,t),t+=2,a.ySubscriptXOffset=n.readShort(r,t),t+=2,a.ySubscriptYOffset=n.readShort(r,t),t+=2,a.ySuperscriptXSize=n.readShort(r,t),t+=2,a.ySuperscriptYSize=n.readShort(r,t),t+=2,a.ySuperscriptXOffset=n.readShort(r,t),t+=2,a.ySuperscriptYOffset=n.readShort(r,t),t+=2,a.yStrikeoutSize=n.readShort(r,t),t+=2,a.yStrikeoutPosition=n.readShort(r,t),t+=2,a.sFamilyClass=n.readShort(r,t),t+=2,a.panose=n.readBytes(r,t,10),t+=10,a.ulUnicodeRange1=n.readUint(r,t),t+=4,a.ulUnicodeRange2=n.readUint(r,t),t+=4,a.ulUnicodeRange3=n.readUint(r,t),t+=4,a.ulUnicodeRange4=n.readUint(r,t),t+=4,a.achVendID=[n.readInt8(r,t),n.readInt8(r,t+1),n.readInt8(r,t+2),n.readInt8(r,t+3)],t+=4,a.fsSelection=n.readUshort(r,t),t+=2,a.usFirstCharIndex=n.readUshort(r,t),t+=2,a.usLastCharIndex=n.readUshort(r,t),t+=2,a.sTypoAscender=n.readShort(r,t),t+=2,a.sTypoDescender=n.readShort(r,t),t+=2,a.sTypoLineGap=n.readShort(r,t),t+=2,a.usWinAscent=n.readUshort(r,t),t+=2,a.usWinDescent=n.readUshort(r,t),t+=2},e["OS/2"].version1=function(r,t,a){var n=e._bin;return t=e["OS/2"].version0(r,t,a),a.ulCodePageRange1=n.readUint(r,t),t+=4,a.ulCodePageRange2=n.readUint(r,t),t+=4},e["OS/2"].version2=function(r,t,a){var n=e._bin;return t=e["OS/2"].version1(r,t,a),a.sxHeight=n.readShort(r,t),t+=2,a.sCapHeight=n.readShort(r,t),t+=2,a.usDefault=n.readUshort(r,t),t+=2,a.usBreak=n.readUshort(r,t),t+=2,a.usMaxContext=n.readUshort(r,t),t+=2},e["OS/2"].version5=function(r,t,a){var n=e._bin;return t=e["OS/2"].version2(r,t,a),a.usLowerOpticalPointSize=n.readUshort(r,t),t+=2,a.usUpperOpticalPointSize=n.readUshort(r,t),t+=2},e.post={},e.post.parse=function(r,t,a){var n=e._bin,o={};return o.version=n.readFixed(r,t),t+=4,o.italicAngle=n.readFixed(r,t),t+=4,o.underlinePosition=n.readShort(r,t),t+=2,o.underlineThickness=n.readShort(r,t),t+=2,o},null==e&&(e={}),null==e.U&&(e.U={}),e.U.codeToGlyph=function(r,e){var t=r.cmap,a=-1;if(null!=t.p0e4?a=t.p0e4:null!=t.p3e1?a=t.p3e1:null!=t.p1e0?a=t.p1e0:null!=t.p0e3&&(a=t.p0e3),-1==a)throw "no familiar platform and encoding!";var n=t.tables[a];if(0==n.format)return e>=n.map.length?0:n.map[e];if(4==n.format){for(var o=-1,s=0;s<n.endCount.length;s++)if(e<=n.endCount[s]){o=s;break}if(-1==o)return 0;if(n.startCount[o]>e)return 0;return 65535&(0!=n.idRangeOffset[o]?n.glyphIdArray[e-n.startCount[o]+(n.idRangeOffset[o]>>1)-(n.idRangeOffset.length-o)]:e+n.idDelta[o])}if(12==n.format){if(e>n.groups[n.groups.length-1][1])return 0;for(s=0;s<n.groups.length;s++){var i=n.groups[s];if(i[0]<=e&&e<=i[1])return i[2]+(e-i[0])}return 0}throw "unknown cmap table format "+n.format},e.U.glyphToPath=function(r,t){var a={cmds:[],crds:[]};if(r.SVG&&r.SVG.entries[t]){var n=r.SVG.entries[t];return null==n?a:("string"==typeof n&&(n=e.SVG.toPath(n),r.SVG.entries[t]=n),n)}if(r.CFF){var o={x:0,y:0,stack:[],nStems:0,haveWidth:!1,width:r.CFF.Private?r.CFF.Private.defaultWidthX:0,open:!1},s=r.CFF,i=r.CFF.Private;if(s.ROS){for(var h=0;s.FDSelect[h+2]<=t;)h+=2;i=s.FDArray[s.FDSelect[h+1]].Private;}e.U._drawCFF(r.CFF.CharStrings[t],o,s,i,a);}else r.glyf&&e.U._drawGlyf(t,r,a);return a},e.U._drawGlyf=function(r,t,a){var n=t.glyf[r];null==n&&(n=t.glyf[r]=e.glyf._parseGlyf(t,r)),null!=n&&(n.noc>-1?e.U._simpleGlyph(n,a):e.U._compoGlyph(n,t,a));},e.U._simpleGlyph=function(r,t){for(var a=0;a<r.noc;a++){for(var n=0==a?0:r.endPts[a-1]+1,o=r.endPts[a],s=n;s<=o;s++){var i=s==n?o:s-1,h=s==o?n:s+1,f=1&r.flags[s],d=1&r.flags[i],u=1&r.flags[h],l=r.xs[s],v=r.ys[s];if(s==n)if(f){if(!d){e.U.P.moveTo(t,l,v);continue}e.U.P.moveTo(t,r.xs[i],r.ys[i]);}else d?e.U.P.moveTo(t,r.xs[i],r.ys[i]):e.U.P.moveTo(t,(r.xs[i]+l)/2,(r.ys[i]+v)/2);f?d&&e.U.P.lineTo(t,l,v):u?e.U.P.qcurveTo(t,l,v,r.xs[h],r.ys[h]):e.U.P.qcurveTo(t,l,v,(l+r.xs[h])/2,(v+r.ys[h])/2);}e.U.P.closePath(t);}},e.U._compoGlyph=function(r,t,a){for(var n=0;n<r.parts.length;n++){var o={cmds:[],crds:[]},s=r.parts[n];e.U._drawGlyf(s.glyphIndex,t,o);for(var i=s.m,h=0;h<o.crds.length;h+=2){var f=o.crds[h],d=o.crds[h+1];a.crds.push(f*i.a+d*i.b+i.tx),a.crds.push(f*i.c+d*i.d+i.ty);}for(h=0;h<o.cmds.length;h++)a.cmds.push(o.cmds[h]);}},e.U._getGlyphClass=function(r,t){var a=e._lctf.getInterval(t,r);return -1==a?0:t[a+2]},e.U.getPairAdjustment=function(r,t,a){var n=!1;if(r.GPOS)for(var o=r.GPOS,s=o.lookupList,i=o.featureList,h=[],f=0;f<i.length;f++){var d=i[f];if("kern"==d.tag){n=!0;for(var u=0;u<d.tab.length;u++)if(!h[d.tab[u]]){h[d.tab[u]]=!0;for(var l=s[d.tab[u]],v=0;v<l.tabs.length;v++)if(null!=l.tabs[v]){var c,p=l.tabs[v];if(!p.coverage||-1!=(c=e._lctf.coverageIndex(p.coverage,t)))if(1==l.ltype);else if(2==l.ltype){var U=null;if(1==p.fmt){var g=p.pairsets[c];for(f=0;f<g.length;f++)g[f].gid2==a&&(U=g[f]);}else if(2==p.fmt){var S=e.U._getGlyphClass(t,p.classDef1),m=e.U._getGlyphClass(a,p.classDef2);U=p.matrix[S][m];}if(U){var b=0;return U.val1&&U.val1[2]&&(b+=U.val1[2]),U.val2&&U.val2[0]&&(b+=U.val2[0]),b}}}}}}if(r.kern&&!n){var y=r.kern.glyph1.indexOf(t);if(-1!=y){var F=r.kern.rval[y].glyph2.indexOf(a);if(-1!=F)return r.kern.rval[y].vals[F]}}return 0},e.U._applySubs=function(r,t,a,n){for(var o=r.length-t-1,s=0;s<a.tabs.length;s++)if(null!=a.tabs[s]){var i,h=a.tabs[s];if(!h.coverage||-1!=(i=e._lctf.coverageIndex(h.coverage,r[t])))if(1==a.ltype)r[t],1==h.fmt?r[t]=r[t]+h.delta:r[t]=h.newg[i];else if(4==a.ltype)for(var f=h.vals[i],d=0;d<f.length;d++){var u=f[d],l=u.chain.length;if(!(l>o)){for(var v=!0,c=0,p=0;p<l;p++){for(;-1==r[t+c+(1+p)];)c++;u.chain[p]!=r[t+c+(1+p)]&&(v=!1);}if(v){r[t]=u.nglyph;for(p=0;p<l+c;p++)r[t+p+1]=-1;break}}}else if(5==a.ltype&&2==h.fmt)for(var U=e._lctf.getInterval(h.cDef,r[t]),g=h.cDef[U+2],S=h.scset[g],m=0;m<S.length;m++){var b=S[m],y=b.input;if(!(y.length>o)){for(v=!0,p=0;p<y.length;p++){var F=e._lctf.getInterval(h.cDef,r[t+1+p]);if(-1==U&&h.cDef[F+2]!=y[p]){v=!1;break}}if(v){var _=b.substLookupRecords;for(d=0;d<_.length;d+=2)_[d],_[d+1];}}}else if(6==a.ltype&&3==h.fmt){if(!e.U._glsCovered(r,h.backCvg,t-h.backCvg.length))continue;if(!e.U._glsCovered(r,h.inptCvg,t))continue;if(!e.U._glsCovered(r,h.ahedCvg,t+h.inptCvg.length))continue;var C=h.lookupRec;for(m=0;m<C.length;m+=2){U=C[m];var x=n[C[m+1]];e.U._applySubs(r,t+U,x,n);}}}},e.U._glsCovered=function(r,t,a){for(var n=0;n<t.length;n++){if(-1==e._lctf.coverageIndex(t[n],r[a+n]))return !1}return !0},e.U.glyphsToPath=function(r,t,a){for(var n={cmds:[],crds:[]},o=0,s=0;s<t.length;s++){var i=t[s];if(-1!=i){for(var h=s<t.length-1&&-1!=t[s+1]?t[s+1]:0,f=e.U.glyphToPath(r,i),d=0;d<f.crds.length;d+=2)n.crds.push(f.crds[d]+o),n.crds.push(f.crds[d+1]);a&&n.cmds.push(a);for(d=0;d<f.cmds.length;d++)n.cmds.push(f.cmds[d]);a&&n.cmds.push("X"),o+=r.hmtx.aWidth[i],s<t.length-1&&(o+=e.U.getPairAdjustment(r,i,h));}}return n},e.U.P={},e.U.P.moveTo=function(r,e,t){r.cmds.push("M"),r.crds.push(e,t);},e.U.P.lineTo=function(r,e,t){r.cmds.push("L"),r.crds.push(e,t);},e.U.P.curveTo=function(r,e,t,a,n,o,s){r.cmds.push("C"),r.crds.push(e,t,a,n,o,s);},e.U.P.qcurveTo=function(r,e,t,a,n){r.cmds.push("Q"),r.crds.push(e,t,a,n);},e.U.P.closePath=function(r){r.cmds.push("Z");},e.U._drawCFF=function(r,t,a,n,o){for(var s=t.stack,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open,u=0,l=t.x,v=t.y,c=0,p=0,U=0,g=0,S=0,m=0,b=0,y=0,F=0,_=0,C={val:0,size:0};u<r.length;){e.CFF.getCharString(r,u,C);var x=C.val;if(u+=C.size,"o1"==x||"o18"==x)s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;else if("o3"==x||"o23"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;}else if("o4"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),d&&e.U.P.closePath(o),v+=s.pop(),e.U.P.moveTo(o,l,v),d=!0;else if("o5"==x)for(;s.length>0;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);else if("o6"==x||"o7"==x)for(var P=s.length,I="o6"==x,w=0;w<P;w++){var O=s.shift();I?l+=O:v+=O,I=!I,e.U.P.lineTo(o,l,v);}else if("o8"==x||"o24"==x){P=s.length;for(var T=0;T+6<=P;)c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v),T+=6;"o24"==x&&(l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v));}else {if("o11"==x)break;if("o1234"==x||"o1235"==x||"o1236"==x||"o1237"==x)"o1234"==x&&(p=v,U=(c=l+s.shift())+s.shift(),_=g=p+s.shift(),m=g,y=v,l=(b=(S=(F=U+s.shift())+s.shift())+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1235"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),l=b+s.shift(),v=y+s.shift(),s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1236"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),_=g=p+s.shift(),m=g,b=(S=(F=U+s.shift())+s.shift())+s.shift(),y=m+s.shift(),l=b+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1237"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),Math.abs(b-l)>Math.abs(y-v)?l=b+s.shift():v=y+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v));else if("o14"==x){if(s.length>0&&!h&&(f=s.shift()+a.nominalWidthX,h=!0),4==s.length){var k=s.shift(),G=s.shift(),D=s.shift(),B=s.shift(),L=e.CFF.glyphBySE(a,D),R=e.CFF.glyphBySE(a,B);e.U._drawCFF(a.CharStrings[L],t,a,n,o),t.x=k,t.y=G,e.U._drawCFF(a.CharStrings[R],t,a,n,o);}d&&(e.U.P.closePath(o),d=!1);}else if("o19"==x||"o20"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0,u+=i+7>>3;}else if("o21"==x)s.length>2&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),v+=s.pop(),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o22"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o25"==x){for(;s.length>6;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);}else if("o26"==x)for(s.length%2&&(l+=s.shift());s.length>0;)c=l,p=v+s.shift(),l=U=c+s.shift(),v=(g=p+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);else if("o27"==x)for(s.length%2&&(v+=s.shift());s.length>0;)p=v,U=(c=l+s.shift())+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g,e.U.P.curveTo(o,c,p,U,g,l,v);else if("o10"==x||"o29"==x){var A="o10"==x?n:a;if(0==s.length)console.debug("error: empty stack");else {var W=s.pop(),M=A.Subrs[W+A.Bias];t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d,e.U._drawCFF(M,t,a,n,o),l=t.x,v=t.y,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open;}}else if("o30"==x||"o31"==x){var V=s.length,N=(T=0,"o31"==x);for(T+=V-(P=-3&V);T<P;)N?(p=v,U=(c=l+s.shift())+s.shift(),v=(g=p+s.shift())+s.shift(),P-T==5?(l=U+s.shift(),T++):l=U,N=!1):(c=l,p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),P-T==5?(v=g+s.shift(),T++):v=g,N=!0),e.U.P.curveTo(o,c,p,U,g,l,v),T+=4;}else {if("o"==(x+"").charAt(0))throw console.debug("Unknown operation: "+x,r),x;s.push(x);}}}t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d;};var t=e,a={Typr:t};return r.Typr=t,r.default=a,Object.defineProperty(r,"__esModule",{value:!0}),r}({}).Typr}
+  function typrFactory(){return "undefined"==typeof window&&(self.window=self),function(r){var e={parse:function(r){var t=e._bin,a=new Uint8Array(r);if("ttcf"==t.readASCII(a,0,4)){var n=4;t.readUshort(a,n),n+=2,t.readUshort(a,n),n+=2;var o=t.readUint(a,n);n+=4;for(var s=[],i=0;i<o;i++){var h=t.readUint(a,n);n+=4,s.push(e._readFont(a,h));}return s}return [e._readFont(a,0)]},_readFont:function(r,t){var a=e._bin,n=t;a.readFixed(r,t),t+=4;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2;for(var s=["cmap","head","hhea","maxp","hmtx","name","OS/2","post","loca","glyf","kern","CFF ","GPOS","GSUB","SVG "],i={_data:r,_offset:n},h={},f=0;f<o;f++){var d=a.readASCII(r,t,4);t+=4,a.readUint(r,t),t+=4;var u=a.readUint(r,t);t+=4;var l=a.readUint(r,t);t+=4,h[d]={offset:u,length:l};}for(f=0;f<s.length;f++){var v=s[f];h[v]&&(i[v.trim()]=e[v.trim()].parse(r,h[v].offset,h[v].length,i));}return i},_tabOffset:function(r,t,a){for(var n=e._bin,o=n.readUshort(r,a+4),s=a+12,i=0;i<o;i++){var h=n.readASCII(r,s,4);s+=4,n.readUint(r,s),s+=4;var f=n.readUint(r,s);if(s+=4,n.readUint(r,s),s+=4,h==t)return f}return 0}};e._bin={readFixed:function(r,e){return (r[e]<<8|r[e+1])+(r[e+2]<<8|r[e+3])/65540},readF2dot14:function(r,t){return e._bin.readShort(r,t)/16384},readInt:function(r,t){return e._bin._view(r).getInt32(t)},readInt8:function(r,t){return e._bin._view(r).getInt8(t)},readShort:function(r,t){return e._bin._view(r).getInt16(t)},readUshort:function(r,t){return e._bin._view(r).getUint16(t)},readUshorts:function(r,t,a){for(var n=[],o=0;o<a;o++)n.push(e._bin.readUshort(r,t+2*o));return n},readUint:function(r,t){return e._bin._view(r).getUint32(t)},readUint64:function(r,t){return 4294967296*e._bin.readUint(r,t)+e._bin.readUint(r,t+4)},readASCII:function(r,e,t){for(var a="",n=0;n<t;n++)a+=String.fromCharCode(r[e+n]);return a},readUnicode:function(r,e,t){for(var a="",n=0;n<t;n++){var o=r[e++]<<8|r[e++];a+=String.fromCharCode(o);}return a},_tdec:"undefined"!=typeof window&&window.TextDecoder?new window.TextDecoder:null,readUTF8:function(r,t,a){var n=e._bin._tdec;return n&&0==t&&a==r.length?n.decode(r):e._bin.readASCII(r,t,a)},readBytes:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(r[e+n]);return a},readASCIIArray:function(r,e,t){for(var a=[],n=0;n<t;n++)a.push(String.fromCharCode(r[e+n]));return a},_view:function(r){return r._dataView||(r._dataView=r.buffer?new DataView(r.buffer,r.byteOffset,r.byteLength):new DataView(new Uint8Array(r).buffer))}},e._lctf={},e._lctf.parse=function(r,t,a,n,o){var s=e._bin,i={},h=t;s.readFixed(r,t),t+=4;var f=s.readUshort(r,t);t+=2;var d=s.readUshort(r,t);t+=2;var u=s.readUshort(r,t);return t+=2,i.scriptList=e._lctf.readScriptList(r,h+f),i.featureList=e._lctf.readFeatureList(r,h+d),i.lookupList=e._lctf.readLookupList(r,h+u,o),i},e._lctf.readLookupList=function(r,t,a){var n=e._bin,o=t,s=[],i=n.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=n.readUshort(r,t);t+=2;var d=e._lctf.readLookupTable(r,o+f,a);s.push(d);}return s},e._lctf.readLookupTable=function(r,t,a){var n=e._bin,o=t,s={tabs:[]};s.ltype=n.readUshort(r,t),t+=2,s.flag=n.readUshort(r,t),t+=2;var i=n.readUshort(r,t);t+=2;for(var h=s.ltype,f=0;f<i;f++){var d=n.readUshort(r,t);t+=2;var u=a(r,h,o+d,s);s.tabs.push(u);}return s},e._lctf.numOfOnes=function(r){for(var e=0,t=0;t<32;t++)0!=(r>>>t&1)&&e++;return e},e._lctf.readClassDef=function(r,t){var a=e._bin,n=[],o=a.readUshort(r,t);if(t+=2,1==o){var s=a.readUshort(r,t);t+=2;var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++)n.push(s+h),n.push(s+h),n.push(a.readUshort(r,t)),t+=2;}if(2==o){var f=a.readUshort(r,t);t+=2;for(h=0;h<f;h++)n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2,n.push(a.readUshort(r,t)),t+=2;}return n},e._lctf.getInterval=function(r,e){for(var t=0;t<r.length;t+=3){var a=r[t],n=r[t+1];if(r[t+2],a<=e&&e<=n)return t}return -1},e._lctf.readCoverage=function(r,t){var a=e._bin,n={};n.fmt=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,1==n.fmt&&(n.tab=a.readUshorts(r,t,o)),2==n.fmt&&(n.tab=a.readUshorts(r,t,3*o)),n},e._lctf.coverageIndex=function(r,t){var a=r.tab;if(1==r.fmt)return a.indexOf(t);if(2==r.fmt){var n=e._lctf.getInterval(a,t);if(-1!=n)return a[n+2]+(t-a[n])}return -1},e._lctf.readFeatureList=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2;var d=e._lctf.readFeatureTable(r,n+f);d.tag=h.trim(),o.push(d);}return o},e._lctf.readFeatureTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,s>0&&(o.featureParams=n+s);var i=a.readUshort(r,t);t+=2,o.tab=[];for(var h=0;h<i;h++)o.tab.push(a.readUshort(r,t+2*h));return o},e._lctf.readScriptList=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readASCII(r,t,4);t+=4;var f=a.readUshort(r,t);t+=2,o[h.trim()]=e._lctf.readScriptTable(r,n+f);}return o},e._lctf.readScriptTable=function(r,t){var a=e._bin,n=t,o={},s=a.readUshort(r,t);t+=2,s>0&&(o.default=e._lctf.readLangSysTable(r,n+s));var i=a.readUshort(r,t);t+=2;for(var h=0;h<i;h++){var f=a.readASCII(r,t,4);t+=4;var d=a.readUshort(r,t);t+=2,o[f.trim()]=e._lctf.readLangSysTable(r,n+d);}return o},e._lctf.readLangSysTable=function(r,t){var a=e._bin,n={};a.readUshort(r,t),t+=2,n.reqFeature=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);return t+=2,n.features=a.readUshorts(r,t,o),n},e.CFF={},e.CFF.parse=function(r,t,a){var n=e._bin;(r=new Uint8Array(r.buffer,t,a))[t=0],r[++t],r[++t],r[++t],t++;var o=[];t=e.CFF.readIndex(r,t,o);for(var s=[],i=0;i<o.length-1;i++)s.push(n.readASCII(r,t+o[i],o[i+1]-o[i]));t+=o[o.length-1];var h=[];t=e.CFF.readIndex(r,t,h);var f=[];for(i=0;i<h.length-1;i++)f.push(e.CFF.readDict(r,t+h[i],t+h[i+1]));t+=h[h.length-1];var d=f[0],u=[];t=e.CFF.readIndex(r,t,u);var l=[];for(i=0;i<u.length-1;i++)l.push(n.readASCII(r,t+u[i],u[i+1]-u[i]));if(t+=u[u.length-1],e.CFF.readSubrs(r,t,d),d.CharStrings){t=d.CharStrings;u=[];t=e.CFF.readIndex(r,t,u);var v=[];for(i=0;i<u.length-1;i++)v.push(n.readBytes(r,t+u[i],u[i+1]-u[i]));d.CharStrings=v;}if(d.ROS){t=d.FDArray;var c=[];t=e.CFF.readIndex(r,t,c),d.FDArray=[];for(i=0;i<c.length-1;i++){var p=e.CFF.readDict(r,t+c[i],t+c[i+1]);e.CFF._readFDict(r,p,l),d.FDArray.push(p);}t+=c[c.length-1],t=d.FDSelect,d.FDSelect=[];var U=r[t];if(t++,3!=U)throw U;var g=n.readUshort(r,t);t+=2;for(i=0;i<g+1;i++)d.FDSelect.push(n.readUshort(r,t),r[t+2]),t+=3;}return d.Encoding&&(d.Encoding=e.CFF.readEncoding(r,d.Encoding,d.CharStrings.length)),d.charset&&(d.charset=e.CFF.readCharset(r,d.charset,d.CharStrings.length)),e.CFF._readFDict(r,d,l),d},e.CFF._readFDict=function(r,t,a){var n;for(var o in t.Private&&(n=t.Private[1],t.Private=e.CFF.readDict(r,n,n+t.Private[0]),t.Private.Subrs&&e.CFF.readSubrs(r,n+t.Private.Subrs,t.Private)),t)-1!=["FamilyName","FontName","FullName","Notice","version","Copyright"].indexOf(o)&&(t[o]=a[t[o]-426+35]);},e.CFF.readSubrs=function(r,t,a){var n=e._bin,o=[];t=e.CFF.readIndex(r,t,o);var s,i=o.length;s=i<1240?107:i<33900?1131:32768,a.Bias=s,a.Subrs=[];for(var h=0;h<o.length-1;h++)a.Subrs.push(n.readBytes(r,t+o[h],o[h+1]-o[h]));},e.CFF.tableSE=[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,0,111,112,113,114,0,115,116,117,118,119,120,121,122,0,123,0,124,125,126,127,128,129,130,131,0,132,133,0,134,135,136,137,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,138,0,139,0,0,0,0,140,141,142,143,0,0,0,0,0,144,0,0,0,145,0,0,146,147,148,149,0,0,0,0],e.CFF.glyphByUnicode=function(r,e){for(var t=0;t<r.charset.length;t++)if(r.charset[t]==e)return t;return -1},e.CFF.glyphBySE=function(r,t){return t<0||t>255?-1:e.CFF.glyphByUnicode(r,e.CFF.tableSE[t])},e.CFF.readEncoding=function(r,t,a){e._bin;var n=[".notdef"],o=r[t];if(t++,0!=o)throw "error: unknown encoding format: "+o;var s=r[t];t++;for(var i=0;i<s;i++)n.push(r[t+i]);return n},e.CFF.readCharset=function(r,t,a){var n=e._bin,o=[".notdef"],s=r[t];if(t++,0==s)for(var i=0;i<a;i++){var h=n.readUshort(r,t);t+=2,o.push(h);}else {if(1!=s&&2!=s)throw "error: format: "+s;for(;o.length<a;){h=n.readUshort(r,t);t+=2;var f=0;1==s?(f=r[t],t++):(f=n.readUshort(r,t),t+=2);for(i=0;i<=f;i++)o.push(h),h++;}}return o},e.CFF.readIndex=function(r,t,a){var n=e._bin,o=n.readUshort(r,t)+1,s=r[t+=2];if(t++,1==s)for(var i=0;i<o;i++)a.push(r[t+i]);else if(2==s)for(i=0;i<o;i++)a.push(n.readUshort(r,t+2*i));else if(3==s)for(i=0;i<o;i++)a.push(16777215&n.readUint(r,t+3*i-1));else if(1!=o)throw "unsupported offset size: "+s+", count: "+o;return (t+=o*s)-1},e.CFF.getCharString=function(r,t,a){var n=e._bin,o=r[t],s=r[t+1];r[t+2],r[t+3],r[t+4];var i=1,h=null,f=null;o<=20&&(h=o,i=1),12==o&&(h=100*o+s,i=2),21<=o&&o<=27&&(h=o,i=1),28==o&&(f=n.readShort(r,t+1),i=3),29<=o&&o<=31&&(h=o,i=1),32<=o&&o<=246&&(f=o-139,i=1),247<=o&&o<=250&&(f=256*(o-247)+s+108,i=2),251<=o&&o<=254&&(f=256*-(o-251)-s-108,i=2),255==o&&(f=n.readInt(r,t+1)/65535,i=5),a.val=null!=f?f:"o"+h,a.size=i;},e.CFF.readCharString=function(r,t,a){for(var n=t+a,o=e._bin,s=[];t<n;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;i<=20&&(d=i,f=1),12==i&&(d=100*i+h,f=2),19!=i&&20!=i||(d=i,f=2),21<=i&&i<=27&&(d=i,f=1),28==i&&(u=o.readShort(r,t+1),f=3),29<=i&&i<=31&&(d=i,f=1),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i&&(u=o.readInt(r,t+1)/65535,f=5),s.push(null!=u?u:"o"+d),t+=f;}return s},e.CFF.readDict=function(r,t,a){for(var n=e._bin,o={},s=[];t<a;){var i=r[t],h=r[t+1];r[t+2],r[t+3],r[t+4];var f=1,d=null,u=null;if(28==i&&(u=n.readShort(r,t+1),f=3),29==i&&(u=n.readInt(r,t+1),f=5),32<=i&&i<=246&&(u=i-139,f=1),247<=i&&i<=250&&(u=256*(i-247)+h+108,f=2),251<=i&&i<=254&&(u=256*-(i-251)-h-108,f=2),255==i)throw u=n.readInt(r,t+1)/65535,f=5,"unknown number";if(30==i){var l=[];for(f=1;;){var v=r[t+f];f++;var c=v>>4,p=15&v;if(15!=c&&l.push(c),15!=p&&l.push(p),15==p)break}for(var U="",g=[0,1,2,3,4,5,6,7,8,9,".","e","e-","reserved","-","endOfNumber"],S=0;S<l.length;S++)U+=g[l[S]];u=parseFloat(U);}if(i<=21)if(d=["version","Notice","FullName","FamilyName","Weight","FontBBox","BlueValues","OtherBlues","FamilyBlues","FamilyOtherBlues","StdHW","StdVW","escape","UniqueID","XUID","charset","Encoding","CharStrings","Private","Subrs","defaultWidthX","nominalWidthX"][i],f=1,12==i)d=["Copyright","isFixedPitch","ItalicAngle","UnderlinePosition","UnderlineThickness","PaintType","CharstringType","FontMatrix","StrokeWidth","BlueScale","BlueShift","BlueFuzz","StemSnapH","StemSnapV","ForceBold",0,0,"LanguageGroup","ExpansionFactor","initialRandomSeed","SyntheticBase","PostScript","BaseFontName","BaseFontBlend",0,0,0,0,0,0,"ROS","CIDFontVersion","CIDFontRevision","CIDFontType","CIDCount","UIDBase","FDArray","FDSelect","FontName"][h],f=2;null!=d?(o[d]=1==s.length?s[0]:s,s=[]):s.push(u),t+=f;}return o},e.cmap={},e.cmap.parse=function(r,t,a){r=new Uint8Array(r.buffer,t,a),t=0;var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2;var i=[];o.tables=[];for(var h=0;h<s;h++){var f=n.readUshort(r,t);t+=2;var d=n.readUshort(r,t);t+=2;var u=n.readUint(r,t);t+=4;var l="p"+f+"e"+d,v=i.indexOf(u);if(-1==v){var c;v=o.tables.length,i.push(u);var p=n.readUshort(r,u);0==p?c=e.cmap.parse0(r,u):4==p?c=e.cmap.parse4(r,u):6==p?c=e.cmap.parse6(r,u):12==p?c=e.cmap.parse12(r,u):console.debug("unknown format: "+p,f,d,u),o.tables.push(c);}if(null!=o[l])throw "multiple tables for one platform+encoding";o[l]=v;}return o},e.cmap.parse0=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2,n.map=[];for(var s=0;s<o-6;s++)n.map.push(r[t+s]);return n},e.cmap.parse4=function(r,t){var a=e._bin,n=t,o={};o.format=a.readUshort(r,t),t+=2;var s=a.readUshort(r,t);t+=2,a.readUshort(r,t),t+=2;var i=a.readUshort(r,t);t+=2;var h=i/2;o.searchRange=a.readUshort(r,t),t+=2,o.entrySelector=a.readUshort(r,t),t+=2,o.rangeShift=a.readUshort(r,t),t+=2,o.endCount=a.readUshorts(r,t,h),t+=2*h,t+=2,o.startCount=a.readUshorts(r,t,h),t+=2*h,o.idDelta=[];for(var f=0;f<h;f++)o.idDelta.push(a.readShort(r,t)),t+=2;for(o.idRangeOffset=a.readUshorts(r,t,h),t+=2*h,o.glyphIdArray=[];t<n+s;)o.glyphIdArray.push(a.readUshort(r,t)),t+=2;return o},e.cmap.parse6=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,a.readUshort(r,t),t+=2,n.firstCode=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2,n.glyphIdArray=[];for(var s=0;s<o;s++)n.glyphIdArray.push(a.readUshort(r,t)),t+=2;return n},e.cmap.parse12=function(r,t){var a=e._bin,n={};n.format=a.readUshort(r,t),t+=2,t+=2,a.readUint(r,t),t+=4,a.readUint(r,t),t+=4;var o=a.readUint(r,t);t+=4,n.groups=[];for(var s=0;s<o;s++){var i=t+12*s,h=a.readUint(r,i+0),f=a.readUint(r,i+4),d=a.readUint(r,i+8);n.groups.push([h,f,d]);}return n},e.glyf={},e.glyf.parse=function(r,e,t,a){for(var n=[],o=0;o<a.maxp.numGlyphs;o++)n.push(null);return n},e.glyf._parseGlyf=function(r,t){var a=e._bin,n=r._data,o=e._tabOffset(n,"glyf",r._offset)+r.loca[t];if(r.loca[t]==r.loca[t+1])return null;var s={};if(s.noc=a.readShort(n,o),o+=2,s.xMin=a.readShort(n,o),o+=2,s.yMin=a.readShort(n,o),o+=2,s.xMax=a.readShort(n,o),o+=2,s.yMax=a.readShort(n,o),o+=2,s.xMin>=s.xMax||s.yMin>=s.yMax)return null;if(s.noc>0){s.endPts=[];for(var i=0;i<s.noc;i++)s.endPts.push(a.readUshort(n,o)),o+=2;var h=a.readUshort(n,o);if(o+=2,n.length-o<h)return null;s.instructions=a.readBytes(n,o,h),o+=h;var f=s.endPts[s.noc-1]+1;s.flags=[];for(i=0;i<f;i++){var d=n[o];if(o++,s.flags.push(d),0!=(8&d)){var u=n[o];o++;for(var l=0;l<u;l++)s.flags.push(d),i++;}}s.xs=[];for(i=0;i<f;i++){var v=0!=(2&s.flags[i]),c=0!=(16&s.flags[i]);v?(s.xs.push(c?n[o]:-n[o]),o++):c?s.xs.push(0):(s.xs.push(a.readShort(n,o)),o+=2);}s.ys=[];for(i=0;i<f;i++){v=0!=(4&s.flags[i]),c=0!=(32&s.flags[i]);v?(s.ys.push(c?n[o]:-n[o]),o++):c?s.ys.push(0):(s.ys.push(a.readShort(n,o)),o+=2);}var p=0,U=0;for(i=0;i<f;i++)p+=s.xs[i],U+=s.ys[i],s.xs[i]=p,s.ys[i]=U;}else {var g;s.parts=[];do{g=a.readUshort(n,o),o+=2;var S={m:{a:1,b:0,c:0,d:1,tx:0,ty:0},p1:-1,p2:-1};if(s.parts.push(S),S.glyphIndex=a.readUshort(n,o),o+=2,1&g){var m=a.readShort(n,o);o+=2;var b=a.readShort(n,o);o+=2;}else {m=a.readInt8(n,o);o++;b=a.readInt8(n,o);o++;}2&g?(S.m.tx=m,S.m.ty=b):(S.p1=m,S.p2=b),8&g?(S.m.a=S.m.d=a.readF2dot14(n,o),o+=2):64&g?(S.m.a=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2):128&g&&(S.m.a=a.readF2dot14(n,o),o+=2,S.m.b=a.readF2dot14(n,o),o+=2,S.m.c=a.readF2dot14(n,o),o+=2,S.m.d=a.readF2dot14(n,o),o+=2);}while(32&g);if(256&g){var y=a.readUshort(n,o);o+=2,s.instr=[];for(i=0;i<y;i++)s.instr.push(n[o]),o++;}}return s},e.GPOS={},e.GPOS.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GPOS.subt)},e.GPOS.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1==t||2==t||3==t||7==t||8==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,h+s);}if(1==t&&1==i.fmt){var f=o.readUshort(r,a);a+=2;var d=e._lctf.numOfOnes(f);0!=f&&(i.pos=e.GPOS.readValueRecord(r,a,f));}else if(2==t&&i.fmt>=1&&i.fmt<=2){f=o.readUshort(r,a);a+=2;var u=o.readUshort(r,a);a+=2;d=e._lctf.numOfOnes(f);var l=e._lctf.numOfOnes(u);if(1==i.fmt){i.pairsets=[];var v=o.readUshort(r,a);a+=2;for(var c=0;c<v;c++){var p=s+o.readUshort(r,a);a+=2;var U=o.readUshort(r,p);p+=2;for(var g=[],S=0;S<U;S++){var m=o.readUshort(r,p);p+=2,0!=f&&(x=e.GPOS.readValueRecord(r,p,f),p+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,p,u),p+=2*l),g.push({gid2:m,val1:x,val2:P});}i.pairsets.push(g);}}if(2==i.fmt){var b=o.readUshort(r,a);a+=2;var y=o.readUshort(r,a);a+=2;var F=o.readUshort(r,a);a+=2;var _=o.readUshort(r,a);a+=2,i.classDef1=e._lctf.readClassDef(r,s+b),i.classDef2=e._lctf.readClassDef(r,s+y),i.matrix=[];for(c=0;c<F;c++){var C=[];for(S=0;S<_;S++){var x=null,P=null;0!=f&&(x=e.GPOS.readValueRecord(r,a,f),a+=2*d),0!=u&&(P=e.GPOS.readValueRecord(r,a,u),a+=2*l),C.push({val1:x,val2:P});}i.matrix.push(C);}}}else {if(9==t&&1==i.fmt){var I=o.readUshort(r,a);a+=2;var w=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=I;else if(n.ltype!=I)throw "invalid extension substitution";return e.GPOS.subt(r,n.ltype,s+w)}console.debug("unsupported GPOS table LookupType",t,"format",i.fmt);}return i},e.GPOS.readValueRecord=function(r,t,a){var n=e._bin,o=[];return o.push(1&a?n.readShort(r,t):0),t+=1&a?2:0,o.push(2&a?n.readShort(r,t):0),t+=2&a?2:0,o.push(4&a?n.readShort(r,t):0),t+=4&a?2:0,o.push(8&a?n.readShort(r,t):0),t+=8&a?2:0,o},e.GSUB={},e.GSUB.parse=function(r,t,a,n){return e._lctf.parse(r,t,a,n,e.GSUB.subt)},e.GSUB.subt=function(r,t,a,n){var o=e._bin,s=a,i={};if(i.fmt=o.readUshort(r,a),a+=2,1!=t&&4!=t&&5!=t&&6!=t)return null;if(1==t||4==t||5==t&&i.fmt<=2||6==t&&i.fmt<=2){var h=o.readUshort(r,a);a+=2,i.coverage=e._lctf.readCoverage(r,s+h);}if(1==t&&i.fmt>=1&&i.fmt<=2){if(1==i.fmt)i.delta=o.readShort(r,a),a+=2;else if(2==i.fmt){var f=o.readUshort(r,a);a+=2,i.newg=o.readUshorts(r,a,f),a+=2*i.newg.length;}}else if(4==t){i.vals=[];f=o.readUshort(r,a);a+=2;for(var d=0;d<f;d++){var u=o.readUshort(r,a);a+=2,i.vals.push(e.GSUB.readLigatureSet(r,s+u));}}else if(5==t&&2==i.fmt){if(2==i.fmt){var l=o.readUshort(r,a);a+=2,i.cDef=e._lctf.readClassDef(r,s+l),i.scset=[];var v=o.readUshort(r,a);a+=2;for(d=0;d<v;d++){var c=o.readUshort(r,a);a+=2,i.scset.push(0==c?null:e.GSUB.readSubClassSet(r,s+c));}}}else if(6==t&&3==i.fmt){if(3==i.fmt){for(d=0;d<3;d++){f=o.readUshort(r,a);a+=2;for(var p=[],U=0;U<f;U++)p.push(e._lctf.readCoverage(r,s+o.readUshort(r,a+2*U)));a+=2*f,0==d&&(i.backCvg=p),1==d&&(i.inptCvg=p),2==d&&(i.ahedCvg=p);}f=o.readUshort(r,a);a+=2,i.lookupRec=e.GSUB.readSubstLookupRecords(r,a,f);}}else {if(7==t&&1==i.fmt){var g=o.readUshort(r,a);a+=2;var S=o.readUint(r,a);if(a+=4,9==n.ltype)n.ltype=g;else if(n.ltype!=g)throw "invalid extension substitution";return e.GSUB.subt(r,n.ltype,s+S)}console.debug("unsupported GSUB table LookupType",t,"format",i.fmt);}return i},e.GSUB.readSubClassSet=function(r,t){var a=e._bin.readUshort,n=t,o=[],s=a(r,t);t+=2;for(var i=0;i<s;i++){var h=a(r,t);t+=2,o.push(e.GSUB.readSubClassRule(r,n+h));}return o},e.GSUB.readSubClassRule=function(r,t){var a=e._bin.readUshort,n={},o=a(r,t),s=a(r,t+=2);t+=2,n.input=[];for(var i=0;i<o-1;i++)n.input.push(a(r,t)),t+=2;return n.substLookupRecords=e.GSUB.readSubstLookupRecords(r,t,s),n},e.GSUB.readSubstLookupRecords=function(r,t,a){for(var n=e._bin.readUshort,o=[],s=0;s<a;s++)o.push(n(r,t),n(r,t+2)),t+=4;return o},e.GSUB.readChainSubClassSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readChainSubClassRule(r,n+h));}return o},e.GSUB.readChainSubClassRule=function(r,t){for(var a=e._bin,n={},o=["backtrack","input","lookahead"],s=0;s<o.length;s++){var i=a.readUshort(r,t);t+=2,1==s&&i--,n[o[s]]=a.readUshorts(r,t,i),t+=2*n[o[s]].length;}i=a.readUshort(r,t);return t+=2,n.subst=a.readUshorts(r,t,2*i),t+=2*n.subst.length,n},e.GSUB.readLigatureSet=function(r,t){var a=e._bin,n=t,o=[],s=a.readUshort(r,t);t+=2;for(var i=0;i<s;i++){var h=a.readUshort(r,t);t+=2,o.push(e.GSUB.readLigature(r,n+h));}return o},e.GSUB.readLigature=function(r,t){var a=e._bin,n={chain:[]};n.nglyph=a.readUshort(r,t),t+=2;var o=a.readUshort(r,t);t+=2;for(var s=0;s<o-1;s++)n.chain.push(a.readUshort(r,t)),t+=2;return n},e.head={},e.head.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.fontRevision=n.readFixed(r,t),t+=4,n.readUint(r,t),t+=4,n.readUint(r,t),t+=4,o.flags=n.readUshort(r,t),t+=2,o.unitsPerEm=n.readUshort(r,t),t+=2,o.created=n.readUint64(r,t),t+=8,o.modified=n.readUint64(r,t),t+=8,o.xMin=n.readShort(r,t),t+=2,o.yMin=n.readShort(r,t),t+=2,o.xMax=n.readShort(r,t),t+=2,o.yMax=n.readShort(r,t),t+=2,o.macStyle=n.readUshort(r,t),t+=2,o.lowestRecPPEM=n.readUshort(r,t),t+=2,o.fontDirectionHint=n.readShort(r,t),t+=2,o.indexToLocFormat=n.readShort(r,t),t+=2,o.glyphDataFormat=n.readShort(r,t),t+=2,o},e.hhea={},e.hhea.parse=function(r,t,a){var n=e._bin,o={};return n.readFixed(r,t),t+=4,o.ascender=n.readShort(r,t),t+=2,o.descender=n.readShort(r,t),t+=2,o.lineGap=n.readShort(r,t),t+=2,o.advanceWidthMax=n.readUshort(r,t),t+=2,o.minLeftSideBearing=n.readShort(r,t),t+=2,o.minRightSideBearing=n.readShort(r,t),t+=2,o.xMaxExtent=n.readShort(r,t),t+=2,o.caretSlopeRise=n.readShort(r,t),t+=2,o.caretSlopeRun=n.readShort(r,t),t+=2,o.caretOffset=n.readShort(r,t),t+=2,t+=8,o.metricDataFormat=n.readShort(r,t),t+=2,o.numberOfHMetrics=n.readUshort(r,t),t+=2,o},e.hmtx={},e.hmtx.parse=function(r,t,a,n){for(var o=e._bin,s={aWidth:[],lsBearing:[]},i=0,h=0,f=0;f<n.maxp.numGlyphs;f++)f<n.hhea.numberOfHMetrics&&(i=o.readUshort(r,t),t+=2,h=o.readShort(r,t),t+=2),s.aWidth.push(i),s.lsBearing.push(h);return s},e.kern={},e.kern.parse=function(r,t,a,n){var o=e._bin,s=o.readUshort(r,t);if(t+=2,1==s)return e.kern.parseV1(r,t-2,a,n);var i=o.readUshort(r,t);t+=2;for(var h={glyph1:[],rval:[]},f=0;f<i;f++){t+=2;a=o.readUshort(r,t);t+=2;var d=o.readUshort(r,t);t+=2;var u=d>>>8;if(0!=(u&=15))throw "unknown kern table format: "+u;t=e.kern.readFormat0(r,t,h);}return h},e.kern.parseV1=function(r,t,a,n){var o=e._bin;o.readFixed(r,t),t+=4;var s=o.readUint(r,t);t+=4;for(var i={glyph1:[],rval:[]},h=0;h<s;h++){o.readUint(r,t),t+=4;var f=o.readUshort(r,t);t+=2,o.readUshort(r,t),t+=2;var d=f>>>8;if(0!=(d&=15))throw "unknown kern table format: "+d;t=e.kern.readFormat0(r,t,i);}return i},e.kern.readFormat0=function(r,t,a){var n=e._bin,o=-1,s=n.readUshort(r,t);t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2,n.readUshort(r,t),t+=2;for(var i=0;i<s;i++){var h=n.readUshort(r,t);t+=2;var f=n.readUshort(r,t);t+=2;var d=n.readShort(r,t);t+=2,h!=o&&(a.glyph1.push(h),a.rval.push({glyph2:[],vals:[]}));var u=a.rval[a.rval.length-1];u.glyph2.push(f),u.vals.push(d),o=h;}return t},e.loca={},e.loca.parse=function(r,t,a,n){var o=e._bin,s=[],i=n.head.indexToLocFormat,h=n.maxp.numGlyphs+1;if(0==i)for(var f=0;f<h;f++)s.push(o.readUshort(r,t+(f<<1))<<1);if(1==i)for(f=0;f<h;f++)s.push(o.readUint(r,t+(f<<2)));return s},e.maxp={},e.maxp.parse=function(r,t,a){var n=e._bin,o={},s=n.readUint(r,t);return t+=4,o.numGlyphs=n.readUshort(r,t),t+=2,65536==s&&(o.maxPoints=n.readUshort(r,t),t+=2,o.maxContours=n.readUshort(r,t),t+=2,o.maxCompositePoints=n.readUshort(r,t),t+=2,o.maxCompositeContours=n.readUshort(r,t),t+=2,o.maxZones=n.readUshort(r,t),t+=2,o.maxTwilightPoints=n.readUshort(r,t),t+=2,o.maxStorage=n.readUshort(r,t),t+=2,o.maxFunctionDefs=n.readUshort(r,t),t+=2,o.maxInstructionDefs=n.readUshort(r,t),t+=2,o.maxStackElements=n.readUshort(r,t),t+=2,o.maxSizeOfInstructions=n.readUshort(r,t),t+=2,o.maxComponentElements=n.readUshort(r,t),t+=2,o.maxComponentDepth=n.readUshort(r,t),t+=2),o},e.name={},e.name.parse=function(r,t,a){var n=e._bin,o={};n.readUshort(r,t),t+=2;var s=n.readUshort(r,t);t+=2,n.readUshort(r,t);for(var i,h=["copyright","fontFamily","fontSubfamily","ID","fullName","version","postScriptName","trademark","manufacturer","designer","description","urlVendor","urlDesigner","licence","licenceURL","---","typoFamilyName","typoSubfamilyName","compatibleFull","sampleText","postScriptCID","wwsFamilyName","wwsSubfamilyName","lightPalette","darkPalette"],f=t+=2,d=0;d<s;d++){var u=n.readUshort(r,t);t+=2;var l=n.readUshort(r,t);t+=2;var v=n.readUshort(r,t);t+=2;var c=n.readUshort(r,t);t+=2;var p=n.readUshort(r,t);t+=2;var U=n.readUshort(r,t);t+=2;var g,S=h[c],m=f+12*s+U;if(0==u)g=n.readUnicode(r,m,p/2);else if(3==u&&0==l)g=n.readUnicode(r,m,p/2);else if(0==l)g=n.readASCII(r,m,p);else if(1==l)g=n.readUnicode(r,m,p/2);else if(3==l)g=n.readUnicode(r,m,p/2);else {if(1!=u)throw "unknown encoding "+l+", platformID: "+u;g=n.readASCII(r,m,p),console.debug("reading unknown MAC encoding "+l+" as ASCII");}var b="p"+u+","+v.toString(16);null==o[b]&&(o[b]={}),o[b][void 0!==S?S:c]=g,o[b]._lang=v;}for(var y in o)if(null!=o[y].postScriptName&&1033==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&0==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName&&3084==o[y]._lang)return o[y];for(var y in o)if(null!=o[y].postScriptName)return o[y];for(var y in o){i=y;break}return console.debug("returning name table with languageID "+o[i]._lang),o[i]},e["OS/2"]={},e["OS/2"].parse=function(r,t,a){var n=e._bin.readUshort(r,t);t+=2;var o={};if(0==n)e["OS/2"].version0(r,t,o);else if(1==n)e["OS/2"].version1(r,t,o);else if(2==n||3==n||4==n)e["OS/2"].version2(r,t,o);else {if(5!=n)throw "unknown OS/2 table version: "+n;e["OS/2"].version5(r,t,o);}return o},e["OS/2"].version0=function(r,t,a){var n=e._bin;return a.xAvgCharWidth=n.readShort(r,t),t+=2,a.usWeightClass=n.readUshort(r,t),t+=2,a.usWidthClass=n.readUshort(r,t),t+=2,a.fsType=n.readUshort(r,t),t+=2,a.ySubscriptXSize=n.readShort(r,t),t+=2,a.ySubscriptYSize=n.readShort(r,t),t+=2,a.ySubscriptXOffset=n.readShort(r,t),t+=2,a.ySubscriptYOffset=n.readShort(r,t),t+=2,a.ySuperscriptXSize=n.readShort(r,t),t+=2,a.ySuperscriptYSize=n.readShort(r,t),t+=2,a.ySuperscriptXOffset=n.readShort(r,t),t+=2,a.ySuperscriptYOffset=n.readShort(r,t),t+=2,a.yStrikeoutSize=n.readShort(r,t),t+=2,a.yStrikeoutPosition=n.readShort(r,t),t+=2,a.sFamilyClass=n.readShort(r,t),t+=2,a.panose=n.readBytes(r,t,10),t+=10,a.ulUnicodeRange1=n.readUint(r,t),t+=4,a.ulUnicodeRange2=n.readUint(r,t),t+=4,a.ulUnicodeRange3=n.readUint(r,t),t+=4,a.ulUnicodeRange4=n.readUint(r,t),t+=4,a.achVendID=[n.readInt8(r,t),n.readInt8(r,t+1),n.readInt8(r,t+2),n.readInt8(r,t+3)],t+=4,a.fsSelection=n.readUshort(r,t),t+=2,a.usFirstCharIndex=n.readUshort(r,t),t+=2,a.usLastCharIndex=n.readUshort(r,t),t+=2,a.sTypoAscender=n.readShort(r,t),t+=2,a.sTypoDescender=n.readShort(r,t),t+=2,a.sTypoLineGap=n.readShort(r,t),t+=2,a.usWinAscent=n.readUshort(r,t),t+=2,a.usWinDescent=n.readUshort(r,t),t+=2},e["OS/2"].version1=function(r,t,a){var n=e._bin;return t=e["OS/2"].version0(r,t,a),a.ulCodePageRange1=n.readUint(r,t),t+=4,a.ulCodePageRange2=n.readUint(r,t),t+=4},e["OS/2"].version2=function(r,t,a){var n=e._bin;return t=e["OS/2"].version1(r,t,a),a.sxHeight=n.readShort(r,t),t+=2,a.sCapHeight=n.readShort(r,t),t+=2,a.usDefault=n.readUshort(r,t),t+=2,a.usBreak=n.readUshort(r,t),t+=2,a.usMaxContext=n.readUshort(r,t),t+=2},e["OS/2"].version5=function(r,t,a){var n=e._bin;return t=e["OS/2"].version2(r,t,a),a.usLowerOpticalPointSize=n.readUshort(r,t),t+=2,a.usUpperOpticalPointSize=n.readUshort(r,t),t+=2},e.post={},e.post.parse=function(r,t,a){var n=e._bin,o={};return o.version=n.readFixed(r,t),t+=4,o.italicAngle=n.readFixed(r,t),t+=4,o.underlinePosition=n.readShort(r,t),t+=2,o.underlineThickness=n.readShort(r,t),t+=2,o},null==e&&(e={}),null==e.U&&(e.U={}),e.U.codeToGlyph=function(r,e){var t=r.cmap,a=-1;if(null!=t.p0e4?a=t.p0e4:null!=t.p3e1?a=t.p3e1:null!=t.p1e0?a=t.p1e0:null!=t.p0e3&&(a=t.p0e3),-1==a)throw "no familiar platform and encoding!";var n=t.tables[a];if(0==n.format)return e>=n.map.length?0:n.map[e];if(4==n.format){for(var o=-1,s=0;s<n.endCount.length;s++)if(e<=n.endCount[s]){o=s;break}if(-1==o)return 0;if(n.startCount[o]>e)return 0;return 65535&(0!=n.idRangeOffset[o]?n.glyphIdArray[e-n.startCount[o]+(n.idRangeOffset[o]>>1)-(n.idRangeOffset.length-o)]:e+n.idDelta[o])}if(12==n.format){if(e>n.groups[n.groups.length-1][1])return 0;for(s=0;s<n.groups.length;s++){var i=n.groups[s];if(i[0]<=e&&e<=i[1])return i[2]+(e-i[0])}return 0}throw "unknown cmap table format "+n.format},e.U.glyphToPath=function(r,t){var a={cmds:[],crds:[]};if(r.SVG&&r.SVG.entries[t]){var n=r.SVG.entries[t];return null==n?a:("string"==typeof n&&(n=e.SVG.toPath(n),r.SVG.entries[t]=n),n)}if(r.CFF){var o={x:0,y:0,stack:[],nStems:0,haveWidth:!1,width:r.CFF.Private?r.CFF.Private.defaultWidthX:0,open:!1},s=r.CFF,i=r.CFF.Private;if(s.ROS){for(var h=0;s.FDSelect[h+2]<=t;)h+=2;i=s.FDArray[s.FDSelect[h+1]].Private;}e.U._drawCFF(r.CFF.CharStrings[t],o,s,i,a);}else r.glyf&&e.U._drawGlyf(t,r,a);return a},e.U._drawGlyf=function(r,t,a){var n=t.glyf[r];null==n&&(n=t.glyf[r]=e.glyf._parseGlyf(t,r)),null!=n&&(n.noc>-1?e.U._simpleGlyph(n,a):e.U._compoGlyph(n,t,a));},e.U._simpleGlyph=function(r,t){for(var a=0;a<r.noc;a++){for(var n=0==a?0:r.endPts[a-1]+1,o=r.endPts[a],s=n;s<=o;s++){var i=s==n?o:s-1,h=s==o?n:s+1,f=1&r.flags[s],d=1&r.flags[i],u=1&r.flags[h],l=r.xs[s],v=r.ys[s];if(s==n)if(f){if(!d){e.U.P.moveTo(t,l,v);continue}e.U.P.moveTo(t,r.xs[i],r.ys[i]);}else d?e.U.P.moveTo(t,r.xs[i],r.ys[i]):e.U.P.moveTo(t,(r.xs[i]+l)/2,(r.ys[i]+v)/2);f?d&&e.U.P.lineTo(t,l,v):u?e.U.P.qcurveTo(t,l,v,r.xs[h],r.ys[h]):e.U.P.qcurveTo(t,l,v,(l+r.xs[h])/2,(v+r.ys[h])/2);}e.U.P.closePath(t);}},e.U._compoGlyph=function(r,t,a){for(var n=0;n<r.parts.length;n++){var o={cmds:[],crds:[]},s=r.parts[n];e.U._drawGlyf(s.glyphIndex,t,o);for(var i=s.m,h=0;h<o.crds.length;h+=2){var f=o.crds[h],d=o.crds[h+1];a.crds.push(f*i.a+d*i.b+i.tx),a.crds.push(f*i.c+d*i.d+i.ty);}for(h=0;h<o.cmds.length;h++)a.cmds.push(o.cmds[h]);}},e.U._getGlyphClass=function(r,t){var a=e._lctf.getInterval(t,r);return -1==a?0:t[a+2]},e.U.getPairAdjustment=function(r,t,a){var n=!1;if(r.GPOS)for(var o=r.GPOS,s=o.lookupList,i=o.featureList,h=[],f=0;f<i.length;f++){var d=i[f];if("kern"==d.tag){n=!0;for(var u=0;u<d.tab.length;u++)if(!h[d.tab[u]]){h[d.tab[u]]=!0;for(var l=s[d.tab[u]],v=0;v<l.tabs.length;v++)if(null!=l.tabs[v]){var c,p=l.tabs[v];if(!p.coverage||-1!=(c=e._lctf.coverageIndex(p.coverage,t)))if(1==l.ltype);else if(2==l.ltype){var U=null;if(1==p.fmt){var g=p.pairsets[c];for(f=0;f<g.length;f++)g[f].gid2==a&&(U=g[f]);}else if(2==p.fmt){var S=e.U._getGlyphClass(t,p.classDef1),m=e.U._getGlyphClass(a,p.classDef2);U=p.matrix[S][m];}if(U){var b=0;return U.val1&&U.val1[2]&&(b+=U.val1[2]),U.val2&&U.val2[0]&&(b+=U.val2[0]),b}}}}}}if(r.kern&&!n){var y=r.kern.glyph1.indexOf(t);if(-1!=y){var F=r.kern.rval[y].glyph2.indexOf(a);if(-1!=F)return r.kern.rval[y].vals[F]}}return 0},e.U._applySubs=function(r,t,a,n){for(var o=r.length-t-1,s=0;s<a.tabs.length;s++)if(null!=a.tabs[s]){var i,h=a.tabs[s];if(!h.coverage||-1!=(i=e._lctf.coverageIndex(h.coverage,r[t])))if(1==a.ltype)r[t],1==h.fmt?r[t]=r[t]+h.delta:r[t]=h.newg[i];else if(4==a.ltype)for(var f=h.vals[i],d=0;d<f.length;d++){var u=f[d],l=u.chain.length;if(!(l>o)){for(var v=!0,c=0,p=0;p<l;p++){for(;-1==r[t+c+(1+p)];)c++;u.chain[p]!=r[t+c+(1+p)]&&(v=!1);}if(v){r[t]=u.nglyph;for(p=0;p<l+c;p++)r[t+p+1]=-1;break}}}else if(5==a.ltype&&2==h.fmt)for(var U=e._lctf.getInterval(h.cDef,r[t]),g=h.cDef[U+2],S=h.scset[g],m=0;m<S.length;m++){var b=S[m],y=b.input;if(!(y.length>o)){for(v=!0,p=0;p<y.length;p++){var F=e._lctf.getInterval(h.cDef,r[t+1+p]);if(-1==U&&h.cDef[F+2]!=y[p]){v=!1;break}}if(v){var _=b.substLookupRecords;for(d=0;d<_.length;d+=2)_[d],_[d+1];}}}else if(6==a.ltype&&3==h.fmt){if(!e.U._glsCovered(r,h.backCvg,t-h.backCvg.length))continue;if(!e.U._glsCovered(r,h.inptCvg,t))continue;if(!e.U._glsCovered(r,h.ahedCvg,t+h.inptCvg.length))continue;var C=h.lookupRec;for(m=0;m<C.length;m+=2){U=C[m];var x=n[C[m+1]];e.U._applySubs(r,t+U,x,n);}}}},e.U._glsCovered=function(r,t,a){for(var n=0;n<t.length;n++){if(-1==e._lctf.coverageIndex(t[n],r[a+n]))return !1}return !0},e.U.glyphsToPath=function(r,t,a){for(var n={cmds:[],crds:[]},o=0,s=0;s<t.length;s++){var i=t[s];if(-1!=i){for(var h=s<t.length-1&&-1!=t[s+1]?t[s+1]:0,f=e.U.glyphToPath(r,i),d=0;d<f.crds.length;d+=2)n.crds.push(f.crds[d]+o),n.crds.push(f.crds[d+1]);a&&n.cmds.push(a);for(d=0;d<f.cmds.length;d++)n.cmds.push(f.cmds[d]);a&&n.cmds.push("X"),o+=r.hmtx.aWidth[i],s<t.length-1&&(o+=e.U.getPairAdjustment(r,i,h));}}return n},e.U.P={},e.U.P.moveTo=function(r,e,t){r.cmds.push("M"),r.crds.push(e,t);},e.U.P.lineTo=function(r,e,t){r.cmds.push("L"),r.crds.push(e,t);},e.U.P.curveTo=function(r,e,t,a,n,o,s){r.cmds.push("C"),r.crds.push(e,t,a,n,o,s);},e.U.P.qcurveTo=function(r,e,t,a,n){r.cmds.push("Q"),r.crds.push(e,t,a,n);},e.U.P.closePath=function(r){r.cmds.push("Z");},e.U._drawCFF=function(r,t,a,n,o){for(var s=t.stack,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open,u=0,l=t.x,v=t.y,c=0,p=0,U=0,g=0,S=0,m=0,b=0,y=0,F=0,_=0,C={val:0,size:0};u<r.length;){e.CFF.getCharString(r,u,C);var x=C.val;if(u+=C.size,"o1"==x||"o18"==x)s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;else if("o3"==x||"o23"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0;}else if("o4"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),d&&e.U.P.closePath(o),v+=s.pop(),e.U.P.moveTo(o,l,v),d=!0;else if("o5"==x)for(;s.length>0;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);else if("o6"==x||"o7"==x)for(var P=s.length,I="o6"==x,w=0;w<P;w++){var O=s.shift();I?l+=O:v+=O,I=!I,e.U.P.lineTo(o,l,v);}else if("o8"==x||"o24"==x){P=s.length;for(var T=0;T+6<=P;)c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v),T+=6;"o24"==x&&(l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v));}else {if("o11"==x)break;if("o1234"==x||"o1235"==x||"o1236"==x||"o1237"==x)"o1234"==x&&(p=v,U=(c=l+s.shift())+s.shift(),_=g=p+s.shift(),m=g,y=v,l=(b=(S=(F=U+s.shift())+s.shift())+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1235"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),l=b+s.shift(),v=y+s.shift(),s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1236"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),_=g=p+s.shift(),m=g,b=(S=(F=U+s.shift())+s.shift())+s.shift(),y=m+s.shift(),l=b+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v)),"o1237"==x&&(c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),F=U+s.shift(),_=g+s.shift(),S=F+s.shift(),m=_+s.shift(),b=S+s.shift(),y=m+s.shift(),Math.abs(b-l)>Math.abs(y-v)?l=b+s.shift():v=y+s.shift(),e.U.P.curveTo(o,c,p,U,g,F,_),e.U.P.curveTo(o,S,m,b,y,l,v));else if("o14"==x){if(s.length>0&&!h&&(f=s.shift()+a.nominalWidthX,h=!0),4==s.length){var k=s.shift(),G=s.shift(),D=s.shift(),B=s.shift(),L=e.CFF.glyphBySE(a,D),R=e.CFF.glyphBySE(a,B);e.U._drawCFF(a.CharStrings[L],t,a,n,o),t.x=k,t.y=G,e.U._drawCFF(a.CharStrings[R],t,a,n,o);}d&&(e.U.P.closePath(o),d=!1);}else if("o19"==x||"o20"==x){s.length%2!=0&&!h&&(f=s.shift()+n.nominalWidthX),i+=s.length>>1,s.length=0,h=!0,u+=i+7>>3;}else if("o21"==x)s.length>2&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),v+=s.pop(),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o22"==x)s.length>1&&!h&&(f=s.shift()+n.nominalWidthX,h=!0),l+=s.pop(),d&&e.U.P.closePath(o),e.U.P.moveTo(o,l,v),d=!0;else if("o25"==x){for(;s.length>6;)l+=s.shift(),v+=s.shift(),e.U.P.lineTo(o,l,v);c=l+s.shift(),p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);}else if("o26"==x)for(s.length%2&&(l+=s.shift());s.length>0;)c=l,p=v+s.shift(),l=U=c+s.shift(),v=(g=p+s.shift())+s.shift(),e.U.P.curveTo(o,c,p,U,g,l,v);else if("o27"==x)for(s.length%2&&(v+=s.shift());s.length>0;)p=v,U=(c=l+s.shift())+s.shift(),g=p+s.shift(),l=U+s.shift(),v=g,e.U.P.curveTo(o,c,p,U,g,l,v);else if("o10"==x||"o29"==x){var A="o10"==x?n:a;if(0==s.length)console.debug("error: empty stack");else {var W=s.pop(),M=A.Subrs[W+A.Bias];t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d,e.U._drawCFF(M,t,a,n,o),l=t.x,v=t.y,i=t.nStems,h=t.haveWidth,f=t.width,d=t.open;}}else if("o30"==x||"o31"==x){var V=s.length,N=(T=0,"o31"==x);for(T+=V-(P=-3&V);T<P;)N?(p=v,U=(c=l+s.shift())+s.shift(),v=(g=p+s.shift())+s.shift(),P-T==5?(l=U+s.shift(),T++):l=U,N=!1):(c=l,p=v+s.shift(),U=c+s.shift(),g=p+s.shift(),l=U+s.shift(),P-T==5?(v=g+s.shift(),T++):v=g,N=!0),e.U.P.curveTo(o,c,p,U,g,l,v),T+=4;}else {if("o"==(x+"").charAt(0))throw console.debug("Unknown operation: "+x,r),x;s.push(x);}}}t.x=l,t.y=v,t.nStems=i,t.haveWidth=h,t.width=f,t.open=d;};var t=e,a={Typr:t};return r.Typr=t,r.default=a,Object.defineProperty(r,"__esModule",{value:!0}),r}({}).Typr}
 
   /*!
   Custom bundle of woff2otf (https://github.com/arty-name/woff2otf) with fflate
@@ -3499,6 +2731,25 @@ void main() {
    * Also adds support for WOFF files (not WOFF2).
    */
 
+  /**
+   * @typedef ParsedFont
+   * @property {number} ascender
+   * @property {number} descender
+   * @property {number} xHeight
+   * @property {(number) => boolean} supportsCodePoint
+   * @property {(text:string, fontSize:number, letterSpacing:number, callback) => number} forEachGlyph
+   * @property {number} lineGap
+   * @property {number} capHeight
+   * @property {number} unitsPerEm
+   */
+
+  /**
+   * @typedef {(buffer: ArrayBuffer) => ParsedFont} FontParser
+   */
+
+  /**
+   * @returns {FontParser}
+   */
   function parserFactory(Typr, woff2otf) {
     const cmdArgLengths = {
       M: 2,
@@ -3640,6 +2891,9 @@ void main() {
       }
     }
 
+    /**
+     * @returns ParsedFont
+     */
     function wrapFontObj(typrFont) {
       const glyphMap = Object.create(null);
 
@@ -3648,6 +2902,7 @@ void main() {
       const unitsPerEm = typrFont.head.unitsPerEm;
       const ascender = firstNum(os2 && os2.sTypoAscender, hhea && hhea.ascender, unitsPerEm);
 
+      /** @type ParsedFont */
       const fontObj = {
         unitsPerEm,
         ascender,
@@ -3655,6 +2910,9 @@ void main() {
         capHeight: firstNum(os2 && os2.sCapHeight, ascender),
         xHeight: firstNum(os2 && os2.sxHeight, ascender),
         lineGap: firstNum(os2 && os2.sTypoLineGap, hhea && hhea.lineGap),
+        supportsCodePoint(code) {
+          return Typr.U.codeToGlyph(typrFont, code) > 0
+        },
         forEachGlyph(text, fontSize, letterSpacing, callback) {
           let glyphX = 0;
           const fontScale = 1 / fontObj.unitsPerEm * fontSize;
@@ -3750,6 +3008,9 @@ void main() {
       return fontObj
     }
 
+    /**
+     * @type FontParser
+     */
     return function parse(buffer) {
       // Look to see if we have a WOFF file and convert it if so:
       const peek = new Uint8Array(buffer, 0, 4);
@@ -3774,12 +3035,1156 @@ void main() {
     }
   });
 
+  /*!
+  Custom bundle of @unicode-font-resolver/client v1.0.0 (https://github.com/lojjic/unicode-font-resolver)
+  for use in Troika text rendering. 
+  Original MIT license applies
+  */
+  function unicodeFontResolverClientFactory(){return function(t){var n=function(){this.buckets=new Map;};n.prototype.add=function(t){var n=t>>5;this.buckets.set(n,(this.buckets.get(n)||0)|1<<(31&t));},n.prototype.has=function(t){var n=this.buckets.get(t>>5);return void 0!==n&&0!=(n&1<<(31&t))},n.prototype.serialize=function(){var t=[];return this.buckets.forEach((function(n,r){t.push((+r).toString(36)+":"+n.toString(36));})),t.join(",")},n.prototype.deserialize=function(t){var n=this;this.buckets.clear(),t.split(",").forEach((function(t){var r=t.split(":");n.buckets.set(parseInt(r[0],36),parseInt(r[1],36));}));};var r=Math.pow(2,8),e=r-1,o=~e;function i(t){var n=function(t){return t&o}(t).toString(16),e=function(t){return (t&o)+r-1}(t).toString(16);return "codepoint-index/plane"+(t>>16)+"/"+n+"-"+e+".json"}function a(t,n){var r=t&e,o=n.codePointAt(r/6|0);return 0!=((o=(o||48)-48)&1<<r%6)}function u(t,n){var r;(r=t,r.replace(/U\+/gi,"").replace(/^,+|,+$/g,"").split(/,+/).map((function(t){return t.split("-").map((function(t){return parseInt(t.trim(),16)}))}))).forEach((function(t){var r=t[0],e=t[1];void 0===e&&(e=r),n(r,e);}));}function s(t,n){u(t,(function(t,r){for(var e=t;e<=r;e++)n(e);}));}var c={},f={},l=new WeakMap,v="https://cdn.jsdelivr.net/gh/lojjic/unicode-font-resolver@v1.0.0/packages/data";function d(t){var r=l.get(t);return r||(r=new n,s(t.ranges,(function(t){return r.add(t)})),l.set(t,r)),r}var h,p=new Map;function g(t,n,r){return t[n]?n:t[r]?r:function(t){for(var n in t)return n}(t)}function w(t,n){var r=n;if(!t.includes(r)){r=1/0;for(var e=0;e<t.length;e++)Math.abs(t[e]-n)<Math.abs(r-n)&&(r=t[e]);}return r}function y(t){return h||(h=new Set,s("9-D,20,85,A0,1680,2000-200A,2028-202F,205F,3000",(function(t){h.add(t);}))),h.has(t)}return t.CodePointSet=n,t.clearCache=function(){c={},f={};},t.getFontsForString=function(t,n){void 0===n&&(n={});var r=n.lang;void 0===r&&(r="en");var e=n.category;void 0===e&&(e="sans-serif");var o=n.style;void 0===o&&(o="normal");var u=n.weight;void 0===u&&(u=400);var s=(n.dataUrl||v).replace(/\/$/g,""),l=new Map,h=new Uint8Array(t.length),m={},b={},k=new Array(t.length),A=new Map,M=!1;function j(t){var n=p.get(t);return n||(n=fetch(s+"/"+t).then((function(t){if(!t.ok)throw new Error(t.statusText);return t.json().then((function(t){if(!Array.isArray(t)||1!==t[0])throw new Error("Incorrect schema version; need 1, got "+t[0]);return t[1]}))})).catch((function(n){if(s!==v)return M||(console.error('unicode-font-resolver: Failed loading from dataUrl "'+s+'", trying default CDN. '+n.message),M=!0),s=v,p.delete(t),j(t);throw n})),p.set(t,n)),n}for(var P=function(n){var r=t.codePointAt(n),e=i(r);k[n]=e,c[e]||A.has(e)||A.set(e,j(e).then((function(t){c[e]=t;}))),r>65535&&(n++,S=n);},S=0;S<t.length;S++)P(S);return Promise.all(A.values()).then((function(){A.clear();for(var n=function(n){var o=t.codePointAt(n),i=null,u=c[k[n]];t:for(var s in u){var l=b[s];if(void 0===l&&(l=b[s]=new RegExp(s).test(r)),l)for(var v in u[s])if(a(o,u[s][v])){i=v;break t}}i||(console.debug("No font coverage for U+"+o.toString(16)),i="latin"),k[n]=i,f[i]||A.has(i)||A.set(i,j("font-meta/"+i+".json").then((function(t){f[i]=t;}))),o>65535&&(n++,e=n);},e=0;e<t.length;e++)n(e);return Promise.all(A.values())})).then((function(){for(var n,r=null,i=0;i<t.length;i++){var a=t.codePointAt(i);if(r&&(y(a)||d(r).has(a)))h[i]=h[i-1];else {r=f[k[i]];var c=m[r.id];if(!c){var v=r.typeforms,p=g(v,e,"sans-serif"),b=g(v[p],o,"normal"),A=w(null===(n=v[p])||void 0===n?void 0:n[b],u);c=m[r.id]=s+"/font-files/"+r.id+"/"+p+"."+b+"."+A+".woff";}var M=l.get(c);null==M&&(M=l.size,l.set(c,M)),h[i]=M;}a>65535&&(i++,h[i]=h[i-1]);}return {fontUrls:Array.from(l.keys()),chars:h}}))},Object.defineProperty(t,"__esModule",{value:!0}),t}({})}
+
+  /**
+   * @typedef {string | {src:string, label?:string, unicodeRange?:string, lang?:string}} UserFont
+   */
+
+  /**
+   * @typedef {ClientOptions} FontResolverOptions
+   * @property {Array<UserFont>|UserFont} [fonts]
+   * @property {'normal'|'italic'} [style]
+   * @property {'normal'|'bold'|number} [style]
+   * @property {string} [unicodeFontsURL]
+   */
+
+  /**
+   * @typedef {Object} FontResolverResult
+   * @property {Uint8Array} chars
+   * @property {Array<ParsedFont & {src:string}>} fonts
+   */
+
+  /**
+   * @typedef {function} FontResolver
+   * @param {string} text
+   * @param {(FontResolverResult) => void} callback
+   * @param {FontResolverOptions} [options]
+   */
+
+  /**
+   * Factory for the FontResolver function.
+   * @param {FontParser} fontParser
+   * @param {{getFontsForString: function, CodePointSet: function}} unicodeFontResolverClient
+   * @return {FontResolver}
+   */
+  function createFontResolver(fontParser, unicodeFontResolverClient) {
+    /**
+     * @type {Record<string, ParsedFont>}
+     */
+    const parsedFonts = Object.create(null);
+
+    /**
+     * @type {Record<string, Array<(ParsedFont) => void>>}
+     */
+    const loadingFonts = Object.create(null);
+
+    /**
+     * Load a given font url
+     */
+    function doLoadFont(url, callback) {
+      const onError = err => {
+        console.error(`Failure loading font ${url}`, err);
+      };
+      try {
+        const request = new XMLHttpRequest();
+        request.open('get', url, true);
+        request.responseType = 'arraybuffer';
+        request.onload = function () {
+          if (request.status >= 400) {
+            onError(new Error(request.statusText));
+          }
+          else if (request.status > 0) {
+            try {
+              const fontObj = fontParser(request.response);
+              fontObj.src = url;
+              callback(fontObj);
+            } catch (e) {
+              onError(e);
+            }
+          }
+        };
+        request.onerror = onError;
+        request.send();
+      } catch(err) {
+        onError(err);
+      }
+    }
+
+
+    /**
+     * Load a given font url if needed, invoking a callback when it's loaded. If already
+     * loaded, the callback will be called synchronously.
+     * @param {string} fontUrl
+     * @param {(font: ParsedFont) => void} callback
+     */
+    function loadFont(fontUrl, callback) {
+      let font = parsedFonts[fontUrl];
+      if (font) {
+        callback(font);
+      } else if (loadingFonts[fontUrl]) {
+        loadingFonts[fontUrl].push(callback);
+      } else {
+        loadingFonts[fontUrl] = [callback];
+        doLoadFont(fontUrl, fontObj => {
+          fontObj.src = fontUrl;
+          parsedFonts[fontUrl] = fontObj;
+          loadingFonts[fontUrl].forEach(cb => cb(fontObj));
+          delete loadingFonts[fontUrl];
+        });
+      }
+    }
+
+    /**
+     * For a given string of text, determine which fonts are required to fully render it and
+     * ensure those fonts are loaded.
+     */
+    return function (text, callback, {
+      lang,
+      fonts: userFonts = [],
+      style = 'normal',
+      weight = 'normal',
+      unicodeFontsURL
+    } = {}) {
+      const charResolutions = new Uint8Array(text.length);
+      const fontResolutions = [];
+      if (!text.length) {
+        allDone();
+      }
+
+      const fontIndices = new Map();
+      const fallbackRanges = []; // [[start, end], ...]
+
+      if (style !== 'italic') style = 'normal';
+      if (typeof weight !== 'number') {
+        weight = weight === 'bold' ? 700 : 400;
+      }
+
+      if (userFonts && !Array.isArray(userFonts)) {
+        userFonts = [userFonts];
+      }
+      userFonts = userFonts.slice()
+        // filter by language
+        .filter(def => !def.lang || def.lang.test(lang))
+        // switch order for easier iteration
+        .reverse();
+      if (userFonts.length) {
+        const UNKNOWN = 0;
+        const RESOLVED = 1;
+        const NEEDS_FALLBACK = 2;
+        let prevCharResult = UNKNOWN
+
+        ;(function resolveUserFonts (startIndex = 0) {
+          for (let i = startIndex, iLen = text.length; i < iLen; i++) {
+            const codePoint = text.codePointAt(i);
+            // Carry previous character's result forward if:
+            // - it resolved to a font that also covers this character
+            // - this character is whitespace
+            if (
+              (prevCharResult === RESOLVED && fontResolutions[charResolutions[i - 1]].supportsCodePoint(codePoint)) ||
+              /\s/.test(text[i])
+            ) {
+              charResolutions[i] = charResolutions[i - 1];
+              if (prevCharResult === NEEDS_FALLBACK) {
+                fallbackRanges[fallbackRanges.length - 1][1] = i;
+              }
+            }  else {
+              for (let j = charResolutions[i], jLen = userFonts.length; j <= jLen; j++) {
+                if (j === jLen) {
+                  // none of the user fonts matched; needs fallback
+                  const range = prevCharResult === NEEDS_FALLBACK ?
+                    fallbackRanges[fallbackRanges.length - 1] :
+                    (fallbackRanges[fallbackRanges.length] = [i, i]);
+                  range[1] = i;
+                  prevCharResult = NEEDS_FALLBACK;
+                } else {
+                  charResolutions[i] = j;
+                  const { src, unicodeRange } = userFonts[j];
+                  // filter by optional explicit unicode ranges
+                  if (!unicodeRange || isCodeInRanges(codePoint, unicodeRange)) {
+                    const fontObj = parsedFonts[src];
+                    // font not yet loaded, load it and resume
+                    if (!fontObj) {
+                      loadFont(src, () => {
+                        resolveUserFonts(i);
+                      });
+                      return;
+                    }
+                    // if the font actually contains a glyph for this char, lock it in
+                    if (fontObj.supportsCodePoint(codePoint)) {
+                      let fontIndex = fontIndices.get(fontObj);
+                      if (typeof fontIndex !== 'number') {
+                        fontIndex = fontResolutions.length;
+                        fontResolutions.push(fontObj);
+                        fontIndices.set(fontObj, fontIndex);
+                      }
+                      charResolutions[i] = fontIndex;
+                      prevCharResult = RESOLVED;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+
+            if (codePoint > 0xffff && i + 1 < iLen) {
+              charResolutions[i + 1] = charResolutions[i];
+              i++;
+              if (prevCharResult === NEEDS_FALLBACK) {
+                fallbackRanges[fallbackRanges.length - 1][1] = i;
+              }
+            }
+          }
+          resolveFallbacks();
+        })();
+      } else {
+        fallbackRanges.push([0, text.length - 1]);
+        resolveFallbacks();
+      }
+
+      function resolveFallbacks() {
+        if (fallbackRanges.length) {
+          // Combine all fallback substrings into a single string for querying
+          const fallbackString = fallbackRanges.map(range => text.substring(range[0], range[1] + 1)).join('\n');
+          unicodeFontResolverClient.getFontsForString(fallbackString, {
+            lang,
+            style,
+            weight,
+            dataUrl: unicodeFontsURL
+          }).then(({fontUrls, chars}) => {
+            // Extract results and put them back in the main array
+            const fontIndexOffset = fontResolutions.length;
+            let charIdx = 0;
+            fallbackRanges.forEach(range => {
+              for (let i = 0, endIdx = range[1] - range[0]; i <= endIdx; i++) {
+                charResolutions[range[0] + i] = chars[charIdx++] + fontIndexOffset;
+              }
+              charIdx++; //skip segment separator
+            });
+
+            // Load and parse the fallback fonts - avoiding Promise here to prevent polyfills in the worker
+            let loadedCount = 0;
+            fontUrls.forEach((url, i) => {
+              loadFont(url, fontObj => {
+                fontResolutions[i + fontIndexOffset] = fontObj;
+                if (++loadedCount === fontUrls.length) {
+                  allDone();
+                }
+              });
+            });
+          });
+        } else {
+          allDone();
+        }
+      }
+
+      function allDone() {
+        callback({
+          chars: charResolutions,
+          fonts: fontResolutions
+        });
+      }
+
+      function isCodeInRanges(code, ranges) {
+        // todo optimize search - CodePointSet from unicode-font-resolver?
+        for (let k = 0; k < ranges.length; k++) {
+          const [start, end = start] = ranges[k];
+          if (start <= code && code <= end) {
+            return true
+          }
+        }
+        return false
+      }
+    }
+  }
+
+  const fontResolverWorkerModule = /*#__PURE__*/defineWorkerModule({
+    name: 'FontResolver',
+    dependencies: [
+      createFontResolver,
+      workerModule,
+      unicodeFontResolverClientFactory,
+    ],
+    init(createFontResolver, fontParser, unicodeFontResolverClientFactory) {
+      return createFontResolver(fontParser, unicodeFontResolverClientFactory());
+    }
+  });
+
+  /**
+   * @typedef {number|'left'|'center'|'right'} AnchorXValue
+   */
+  /**
+   * @typedef {number|'top'|'top-baseline'|'top-cap'|'top-ex'|'middle'|'bottom-baseline'|'bottom'} AnchorYValue
+   */
+
+  /**
+   * @typedef {object} TypesetParams
+   * @property {string} text
+   * @property {UserFont|UserFont[]} [font]
+   * @property {string} [lang='en']
+   * @property {number} [sdfGlyphSize=64]
+   * @property {number} [fontSize=1]
+   * @property {number|'normal'|'bold'} [fontWeight='normal']
+   * @property {'normal'|'italic'} [fontStyle='normal']
+   * @property {number} [letterSpacing=0]
+   * @property {'normal'|number} [lineHeight='normal']
+   * @property {number} [maxWidth]
+   * @property {'ltr'|'rtl'} [direction='ltr']
+   * @property {string} [textAlign='left']
+   * @property {number} [textIndent=0]
+   * @property {'normal'|'nowrap'} [whiteSpace='normal']
+   * @property {'normal'|'break-word'} [overflowWrap='normal']
+   * @property {AnchorXValue} [anchorX=0]
+   * @property {AnchorYValue} [anchorY=0]
+   * @property {boolean} [metricsOnly=false]
+   * @property {string} [unicodeFontsURL]
+   * @property {FontResolverResult} [preResolvedFonts]
+   * @property {boolean} [includeCaretPositions=false]
+   * @property {number} [chunkedBoundsSize=8192]
+   * @property {{[rangeStartIndex]: number}} [colorRanges]
+   */
+
+  /**
+   * @typedef {object} TypesetResult
+   * @property {Uint16Array} glyphIds id for each glyph, specific to that glyph's font
+   * @property {Uint8Array} glyphFontIndices index into fontData for each glyph
+   * @property {Float32Array} glyphPositions x,y of each glyph's origin in layout
+   * @property {{[font]: {[glyphId]: {path: string, pathBounds: number[]}}}} glyphData data about each glyph appearing in the text
+   * @property {TypesetFontData[]} fontData data about each font used in the text
+   * @property {Float32Array} [caretPositions] startX,endX,bottomY caret positions for each char
+   * @property {Uint8Array} [glyphColors] color for each glyph, if color ranges supplied
+   *         chunkedBounds, //total rects per (n=chunkedBoundsSize) consecutive glyphs
+   *         fontSize, //calculated em height
+   *         topBaseline: anchorYOffset + lines[0].baseline, //y coordinate of the top line's baseline
+   *         blockBounds: [ //bounds for the whole block of text, including vertical padding for lineHeight
+   *           anchorXOffset,
+   *           anchorYOffset - totalHeight,
+   *           anchorXOffset + maxLineWidth,
+   *           anchorYOffset
+   *         ],
+   *         visibleBounds, //total bounds of visible text paths, may be larger or smaller than blockBounds
+   *         timings
+   */
+
+  /**
+   * @typedef {object} TypesetFontData
+   * @property src
+   * @property unitsPerEm
+   * @property ascender
+   * @property descender
+   * @property lineHeight
+   * @property capHeight
+   * @property xHeight
+   */
+
+  /**
+   * @typedef {function} TypesetterTypesetFunction - compute fonts and layout for some text.
+   * @param {TypesetParams} params
+   * @param {(TypesetResult) => void} callback - function called when typesetting is complete.
+   *    If the params included `preResolvedFonts`, this will be called synchronously.
+   */
+
+  /**
+   * @typedef {function} TypesetterMeasureFunction - compute width/height for some text.
+   * @param {TypesetParams} params
+   * @param {(width:number, height:number) => void} callback - function called when measurement is complete.
+   *    If the params included `preResolvedFonts`, this will be called synchronously.
+   */
+
+
+  /**
+   * Factory function that creates a self-contained environment for processing text typesetting requests.
+   *
+   * It is important that this function has no closure dependencies, so that it can be easily injected
+   * into the source for a Worker without requiring a build step or complex dependency loading. All its
+   * dependencies must be passed in at initialization.
+   *
+   * @param {FontResolver} resolveFonts - function to resolve a string to parsed fonts
+   * @param {object} bidi - the bidi.js implementation object
+   * @return {{typeset: TypesetterTypesetFunction, measure: TypesetterMeasureFunction}}
+   */
+  function createTypesetter(resolveFonts, bidi) {
+    const INF = Infinity;
+
+    // Set of Unicode Default_Ignorable_Code_Point characters, these will not produce visible glyphs
+    // eslint-disable-next-line no-misleading-character-class
+    const DEFAULT_IGNORABLE_CHARS = /[\u00AD\u034F\u061C\u115F-\u1160\u17B4-\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFF8]/;
+
+    // This regex (instead of /\s/) allows us to select all whitespace EXCEPT for non-breaking white spaces
+    const lineBreakingWhiteSpace = `[^\\S\\u00A0]`;
+
+    // Incomplete set of characters that allow line breaking after them
+    // In the future we may consider a full Unicode line breaking algorithm impl: https://www.unicode.org/reports/tr14
+    const BREAK_AFTER_CHARS = new RegExp(`${lineBreakingWhiteSpace}|[\\-\\u007C\\u00AD\\u2010\\u2012-\\u2014\\u2027\\u2056\\u2E17\\u2E40]`);
+
+    /**
+     * Load and parse all the necessary fonts to render a given string of text, then group
+     * them into consecutive runs of characters sharing a font.
+     */
+    function calculateFontRuns({text, lang, fonts, style, weight, preResolvedFonts, unicodeFontsURL}, onDone) {
+      const onResolved = ({chars, fonts: parsedFonts}) => {
+        let curRun, prevVal;
+        const runs = [];
+        for (let i = 0; i < chars.length; i++) {
+          if (chars[i] !== prevVal) {
+            prevVal = chars[i];
+            runs.push(curRun = { start: i, end: i, fontObj: parsedFonts[chars[i]]});
+          } else {
+            curRun.end = i;
+          }
+        }
+        onDone(runs);
+      };
+      if (preResolvedFonts) {
+        onResolved(preResolvedFonts);
+      } else {
+        resolveFonts(
+          text,
+          onResolved,
+          { lang, fonts, style, weight, unicodeFontsURL }
+        );
+      }
+    }
+
+    /**
+     * Main entry point.
+     * Process a text string with given font and formatting parameters, and return all info
+     * necessary to render all its glyphs.
+     * @type TypesetterTypesetFunction
+     */
+    function typeset(
+      {
+        text='',
+        font,
+        lang='en',
+        sdfGlyphSize=64,
+        fontSize=400,
+        fontWeight=1,
+        fontStyle='normal',
+        letterSpacing=0,
+        lineHeight='normal',
+        maxWidth=INF,
+        direction,
+        textAlign='left',
+        textIndent=0,
+        whiteSpace='normal',
+        overflowWrap='normal',
+        anchorX = 0,
+        anchorY = 0,
+        metricsOnly=false,
+        unicodeFontsURL,
+        preResolvedFonts=null,
+        includeCaretPositions=false,
+        chunkedBoundsSize=8192,
+        colorRanges=null
+      },
+      callback
+    ) {
+      const mainStart = now();
+      const timings = {fontLoad: 0, typesetting: 0};
+
+      // Ensure newlines are normalized
+      if (text.indexOf('\r') > -1) {
+        console.info('Typesetter: got text with \\r chars; normalizing to \\n');
+        text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      }
+
+      // Ensure we've got numbers not strings
+      fontSize = +fontSize;
+      letterSpacing = +letterSpacing;
+      maxWidth = +maxWidth;
+      lineHeight = lineHeight || 'normal';
+      textIndent = +textIndent;
+
+      calculateFontRuns({
+        text,
+        lang,
+        style: fontStyle,
+        weight: fontWeight,
+        fonts: typeof font === 'string' ? [{src: font}] : font,
+        unicodeFontsURL,
+        preResolvedFonts
+      }, runs => {
+        timings.fontLoad = now() - mainStart;
+        const hasMaxWidth = isFinite(maxWidth);
+        let glyphIds = null;
+        let glyphFontIndices = null;
+        let glyphPositions = null;
+        let glyphData = null;
+        let glyphColors = null;
+        let caretPositions = null;
+        let visibleBounds = null;
+        let chunkedBounds = null;
+        let maxLineWidth = 0;
+        let renderableGlyphCount = 0;
+        let canWrap = whiteSpace !== 'nowrap';
+        const metricsByFont = new Map(); // fontObj -> metrics
+        const typesetStart = now();
+
+        // Distribute glyphs into lines based on wrapping
+        let lineXOffset = textIndent;
+        let prevRunEndX = 0;
+        let currentLine = new TextLine();
+        const lines = [currentLine];
+        runs.forEach(run => {
+          const { fontObj } = run;
+          const { ascender, descender, unitsPerEm, lineGap, capHeight, xHeight } = fontObj;
+
+          // Calculate metrics for each font used
+          let fontData = metricsByFont.get(fontObj);
+          if (!fontData) {
+            // Find conversion between native font units and fontSize units
+            const fontSizeMult = fontSize / unitsPerEm;
+
+            // Determine appropriate value for 'normal' line height based on the font's actual metrics
+            // This does not guarantee individual glyphs won't exceed the line height, e.g. Roboto; should we use yMin/Max instead?
+            const calcLineHeight = lineHeight === 'normal' ?
+              (ascender - descender + lineGap) * fontSizeMult : lineHeight * fontSize;
+
+            // Determine line height and leading adjustments
+            const halfLeading = (calcLineHeight - (ascender - descender) * fontSizeMult) / 2;
+            const caretHeight = Math.min(calcLineHeight, (ascender - descender) * fontSizeMult);
+            const caretTop = (ascender + descender) / 2 * fontSizeMult + caretHeight / 2;
+            fontData = {
+              index: metricsByFont.size,
+              src: fontObj.src,
+              fontObj,
+              fontSizeMult,
+              unitsPerEm,
+              ascender: ascender * fontSizeMult,
+              descender: descender * fontSizeMult,
+              capHeight: capHeight * fontSizeMult,
+              xHeight: xHeight * fontSizeMult,
+              lineHeight: calcLineHeight,
+              baseline: -halfLeading - ascender * fontSizeMult, // baseline offset from top of line height
+              // cap: -halfLeading - capHeight * fontSizeMult, // cap from top of line height
+              // ex: -halfLeading - xHeight * fontSizeMult, // ex from top of line height
+              caretTop: (ascender + descender) / 2 * fontSizeMult + caretHeight / 2,
+              caretBottom: caretTop - caretHeight
+            };
+            metricsByFont.set(fontObj, fontData);
+          }
+          const { fontSizeMult } = fontData;
+
+          const runText = text.slice(run.start, run.end + 1);
+          let prevGlyphX, prevGlyphObj;
+          fontObj.forEachGlyph(runText, fontSize, letterSpacing, (glyphObj, glyphX, charIndex) => {
+            glyphX += prevRunEndX;
+            charIndex += run.start;
+            prevGlyphX = glyphX;
+            prevGlyphObj = glyphObj;
+            const char = text.charAt(charIndex);
+            const glyphWidth = glyphObj.advanceWidth * fontSizeMult;
+            const curLineCount = currentLine.count;
+            let nextLine;
+
+            // Calc isWhitespace and isEmpty once per glyphObj
+            if (!('isEmpty' in glyphObj)) {
+              glyphObj.isWhitespace = !!char && new RegExp(lineBreakingWhiteSpace).test(char);
+              glyphObj.canBreakAfter = !!char && BREAK_AFTER_CHARS.test(char);
+              glyphObj.isEmpty = glyphObj.xMin === glyphObj.xMax || glyphObj.yMin === glyphObj.yMax || DEFAULT_IGNORABLE_CHARS.test(char);
+            }
+            if (!glyphObj.isWhitespace && !glyphObj.isEmpty) {
+              renderableGlyphCount++;
+            }
+
+            // If a non-whitespace character overflows the max width, we need to soft-wrap
+            if (canWrap && hasMaxWidth && !glyphObj.isWhitespace && glyphX + glyphWidth + lineXOffset > maxWidth && curLineCount) {
+              // If it's the first char after a whitespace, start a new line
+              if (currentLine.glyphAt(curLineCount - 1).glyphObj.canBreakAfter) {
+                nextLine = new TextLine();
+                lineXOffset = -glyphX;
+              } else {
+                // Back up looking for a whitespace character to wrap at
+                for (let i = curLineCount; i--;) {
+                  // If we got the start of the line there's no soft break point; make hard break if overflowWrap='break-word'
+                  if (i === 0 && overflowWrap === 'break-word') {
+                    nextLine = new TextLine();
+                    lineXOffset = -glyphX;
+                    break
+                  }
+                  // Found a soft break point; move all chars since it to a new line
+                  else if (currentLine.glyphAt(i).glyphObj.canBreakAfter) {
+                    nextLine = currentLine.splitAt(i + 1);
+                    const adjustX = nextLine.glyphAt(0).x;
+                    lineXOffset -= adjustX;
+                    for (let j = nextLine.count; j--;) {
+                      nextLine.glyphAt(j).x -= adjustX;
+                    }
+                    break
+                  }
+                }
+              }
+              if (nextLine) {
+                currentLine.isSoftWrapped = true;
+                currentLine = nextLine;
+                lines.push(currentLine);
+                maxLineWidth = maxWidth; //after soft wrapping use maxWidth as calculated width
+              }
+            }
+
+            let fly = currentLine.glyphAt(currentLine.count);
+            fly.glyphObj = glyphObj;
+            fly.x = glyphX + lineXOffset;
+            fly.width = glyphWidth;
+            fly.charIndex = charIndex;
+            fly.fontData = fontData;
+
+            // Handle hard line breaks
+            if (char === '\n') {
+              currentLine = new TextLine();
+              lines.push(currentLine);
+              lineXOffset = -(glyphX + glyphWidth + (letterSpacing * fontSize)) + textIndent;
+            }
+          });
+          // At the end of a run we must capture the x position as the starting point for the next run
+          prevRunEndX = prevGlyphX + prevGlyphObj.advanceWidth * fontSizeMult + letterSpacing * fontSize;
+        });
+
+        // Calculate width/height/baseline of each line (excluding trailing whitespace) and maximum block width
+        let totalHeight = 0;
+        lines.forEach(line => {
+          let isTrailingWhitespace = true;
+          for (let i = line.count; i--;) {
+            const glyphInfo = line.glyphAt(i);
+            // omit trailing whitespace from width calculation
+            if (isTrailingWhitespace && !glyphInfo.glyphObj.isWhitespace) {
+              line.width = glyphInfo.x + glyphInfo.width;
+              if (line.width > maxLineWidth) {
+                maxLineWidth = line.width;
+              }
+              isTrailingWhitespace = false;
+            }
+            // use the tallest line height, lowest baseline, and highest cap/ex
+            let {lineHeight, capHeight, xHeight, baseline} = glyphInfo.fontData;
+            if (lineHeight > line.lineHeight) line.lineHeight = lineHeight;
+            const baselineDiff = baseline - line.baseline;
+            if (baselineDiff < 0) { //shift all metrics down
+              line.baseline += baselineDiff;
+              line.cap += baselineDiff;
+              line.ex += baselineDiff;
+            }
+            // compare cap/ex based on new lowest baseline
+            line.cap = Math.max(line.cap, line.baseline + capHeight);
+            line.ex = Math.max(line.ex, line.baseline + xHeight);
+          }
+          line.baseline -= totalHeight;
+          line.cap -= totalHeight;
+          line.ex -= totalHeight;
+          totalHeight += line.lineHeight;
+        });
+
+        // Find overall position adjustments for anchoring
+        let anchorXOffset = 0;
+        let anchorYOffset = 0;
+        if (anchorX) {
+          if (typeof anchorX === 'number') {
+            anchorXOffset = -anchorX;
+          }
+          else if (typeof anchorX === 'string') {
+            anchorXOffset = -maxLineWidth * (
+              anchorX === 'left' ? 0 :
+              anchorX === 'center' ? 0.5 :
+              anchorX === 'right' ? 1 :
+              parsePercent(anchorX)
+            );
+          }
+        }
+        if (anchorY) {
+          if (typeof anchorY === 'number') {
+            anchorYOffset = -anchorY;
+          }
+          else if (typeof anchorY === 'string') {
+            anchorYOffset = anchorY === 'top' ? 0 :
+              anchorY === 'top-baseline' ? -lines[0].baseline :
+              anchorY === 'top-cap' ? -lines[0].cap :
+              anchorY === 'top-ex' ? -lines[0].ex :
+              anchorY === 'middle' ? totalHeight / 2 :
+              anchorY === 'bottom' ? totalHeight :
+              anchorY === 'bottom-baseline' ? lines[lines.length - 1].baseline :
+              parsePercent(anchorY) * totalHeight;
+          }
+        }
+
+        if (!metricsOnly) {
+          // Resolve bidi levels
+          const bidiLevelsResult = bidi.getEmbeddingLevels(text, direction);
+
+          // Process each line, applying alignment offsets, adding each glyph to the atlas, and
+          // collecting all renderable glyphs into a single collection.
+          glyphIds = new Uint16Array(renderableGlyphCount);
+          glyphFontIndices = new Uint8Array(renderableGlyphCount);
+          glyphPositions = new Float32Array(renderableGlyphCount * 2);
+          glyphData = {};
+          visibleBounds = [INF, INF, -INF, -INF];
+          chunkedBounds = [];
+          if (includeCaretPositions) {
+            caretPositions = new Float32Array(text.length * 4);
+          }
+          if (colorRanges) {
+            glyphColors = new Uint8Array(renderableGlyphCount * 3);
+          }
+          let renderableGlyphIndex = 0;
+          let prevCharIndex = -1;
+          let colorCharIndex = -1;
+          let chunk;
+          let currentColor;
+          lines.forEach((line, lineIndex) => {
+            let {count:lineGlyphCount, width:lineWidth} = line;
+
+            // Ignore empty lines
+            if (lineGlyphCount > 0) {
+              // Count trailing whitespaces, we want to ignore these for certain things
+              let trailingWhitespaceCount = 0;
+              for (let i = lineGlyphCount; i-- && line.glyphAt(i).glyphObj.isWhitespace;) {
+                trailingWhitespaceCount++;
+              }
+
+              // Apply horizontal alignment adjustments
+              let lineXOffset = 0;
+              let justifyAdjust = 0;
+              if (textAlign === 'center') {
+                lineXOffset = (maxLineWidth - lineWidth) / 2;
+              } else if (textAlign === 'right') {
+                lineXOffset = maxLineWidth - lineWidth;
+              } else if (textAlign === 'justify' && line.isSoftWrapped) {
+                // count non-trailing whitespace characters, and we'll adjust the offsets per character in the next loop
+                let whitespaceCount = 0;
+                for (let i = lineGlyphCount - trailingWhitespaceCount; i--;) {
+                  if (line.glyphAt(i).glyphObj.isWhitespace) {
+                    whitespaceCount++;
+                  }
+                }
+                justifyAdjust = (maxLineWidth - lineWidth) / whitespaceCount;
+              }
+              if (justifyAdjust || lineXOffset) {
+                let justifyOffset = 0;
+                for (let i = 0; i < lineGlyphCount; i++) {
+                  let glyphInfo = line.glyphAt(i);
+                  const glyphObj = glyphInfo.glyphObj;
+                  glyphInfo.x += lineXOffset + justifyOffset;
+                  // Expand non-trailing whitespaces for justify alignment
+                  if (justifyAdjust !== 0 && glyphObj.isWhitespace && i < lineGlyphCount - trailingWhitespaceCount) {
+                    justifyOffset += justifyAdjust;
+                    glyphInfo.width += justifyAdjust;
+                  }
+                }
+              }
+
+              // Perform bidi range flipping
+              const flips = bidi.getReorderSegments(
+                text, bidiLevelsResult, line.glyphAt(0).charIndex, line.glyphAt(line.count - 1).charIndex
+              );
+              for (let fi = 0; fi < flips.length; fi++) {
+                const [start, end] = flips[fi];
+                // Map start/end string indices to indices in the line
+                let left = Infinity, right = -Infinity;
+                for (let i = 0; i < lineGlyphCount; i++) {
+                  if (line.glyphAt(i).charIndex >= start) { // gte to handle removed characters
+                    let startInLine = i, endInLine = i;
+                    for (; endInLine < lineGlyphCount; endInLine++) {
+                      let info = line.glyphAt(endInLine);
+                      if (info.charIndex > end) {
+                        break
+                      }
+                      if (endInLine < lineGlyphCount - trailingWhitespaceCount) { //don't include trailing ws in flip width
+                        left = Math.min(left, info.x);
+                        right = Math.max(right, info.x + info.width);
+                      }
+                    }
+                    for (let j = startInLine; j < endInLine; j++) {
+                      const glyphInfo = line.glyphAt(j);
+                      glyphInfo.x = right - (glyphInfo.x + glyphInfo.width - left);
+                    }
+                    break
+                  }
+                }
+              }
+
+              // Assemble final data arrays
+              let glyphObj;
+              const setGlyphObj = g => glyphObj = g;
+              for (let i = 0; i < lineGlyphCount; i++) {
+                const glyphInfo = line.glyphAt(i);
+                glyphObj = glyphInfo.glyphObj;
+                const glyphId = glyphObj.index;
+
+                // Replace mirrored characters in rtl
+                const rtl = bidiLevelsResult.levels[glyphInfo.charIndex] & 1; //odd level means rtl
+                if (rtl) {
+                  const mirrored = bidi.getMirroredCharacter(text[glyphInfo.charIndex]);
+                  if (mirrored) {
+                    glyphInfo.fontData.fontObj.forEachGlyph(mirrored, 0, 0, setGlyphObj);
+                  }
+                }
+
+                // Add caret positions
+                if (includeCaretPositions) {
+                  const {charIndex, fontData} = glyphInfo;
+                  const caretLeft = glyphInfo.x + anchorXOffset;
+                  const caretRight = glyphInfo.x + glyphInfo.width + anchorXOffset;
+                  caretPositions[charIndex * 4] = rtl ? caretRight : caretLeft; //start edge x
+                  caretPositions[charIndex * 4 + 1] = rtl ? caretLeft : caretRight; //end edge x
+                  caretPositions[charIndex * 4 + 2] = line.baseline + fontData.caretBottom + anchorYOffset; //common bottom y
+                  caretPositions[charIndex * 4 + 3] = line.baseline + fontData.caretTop + anchorYOffset; //common top y
+
+                  // If we skipped any chars from the previous glyph (due to ligature subs), fill in caret
+                  // positions for those missing char indices; currently this uses a best-guess by dividing
+                  // the ligature's width evenly. In the future we may try to use the font's LigatureCaretList
+                  // table to get better interior caret positions.
+                  const ligCount = charIndex - prevCharIndex;
+                  if (ligCount > 1) {
+                    fillLigatureCaretPositions(caretPositions, prevCharIndex, ligCount);
+                  }
+                  prevCharIndex = charIndex;
+                }
+
+                // Track current color range
+                if (colorRanges) {
+                  const {charIndex} = glyphInfo;
+                  while(charIndex > colorCharIndex) {
+                    colorCharIndex++;
+                    if (colorRanges.hasOwnProperty(colorCharIndex)) {
+                      currentColor = colorRanges[colorCharIndex];
+                    }
+                  }
+                }
+
+                // Get atlas data for renderable glyphs
+                if (!glyphObj.isWhitespace && !glyphObj.isEmpty) {
+                  const idx = renderableGlyphIndex++;
+                  const {fontSizeMult, src: fontSrc, index: fontIndex} = glyphInfo.fontData;
+
+                  // Add this glyph's path data
+                  const fontGlyphData = glyphData[fontSrc] || (glyphData[fontSrc] = {});
+                  if (!fontGlyphData[glyphId]) {
+                    fontGlyphData[glyphId] = {
+                      path: glyphObj.path,
+                      pathBounds: [glyphObj.xMin, glyphObj.yMin, glyphObj.xMax, glyphObj.yMax]
+                    };
+                  }
+
+                  // Determine final glyph position and add to glyphPositions array
+                  const glyphX = glyphInfo.x + anchorXOffset;
+                  const glyphY = line.baseline + anchorYOffset;
+                  glyphPositions[idx * 2] = glyphX;
+                  glyphPositions[idx * 2 + 1] = glyphY;
+
+                  // Track total visible bounds
+                  const visX0 = glyphX + glyphObj.xMin * fontSizeMult;
+                  const visY0 = glyphY + glyphObj.yMin * fontSizeMult;
+                  const visX1 = glyphX + glyphObj.xMax * fontSizeMult;
+                  const visY1 = glyphY + glyphObj.yMax * fontSizeMult;
+                  if (visX0 < visibleBounds[0]) visibleBounds[0] = visX0;
+                  if (visY0 < visibleBounds[1]) visibleBounds[1] = visY0;
+                  if (visX1 > visibleBounds[2]) visibleBounds[2] = visX1;
+                  if (visY1 > visibleBounds[3]) visibleBounds[3] = visY1;
+
+                  // Track bounding rects for each chunk of N glyphs
+                  if (idx % chunkedBoundsSize === 0) {
+                    chunk = {start: idx, end: idx, rect: [INF, INF, -INF, -INF]};
+                    chunkedBounds.push(chunk);
+                  }
+                  chunk.end++;
+                  const chunkRect = chunk.rect;
+                  if (visX0 < chunkRect[0]) chunkRect[0] = visX0;
+                  if (visY0 < chunkRect[1]) chunkRect[1] = visY0;
+                  if (visX1 > chunkRect[2]) chunkRect[2] = visX1;
+                  if (visY1 > chunkRect[3]) chunkRect[3] = visY1;
+
+                  // Add to glyph ids and font indices arrays
+                  glyphIds[idx] = glyphId;
+                  glyphFontIndices[idx] = fontIndex;
+
+                  // Add colors
+                  if (colorRanges) {
+                    const start = idx * 3;
+                    glyphColors[start] = currentColor >> 16 & 255;
+                    glyphColors[start + 1] = currentColor >> 8 & 255;
+                    glyphColors[start + 2] = currentColor & 255;
+                  }
+                }
+              }
+            }
+          });
+
+          // Fill in remaining caret positions in case the final character was a ligature
+          if (caretPositions) {
+            const ligCount = text.length - prevCharIndex;
+            if (ligCount > 1) {
+              fillLigatureCaretPositions(caretPositions, prevCharIndex, ligCount);
+            }
+          }
+        }
+
+        // Assemble final data about each font used
+        const fontData = [];
+        metricsByFont.forEach(({index, src, unitsPerEm, ascender, descender, lineHeight, capHeight, xHeight}) => {
+          fontData[index] = {src, unitsPerEm, ascender, descender, lineHeight, capHeight, xHeight};
+        });
+
+        // Timing stats
+        timings.typesetting = now() - typesetStart;
+
+        callback({
+          glyphIds, //id for each glyph, specific to that glyph's font
+          glyphFontIndices, //index into fontData for each glyph
+          glyphPositions, //x,y of each glyph's origin in layout
+          glyphData, //dict holding data about each glyph appearing in the text
+          fontData, //data about each font used in the text
+          caretPositions, //startX,endX,bottomY caret positions for each char
+          // caretHeight, //height of cursor from bottom to top - todo per glyph?
+          glyphColors, //color for each glyph, if color ranges supplied
+          chunkedBounds, //total rects per (n=chunkedBoundsSize) consecutive glyphs
+          fontSize, //calculated em height
+          topBaseline: anchorYOffset + lines[0].baseline, //y coordinate of the top line's baseline
+          blockBounds: [ //bounds for the whole block of text, including vertical padding for lineHeight
+            anchorXOffset,
+            anchorYOffset - totalHeight,
+            anchorXOffset + maxLineWidth,
+            anchorYOffset
+          ],
+          visibleBounds, //total bounds of visible text paths, may be larger or smaller than blockBounds
+          timings
+        });
+      });
+    }
+
+
+    /**
+     * For a given text string and font parameters, determine the resulting block dimensions
+     * after wrapping for the given maxWidth.
+     * @param args
+     * @param callback
+     */
+    function measure(args, callback) {
+      typeset({...args, metricsOnly: true}, (result) => {
+        const [x0, y0, x1, y1] = result.blockBounds;
+        callback({
+          width: x1 - x0,
+          height: y1 - y0
+        });
+      });
+    }
+
+    function parsePercent(str) {
+      let match = str.match(/^([\d.]+)%$/);
+      let pct = match ? parseFloat(match[1]) : NaN;
+      return isNaN(pct) ? 0 : pct / 100
+    }
+
+    function fillLigatureCaretPositions(caretPositions, ligStartIndex, ligCount) {
+      const ligStartX = caretPositions[ligStartIndex * 4];
+      const ligEndX = caretPositions[ligStartIndex * 4 + 1];
+      const ligBottom = caretPositions[ligStartIndex * 4 + 2];
+      const ligTop = caretPositions[ligStartIndex * 4 + 3];
+      const guessedAdvanceX = (ligEndX - ligStartX) / ligCount;
+      for (let i = 0; i < ligCount; i++) {
+        const startIndex = (ligStartIndex + i) * 4;
+        caretPositions[startIndex] = ligStartX + guessedAdvanceX * i;
+        caretPositions[startIndex + 1] = ligStartX + guessedAdvanceX * (i + 1);
+        caretPositions[startIndex + 2] = ligBottom;
+        caretPositions[startIndex + 3] = ligTop;
+      }
+    }
+
+    function now() {
+      return (self.performance || Date).now()
+    }
+
+    // Array-backed structure for a single line's glyphs data
+    function TextLine() {
+      this.data = [];
+    }
+    const textLineProps = ['glyphObj', 'x', 'width', 'charIndex', 'fontData'];
+    TextLine.prototype = {
+      width: 0,
+      lineHeight: 0,
+      baseline: 0,
+      cap: 0,
+      ex: 0,
+      isSoftWrapped: false,
+      get count() {
+        return Math.ceil(this.data.length / textLineProps.length)
+      },
+      glyphAt(i) {
+        let fly = TextLine.flyweight;
+        fly.data = this.data;
+        fly.index = i;
+        return fly
+      },
+      splitAt(i) {
+        let newLine = new TextLine();
+        newLine.data = this.data.splice(i * textLineProps.length);
+        return newLine
+      }
+    };
+    TextLine.flyweight = textLineProps.reduce((obj, prop, i, all) => {
+      Object.defineProperty(obj, prop, {
+        get() {
+          return this.data[this.index * textLineProps.length + i]
+        },
+        set(val) {
+          this.data[this.index * textLineProps.length + i] = val;
+        }
+      });
+      return obj
+    }, {data: null, index: 0});
+
+
+    return {
+      typeset,
+      measure,
+    }
+  }
+
+  const now = () => (self.performance || Date).now();
+
+  const mainThreadGenerator = /*#__PURE__*/ SDFGenerator();
+
+  let warned;
+
+  /**
+   * Generate an SDF texture image for a single glyph path, placing the result into a webgl canvas at a
+   * given location and channel. Utilizes the webgl-sdf-generator external package for GPU-accelerated SDF
+   * generation when supported.
+   */
+  function generateSDF(width, height, path, viewBox, distance, exponent, canvas, x, y, channel, useWebGL = true) {
+    // Allow opt-out
+    if (!useWebGL) {
+      return generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel)
+    }
+
+    // Attempt GPU-accelerated generation first
+    return generateSDF_GL(width, height, path, viewBox, distance, exponent, canvas, x, y, channel).then(
+      null,
+      err => {
+        // WebGL failed either due to a hard error or unexpected results; fall back to JS in workers
+        if (!warned) {
+          console.warn(`WebGL SDF generation failed, falling back to JS`, err);
+          warned = true;
+        }
+        return generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel)
+      }
+    )
+  }
+
+  const queue = [];
+  const chunkTimeBudget = 5; // ms
+  let timer = 0;
+
+  function nextChunk() {
+    const start = now();
+    while (queue.length && now() - start < chunkTimeBudget) {
+      queue.shift()();
+    }
+    timer = queue.length ? setTimeout(nextChunk, 0) : 0;
+  }
+
+  /**
+   * WebGL-based implementation executed on the main thread. Requests are executed in time-bounded
+   * macrotask chunks to allow render frames to execute in between.
+   */
+  const generateSDF_GL = (...args) => {
+    return new Promise((resolve, reject) => {
+      queue.push(() => {
+        const start = now();
+        try {
+          mainThreadGenerator.webgl.generateIntoCanvas(...args);
+          resolve({ timing: now() - start });
+        } catch (err) {
+          reject(err);
+        }
+      });
+      if (!timer) {
+        timer = setTimeout(nextChunk, 0);
+      }
+    })
+  };
+
+  const threadCount = 4; // how many workers to spawn
+  const idleTimeout = 2000; // workers will be terminated after being idle this many milliseconds
+  const threads = {};
+  let callNum = 0;
+
+  /**
+   * Fallback JS-based implementation, fanned out to a number of worker threads for parallelism
+   */
+  function generateSDF_JS_Worker(width, height, path, viewBox, distance, exponent, canvas, x, y, channel) {
+    const workerId = 'TroikaTextSDFGenerator_JS_' + ((callNum++) % threadCount);
+    let thread = threads[workerId];
+    if (!thread) {
+      thread = threads[workerId] = {
+        workerModule: defineWorkerModule({
+          name: workerId,
+          workerId,
+          dependencies: [
+            SDFGenerator,
+            now
+          ],
+          init(_createSDFGenerator, now) {
+            const generate = _createSDFGenerator().javascript.generate;
+            return function (...args) {
+              const start = now();
+              const textureData = generate(...args);
+              return {
+                textureData,
+                timing: now() - start
+              }
+            }
+          },
+          getTransferables(result) {
+            return [result.textureData.buffer]
+          }
+        }),
+        requests: 0,
+        idleTimer: null
+      };
+    }
+
+    thread.requests++;
+    clearTimeout(thread.idleTimer);
+    return thread.workerModule(width, height, path, viewBox, distance, exponent)
+      .then(({ textureData, timing }) => {
+        // copy result data into the canvas
+        const start = now();
+        // expand single-channel data into rgba
+        const imageData = new Uint8Array(textureData.length * 4);
+        for (let i = 0; i < textureData.length; i++) {
+          imageData[i * 4 + channel] = textureData[i];
+        }
+        mainThreadGenerator.webglUtils.renderImageData(canvas, imageData, x, y, width, height, 1 << (3 - channel));
+        timing += now() - start;
+
+        // clean up workers after a while
+        if (--thread.requests === 0) {
+          thread.idleTimer = setTimeout(() => { terminateWorker(workerId); }, idleTimeout);
+        }
+        return { timing }
+      })
+  }
+
+  function warmUpSDFCanvas(canvas) {
+    if (!canvas._warm) {
+      mainThreadGenerator.webgl.isSupported(canvas);
+      canvas._warm = true;
+    }
+  }
+
+  const resizeWebGLCanvasWithoutClearing = mainThreadGenerator.webglUtils.resizeWebGLCanvasWithoutClearing;
+
   const CONFIG = {
-    defaultFontURL: 'https://fonts.gstatic.com/s/roboto/v18/KFOmCnqEu92Fr1Mu4mxM.woff', //Roboto Regular
+    defaultFontURL: null,
+    unicodeFontsURL: null,
     sdfGlyphSize: 64,
     sdfMargin: 1 / 16,
     sdfExponent: 9,
-    textureWidth: 2048
+    textureWidth: 2048,
   };
   const tempColor = /*#__PURE__*/new THREE.Color();
 
@@ -3806,7 +4211,7 @@ void main() {
 
   /**
    * @typedef {object} TroikaTextRenderInfo - Format of the result from `getTextRenderInfo`.
-   * @property {object} parameters - The normalized input arguments to the render call.
+   * @property {TypesetParams} parameters - The normalized input arguments to the render call.
    * @property {Texture} sdfTexture - The SDF atlas texture.
    * @property {number} sdfGlyphSize - The size of each glyph's SDF; see `configureTextBuilder`.
    * @property {number} sdfExponent - The exponent used in encoding the SDF's values; see `configureTextBuilder`.
@@ -3814,7 +4219,7 @@ void main() {
    * @property {Float32Array} glyphAtlasIndices - List holding each glyph's index in the SDF atlas.
    * @property {Uint8Array} [glyphColors] - List holding each glyph's [r, g, b] color, if `colorRanges` was supplied.
    * @property {Float32Array} [caretPositions] - A list of caret positions for all characters in the string; each is
-   *           three elements: the starting X, the ending X, and the bottom Y for the caret.
+   *           four elements: the starting X, the ending X, the bottom Y, and the top Y for the caret.
    * @property {number} [caretHeight] - An appropriate height for all selection carets.
    * @property {number} ascender - The font's ascender metric.
    * @property {number} descender - The font's descender metric.
@@ -3842,21 +4247,30 @@ void main() {
   /**
    * Main entry point for requesting the data needed to render a text string with given font parameters.
    * This is an asynchronous call, performing most of the logic in a web worker thread.
-   * @param {object} args
+   * @param {TypesetParams} args
    * @param {getTextRenderInfo~callback} callback
    */
   function getTextRenderInfo(args, callback) {
     args = assign({}, args);
     const totalStart = now$1();
 
-    // Apply default font here to avoid a 'null' atlas, and convert relative
-    // URLs to absolute so they can be resolved in the worker
-    args.font = toAbsoluteURL(args.font || CONFIG.defaultFontURL);
+    // Convert relative URL to absolute so it can be resolved in the worker, and add fallbacks.
+    // In the future we'll allow args.font to be a list with unicode ranges too.
+    const { defaultFontURL } = CONFIG;
+    const fonts = [];
+    if (defaultFontURL) {
+      fonts.push({label: 'default', src: toAbsoluteURL(defaultFontURL)});
+    }
+    if (args.font) {
+      fonts.push({label: 'user', src: toAbsoluteURL(args.font)});
+    }
+    args.font = fonts;
 
     // Normalize text to a string
     args.text = '' + args.text;
 
     args.sdfGlyphSize = args.sdfGlyphSize || CONFIG.sdfGlyphSize;
+    args.unicodeFontsURL = args.unicodeFontsURL || CONFIG.unicodeFontsURL;
 
     // Normalize colors
     if (args.colorRanges != null) {
@@ -3904,26 +4318,32 @@ void main() {
     }
 
     const {sdfTexture, sdfCanvas} = atlas;
-    let fontGlyphs = atlas.glyphsByFont.get(args.font);
-    if (!fontGlyphs) {
-      atlas.glyphsByFont.set(args.font, fontGlyphs = new Map());
-    }
 
     // Issue request to the typesetting engine in the worker
     typesetInWorker(args).then(result => {
-      const {glyphIds, glyphPositions, fontSize, unitsPerEm, timings} = result;
+      const {glyphIds, glyphFontIndices, fontData, glyphPositions, fontSize, timings} = result;
       const neededSDFs = [];
       const glyphBounds = new Float32Array(glyphIds.length * 4);
-      const fontSizeMult = fontSize / unitsPerEm;
       let boundsIdx = 0;
       let positionsIdx = 0;
       const quadsStart = now$1();
+
+      const fontGlyphMaps = fontData.map(font => {
+        let map = atlas.glyphsByFont.get(font.src);
+        if (!map) {
+          atlas.glyphsByFont.set(font.src, map = new Map());
+        }
+        return map
+      });
+
       glyphIds.forEach((glyphId, i) => {
-        let glyphInfo = fontGlyphs.get(glyphId);
+        const fontIndex = glyphFontIndices[i];
+        const {src: fontSrc, unitsPerEm} = fontData[fontIndex];
+        let glyphInfo = fontGlyphMaps[fontIndex].get(glyphId);
 
         // If this is a glyphId not seen before, add it to the atlas
         if (!glyphInfo) {
-          const {path, pathBounds} = result.glyphData[glyphId];
+          const {path, pathBounds} = result.glyphData[fontSrc][glyphId];
 
           // Margin around path edges in SDF, based on a percentage of the glyph's max dimension.
           // Note we add an extra 0.5 px over the configured value because the outer 0.5 doesn't contain
@@ -3938,7 +4358,7 @@ void main() {
             pathBounds[2] + fontUnitsMargin,
             pathBounds[3] + fontUnitsMargin,
           ];
-          fontGlyphs.set(glyphId, (glyphInfo = { path, atlasIndex, sdfViewBox }));
+          fontGlyphMaps[fontIndex].set(glyphId, (glyphInfo = { path, atlasIndex, sdfViewBox }));
 
           // Collect those that need SDF generation
           neededSDFs.push(glyphInfo);
@@ -3949,6 +4369,7 @@ void main() {
         const {sdfViewBox} = glyphInfo;
         const posX = glyphPositions[positionsIdx++];
         const posY = glyphPositions[positionsIdx++];
+        const fontSizeMult = fontSize / unitsPerEm;
         glyphBounds[boundsIdx++] = posX + sdfViewBox[0] * fontSizeMult;
         glyphBounds[boundsIdx++] = posY + sdfViewBox[1] * fontSizeMult;
         glyphBounds[boundsIdx++] = posX + sdfViewBox[2] * fontSizeMult;
@@ -3997,7 +4418,6 @@ void main() {
           glyphAtlasIndices: glyphIds,
           glyphColors: result.glyphColors,
           caretPositions: result.caretPositions,
-          caretHeight: result.caretHeight,
           chunkedBounds: result.chunkedBounds,
           ascender: result.ascender,
           descender: result.descender,
@@ -4130,18 +4550,15 @@ void main() {
     }
   }
 
-
   const typesetterWorkerModule = /*#__PURE__*/defineWorkerModule({
     name: 'Typesetter',
     dependencies: [
-      CONFIG,
-      workerModule,
       createTypesetter,
-      bidiFactory
+      fontResolverWorkerModule,
+      bidiFactory,
     ],
-    init(config, fontParser, createTypesetter, bidiFactory) {
-      const {defaultFontURL} = config;
-      return createTypesetter(fontParser, bidiFactory(), { defaultFontURL })
+    init(createTypesetter, fontResolver, bidiFactory) {
+      return createTypesetter(fontResolver, bidiFactory())
     }
   });
 
@@ -4159,15 +4576,11 @@ void main() {
     },
     getTransferables(result) {
       // Mark array buffers as transferable to avoid cloning during postMessage
-      const transferables = [
-        result.glyphPositions.buffer,
-        result.glyphIds.buffer
-      ];
-      if (result.caretPositions) {
-        transferables.push(result.caretPositions.buffer);
-      }
-      if (result.glyphColors) {
-        transferables.push(result.glyphColors.buffer);
+      const transferables = [];
+      for (let p in result) {
+        if (result[p] && result[p].buffer) {
+          transferables.push(result[p].buffer);
+        }
       }
       return transferables
     }
@@ -4192,7 +4605,7 @@ void main() {
         backAttrs.position.array[i * 3] *= -1; // flip position x
         backAttrs.normal.array[i * 3 + 2] *= -1; // flip normal z
       }
-  ['position', 'normal', 'uv'].forEach(name => {
+      ['position', 'normal', 'uv'].forEach(name => {
         combined.setAttribute(name, new THREE.Float32BufferAttribute(
           [...frontAttrs[name].array, ...backAttrs[name].array],
           frontAttrs[name].itemSize)
@@ -4720,6 +5133,9 @@ if (edgeAlpha == 0.0) {
   const SYNCABLE_PROPS = [
     'font',
     'fontSize',
+    'fontStyle',
+    'fontWeight',
+    'lang',
     'letterSpacing',
     'lineHeight',
     'maxWidth',
@@ -4774,7 +5190,7 @@ if (edgeAlpha == 0.0) {
       this.anchorX = 0;
 
       /**
-       * @member {number|string} anchorX
+       * @member {number|string} anchorY
        * Defines the vertical position in the text block that should line up with the local origin.
        * Can be specified as a numeric y position in local units (note: down is negative y), a string
        * percentage of the total text block height e.g. `'25%'`, or one of the following keyword strings:
@@ -4808,6 +5224,8 @@ if (edgeAlpha == 0.0) {
        */
       this.font = null; //will use default from TextBuilder
 
+      this.unicodeFontsURL = null; //defaults to CDN
+
       /**
        * @member {number} fontSize
        * The size at which to render the font in local units; corresponds to the em-box height
@@ -4816,6 +5234,24 @@ if (edgeAlpha == 0.0) {
       this.fontSize = 0.1;
 
       /**
+       * @member {number|'normal'|'bold'}
+       * The weight of the font. Currently only used for fallback Noto fonts.
+       */
+      this.fontWeight = 'normal';
+
+      /**
+       * @member {'normal'|'italic'}
+       * The style of the font. Currently only used for fallback Noto fonts.
+       */
+      this.fontStyle = 'normal';
+
+      /**
+       * @member {string} lang
+       * The language code of this text; can be used for font selection.
+       */
+      this.lang = 'en';
+
+        /**
        * @member {number} letterSpacing
        * Sets a uniform adjustment to spacing between letters after kerning is applied. Positive
        * numbers increase spacing and negative numbers decrease it.
@@ -5064,7 +5500,10 @@ if (edgeAlpha == 0.0) {
           getTextRenderInfo({
             text: this.text,
             font: this.font,
+            lang: this.lang,
             fontSize: this.fontSize || 0.1,
+            fontWeight: this.fontWeight || 'normal',
+            fontStyle: this.fontStyle || 'normal',
             letterSpacing: this.letterSpacing || 0,
             lineHeight: this.lineHeight || 'normal',
             maxWidth: this.maxWidth,
@@ -5079,6 +5518,7 @@ if (edgeAlpha == 0.0) {
             includeCaretPositions: true, //TODO parameterize
             sdfGlyphSize: this.sdfGlyphSize,
             gpuAccelerateSDF: this.gpuAccelerateSDF,
+            unicodeFontsURL: this.unicodeFontsURL,
           }, textRenderInfo => {
             this._isSyncing = false;
 
