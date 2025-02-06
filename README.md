@@ -50,6 +50,7 @@ I've attempted to keep the API as close as possible to that of A-Frame's default
 | strokeOpacity         | stroke-opacity         | Opacity of the stroke, from 0 to 1.                                                                         | 1                               |
 | strokeWidth           | stroke-width           | Width of a stroke drawn inside the glyph paths, as a number in meters or a percentage of the font-size.     | 0                               |
 | textIndent            | text-indent            | Width of an indentation space to be added before the first character of a line.                             | 0                               |
+| unicodeFontsURL       | unicode-fonts-url      | Location of [self-hosted font files](https://github.com/lojjic/unicode-font-resolver/blob/1.x/packages/data/README.md#self-hosting). | ''     |
 | whiteSpace            | white-space            | How whitespace should be handled (i.e., normal, nowrap).                                                    | normal (behaves like pre-wrap)  |
 
 Note: It does not currently follow how the built-in `text` component interacts with a `geometry` component for auto-sizing and anchoring. I think that's a nice feature so it's probably worth adding; in the meantime just use the `maxWidth` and `anchor`/`baseline` attributes to control it manually.
