@@ -6067,6 +6067,7 @@ if (edgeAlpha == 0.0) {
       strokeOpacity: {type: 'number', default: 1},
       strokeWidth: numberOrPercent(0),
       textIndent: {type: 'number', default: 0},
+      unicodeFontsURL: {type: 'string', default: ''},
       value: {type: 'string'},
       whiteSpace: {default: 'normal', oneOf: ['normal', 'nowrap']}
 
@@ -6144,6 +6145,7 @@ if (edgeAlpha == 0.0) {
       mesh.strokeOpacity = data.strokeOpacity;
       mesh.strokeWidth = data.strokeWidth;
       mesh.textIndent = data.textIndent;
+      mesh.unicodeFontsURL = data.unicodeFontsURL;
       mesh.whiteSpace = data.whiteSpace;
       mesh.maxWidth = data.maxWidth;
       mesh.sync();
