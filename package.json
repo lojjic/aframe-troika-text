@@ -12,10 +12,10 @@
     "troika-three-text": "^0.52.2"
   },
   "peerDependencies": {
-    "aframe": "1.1.x - 1.4.x"
+    "aframe": "1.1.x - 1.7.x"
   },
   "devDependencies": {
-    "aframe": "1.6.0",
+    "aframe": "^1.7.1",
     "rollup": "2.79.2",
     "rollup-plugin-node-resolve": "5.2.0",
     "rollup-plugin-terser": "7.0.2"
