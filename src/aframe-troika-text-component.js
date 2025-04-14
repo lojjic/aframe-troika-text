@@ -29,6 +29,9 @@ aframe.registerComponent(COMPONENT_NAME, {
       type: 'string',
       default: '',
       parse: function(value) {
+        if (Array.isArray(value)) {
+          return value;
+        }
         if (value) {
           value = value.split(/[\s,]+/).reduce(function(out, val) {
             val = +val
