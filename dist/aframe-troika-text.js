@@ -5793,8 +5793,14 @@ if (edgeAlpha == 0.0) {
     get customDepthMaterial() {
       return first(this.material).getDepthMaterial()
     }
+    set customDepthMaterial(m) {
+      // future: let the user override with their own?
+    }
     get customDistanceMaterial() {
       return first(this.material).getDistanceMaterial()
+    }
+    set customDistanceMaterial(m) {
+      // future: let the user override with their own?
     }
 
     _prepareForRender(material) {
@@ -6023,6 +6029,9 @@ if (edgeAlpha == 0.0) {
         type: 'string',
         default: '',
         parse: function(value) {
+          if (Array.isArray(value)) {
+            return value;
+          }
           if (value) {
             value = value.split(/[\s,]+/).reduce(function(out, val) {
               val = +val;
